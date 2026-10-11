@@ -20,6 +20,8 @@ Host 观测到首个输出或计入新请求后，通过用量通知触发界面
 
 输入框下方的用量按钮显示“最近缓存命中（CH）· 输出速度 · 费用”，例如 `CH 99.6% · 232 tok/s · $12.23`。按钮用最近值反映缓存失效；有可靠数据时显示，包括明确的 0%，未知或输入为零时省略。平均缓存命中只在浮窗中显示。速度 100 以上取整；费用 1 美元以上保留两位小数，以下保留三位。缓存写入为 0 或未知时，浮窗只显示缓存读取。
 
+Standalone Web 的共享 CH 模式直接读取同一个 Host 的 `codexhost/thread/usage/inspect` 绝对快照，并将原生 Token、上下文窗口接入 DSH 已有 Composer meter；CH、TPS、TTFT、费用、Credits 和套餐／账号配额进入 CodexHost 用量浮窗。`codexhost/thread/usage/updated` 只作为失效通知，Web 收到后重新读取绝对快照，不自行累计或重新计算 Host 事实。字段缺失时隐藏，不显示伪造的零值；浮窗可悬停或键盘聚焦预览，也可点击固定，外部点击或 `Esc` 关闭。
+
 ## 已接入的 Harness
 
 Pi、OMP、OpenCode v2、Claude Code、DeepSeek Harness（dsh）、CodeBuddy、WorkBuddy、ZCode。其余 Harness 继续显示原生费用，后续分批接入；OpenCode v1 不接入。

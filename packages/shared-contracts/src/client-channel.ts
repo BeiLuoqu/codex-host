@@ -17,10 +17,18 @@ export const CLIENT_CHANNEL_METHODS = [
   "turn/start",
   "turn/interrupt",
   "turn/steer",
+  "thread/queue/list",
+  "thread/queue/add",
+  "thread/queue/update",
+  "thread/queue/delete",
+  "thread/queue/reorder",
+  "thread/queue/start",
+  "codexhost/thread/queue/send-now",
   "codexhost/workspace/read",
   "codexhost/harness/plugins/list",
   "codexhost/harness/inspect",
   "codexhost/thread/inspect",
+  "codexhost/thread/usage/inspect",
   "codexhost/thread/ownership/list",
   "codexhost/thread/model/select",
   "codexhost/thread/thinking/select",
@@ -109,6 +117,14 @@ export const clientInteractionSchema = z.object({
   request: record,
 });
 export type ClientInteraction = z.infer<typeof clientInteractionSchema>;
+const clientQueuedSubmissionSchema = z
+  .object({
+    id: z.string().min(1),
+    clientUserMessageId: z.string().min(1),
+    input: z.array(record),
+    presentationInput: z.array(record).nullable().optional(),
+  })
+  .passthrough();
 const clientTurnSchema = z
   .object({
     id: z.string().min(1),
@@ -119,6 +135,8 @@ const clientTurnSchema = z
   .passthrough();
 export const clientThreadSnapshotSchema = z.object({
   cursor: clientChannelCursorSchema,
+  /** Current interruptible Host Turn, including command Turns omitted from client history. */
+  activeTurnId: z.string().min(1).nullable().optional(),
   thread: z
     .object({
       id: z.string().min(1),
@@ -141,6 +159,12 @@ export const clientThreadSnapshotSchema = z.object({
     effectiveThinkingOptionId: harnessThinkingOptionIdSchema.optional(),
     effectivePermissionModeId: harnessPermissionModeIdSchema.optional(),
   }),
+  queue: z
+    .object({
+      items: z.array(clientQueuedSubmissionSchema),
+      pausedReason: z.enum(["interrupted", "outcome-unknown", "failed"]).nullable(),
+    })
+    .optional(),
   interactions: z.array(clientInteractionSchema),
 });
 export type ClientThreadSnapshot = z.infer<typeof clientThreadSnapshotSchema>;

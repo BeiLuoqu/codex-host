@@ -750,8 +750,18 @@ export class Sessions {
     runtime.queue.unshift(prompt);
     this.publishQueue(runtime);
     if (runtime.harness !== undefined && runtime.turnId !== undefined) {
-      const result = await runtime.harness.execute({ type: "turn.cancel", turnId: runtime.turnId });
-      if (!result.ok) this.endTurn(runtime, { status: "cancelled" });
+      try {
+        const result = await runtime.harness.execute({
+          type: "turn.cancel",
+          turnId: runtime.turnId,
+        });
+        if (!result.ok) throw new RpcError("session/steer-failed", result.error.message);
+      } catch (error) {
+        const index = runtime.queue.findIndex((item) => item.id === prompt.id);
+        if (index >= 0) runtime.queue.splice(index, 1);
+        this.publishQueue(runtime);
+        throw error;
+      }
     } else if (runtime.running) {
       this.endTurn(runtime, { status: "cancelled" });
     }
@@ -969,15 +979,13 @@ export class Sessions {
     rpc.register("session/cancel", async (args) => {
       const { sessionId } = requestOf<{ sessionId: string }>(args);
       const runtime = this.runtime(sessionId);
-      runtime.queue = [];
-      this.publishQueue(runtime);
       await runtime.starting;
       if (runtime.harness !== undefined && runtime.turnId !== undefined) {
         const result = await runtime.harness.execute({
           type: "turn.cancel",
           turnId: runtime.turnId,
         });
-        if (!result.ok) this.endTurn(runtime, { status: "cancelled" });
+        if (!result.ok) throw new RpcError("session/cancel-failed", result.error.message);
       } else if (runtime.running) {
         this.endTurn(runtime, { status: "cancelled" });
       }
@@ -1000,7 +1008,12 @@ export class Sessions {
         (runtime.queue[index] as QueuedPrompt).content = request.action.content;
       else if (request.action.kind === "steer") {
         const [item] = runtime.queue.splice(index, 1);
-        void this.steer(runtime, item as QueuedPrompt);
+        this.publishQueue(runtime);
+        if (runtime.running) void this.steer(runtime, item as QueuedPrompt);
+        else
+          void this.startTurn(runtime, item as QueuedPrompt).catch((error: unknown) => {
+            console.error(`[session ${request.sessionId}] queued turn failed`, error);
+          });
         return { accepted: true };
       }
       this.publishQueue(runtime);

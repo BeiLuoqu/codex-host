@@ -259,6 +259,11 @@ export function ChatView({
     [inbox],
   );
   const pendingSubmissions = useSession((s) => s.pendingSubmissions);
+  // A local non-queued submission is visible immediately, before Host admission
+  // can report authoritative running state. Keep Stop tied to `running`, but do
+  // not leave the transcript looking idle during that round-trip.
+  const showRunningStatus =
+    running || pendingSubmissions.some((submission) => submission.placement !== "queued");
   // Submission echoes still awaiting their durable counterpart. `order` is the
   // recompute trigger: durable user material always arrives as an append, and
   // every append replaces the order array.
@@ -390,7 +395,7 @@ export function ChatView({
                 t={t}
               />
             </MarkdownDelegateProvider>
-            {running && <RunningStatus startTime={runningStartTime} t={t} />}
+            {showRunningStatus && <RunningStatus startTime={runningStartTime} t={t} />}
             {/* No pending placeholders: questions (ui-user-questions) and approvals
                 (ApprovalPanel) both take over the composer, so a flow card would
                 double-render the same wait. */}

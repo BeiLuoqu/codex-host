@@ -57,7 +57,7 @@ POST 使用 JSON，正文上限 1 MiB；返回 `{result: …}` 或 `{error: {cod
 - `hello {version: 1, cursor: {epoch, sequence}, reset}`。
 - `changed {cursor: {epoch, sequence}, threadId, method}`。
 
-**changed 是失效通知，不是可追加的 token。** 首次先建立订阅，再取快照；读取期间收到新通知必须再校验。快照给出同一 Host 的元数据、最近 5 轮 full/desc、下一页 cursor、生效配置和当前待处理交互。热会话在不让出执行权的同步步骤中复制已接受状态及通知水位；状态可以包含尚待发出的后续通知所描述的变化，因此禁止把通知当增量再次拼接到快照上。
+**changed 是失效通知，不是可追加的 token。** 首次先建立订阅，再取快照；读取期间收到新通知必须再校验。快照给出同一 Host 的元数据、最近 5 轮 full/desc、下一页 cursor、生效配置、当前待处理交互，以及 Shared Host 持有的绝对队列与暂停原因。热会话在不让出执行权的同步步骤中复制已接受状态及通知水位；状态可以包含尚待发出的后续通知所描述的变化，因此禁止把通知当增量再次拼接到快照上。
 
 Host 和 Node 网关分别保留最近 512 条轻量通知。游标仍在窗口中时，`hello.reset=false`，随后重放大于旧游标的通知；hello 的 cursor 是本轮重放终点，不应在处理重放前覆盖旧消费游标。窗口不足、游标超前或 epoch 不同时，`reset=true`，重新读取所需 Thread 的快照。每次重连都重新校验已关注的 Thread，包括仍待处理的交互；不需要持久事件队列。
 
@@ -71,7 +71,7 @@ Desktop 专用 `CodexTurnProjector.pendingTurn()` 不包含所有进行中的 It
 
 审批与提问使用 Host 中现有 request ID，并绑定 epoch、Thread。Web 显示原生 action/选项标签，结果仍由 Host 的原有投影解析器校验。第一份有效响应在异步执行前认领，后续响应不重复调用 Harness；`serverRequest/resolved` 使其他 GUI/Web 卡片撤下。`{resolved:true}` 只表示请求已不再待处理，不证明当前客户端的答案获胜，更不代表工具执行成功。
 
-断线会撤下 Web 的交互卡片，不自动回答或拒绝 Harness；重新连接只恢复快照中仍 pending 的请求。配置通知只报告观察器已接受的实际状态，多个配置命令不被包装成一个虚假的原子事务。草稿、阅读位置、输入框内容与当前选中 Thread 留在各端。
+断线会撤下 Web 的交互卡片，不自动回答或拒绝 Harness；重新连接只恢复快照中仍 pending 的请求。配置通知只报告观察器已接受的实际状态，多个配置命令不被包装成一个虚假的原子事务。草稿、阅读位置、输入框内容与当前选中 Thread 留在各端。跟进队列不属于这些本地 UI 状态：Desktop 的原生 `thread/queue/*` 与 Web 的 DSH inbox 操作都落到 Shared Host；正常成功后推进，停止、失败或 unknown outcome 后暂停。
 
 ## 写操作边界
 
@@ -80,7 +80,7 @@ Desktop 专用 `CodexTurnProjector.pendingTurn()` 不包含所有进行中的 It
 - 这是有界、进程内的回执，不是跨 Host 重启、窗口驱逐或历史恢复的持久 exactly-once 保证。
 - 原生历史刷新后，可在回执窗口内补回已接受输入的 `clientId`，不建立持久消息映射。
 - 写入已确认后，随后的快照读取失败不会改报成“发送被拒绝”。
-- 同时发送服从现有 Host/Harness 的忙碌、队列或 Steering 语义；不会另开 Adapter 伪造并发。
+- 同时发送服从 Host 的 canonical queue 或 Steering 语义；队列通知只触发绝对快照重读，unknown outcome 不自动重发，也不会另开 Adapter 伪造并发。
 
 ## 验证范围
 

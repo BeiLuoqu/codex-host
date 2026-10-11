@@ -4,6 +4,7 @@ import {
   encodeHarnessPluginRoute,
   harnessPluginRouteSchema,
   threadInspectionSchema,
+  threadUsageInspectionSchema,
 } from "@codexhost/shared-contracts";
 import type { ChHostClient } from "./ch-host-client.ts";
 import { ChHarnessCatalog, type ModelSelection } from "./ch-harness-catalog.ts";
@@ -30,6 +31,7 @@ import {
 } from "./transport.ts";
 import type { Workspaces } from "./workspaces.ts";
 import { defaultProjections } from "./session-log.ts";
+import { applyUsageProjections } from "./usage-projection.ts";
 
 interface Draft {
   id: string;
@@ -51,6 +53,11 @@ export class ChSessions {
   private views = new Map<string, ChThreadHistory>();
   private readingViews = new Map<string, Promise<ChThreadHistory>>();
   private loadingControls = new Map<string, Promise<void>>();
+  private loadingUsage = new Map<
+    string,
+    { view: ChThreadHistory; dirty: boolean; operation: Promise<void> }
+  >();
+  private usageReadAt = new Map<string, number>();
   private historyReadAt = new Map<string, number>();
   private ownership = new Map<string, string>();
   private drafts = new Map<string, Draft>();
@@ -99,7 +106,12 @@ export class ChSessions {
       : undefined;
     this.realtime = host.realtime
       ? new ChRealtime(host.realtime, {
-          thread: (id) => this.view(id),
+          thread: async (id) => {
+            const view = await this.view(id);
+            // Thread snapshots own the live status. Forward it directly instead
+            // of waiting for the heavier catalog refresh to catch up.
+            this.events.emit("api-session/status", id, view.thread.status.type === "active");
+          },
           catalog: () => this.refresh(),
           connection: (online) => {
             this.hostOnline = online;
@@ -115,6 +127,8 @@ export class ChSessions {
               this.views.clear();
               this.readingViews.clear();
               this.loadingControls.clear();
+              this.loadingUsage.clear();
+              this.usageReadAt.clear();
               this.historyReadAt.clear();
               this.interactions?.clear();
               for (const view of old) {
@@ -322,6 +336,8 @@ export class ChSessions {
         this.views.delete(id);
         this.historyReadAt.delete(id);
         this.loadingControls.delete(id);
+        this.loadingUsage.delete(id);
+        this.usageReadAt.delete(id);
         view.log.invalidate(error.code, error.message);
       }
       throw error;
@@ -340,7 +356,42 @@ export class ChSessions {
       throw new RpcError("host/resync", "Host snapshot was superseded by a new generation");
     view.log.setProjection("harnessIdentity", { id: harnessId, name });
     this.loadControls(view, harnessId, force);
+    this.loadUsage(view, force);
     return view;
+  }
+  private loadUsage(view: ChThreadHistory, force: boolean): void {
+    const id = view.thread.id;
+    const active = this.loadingUsage.get(id);
+    if (active?.view === view) {
+      if (force) active.dirty = true;
+      return;
+    }
+    if (!force && Date.now() - (this.usageReadAt.get(id) ?? 0) < 30_000) return;
+    const state = {
+      view,
+      dirty: false,
+      operation: Promise.resolve(),
+    };
+    state.operation = (async () => {
+      do {
+        state.dirty = false;
+        const result = threadUsageInspectionSchema.parse(
+          await this.host.request("codexhost/thread/usage/inspect", { threadId: id }),
+        );
+        if (this.closed || this.views.get(id) !== view || this.loadingUsage.get(id) !== state)
+          return;
+        applyUsageProjections(view.log, result);
+        this.usageReadAt.set(id, Date.now());
+      } while (state.dirty);
+    })()
+      .catch(() => {
+        // Usage is optional metadata. Preserve the latest confirmed projection;
+        // history and input remain usable, and the next invalidation retries.
+      })
+      .finally(() => {
+        if (this.loadingUsage.get(id) === state) this.loadingUsage.delete(id);
+      });
+    this.loadingUsage.set(id, state);
   }
   private loadControls(view: ChThreadHistory, harnessId: string, force: boolean): void {
     const id = view.thread.id;
@@ -592,11 +643,6 @@ export class ChSessions {
           "session/attachment-invalid",
           "Shared CH input currently accepts text only.",
         );
-      if (request.mode === "steer")
-        throw new RpcError(
-          "session/steer-unavailable",
-          "Use the existing CH controls to steer; Web will not cancel and resend implicitly.",
-        );
       const draft = this.drafts.get(request.sessionId);
       if (!draft || draft.canonicalId) await this.owner(request.sessionId);
       // Validate/save before creating a native Thread. Only native path context crosses the Host channel.
@@ -613,11 +659,32 @@ export class ChSessions {
           )
         : this.id(request.sessionId);
       await this.owner(threadId);
-      await this.host.request("turn/start", {
-        threadId,
-        input,
-        ...(request.requestId ? { clientUserMessageId: request.requestId } : {}),
-      });
+      if (request.mode === "steer") {
+        const view = await this.view(threadId, true);
+        const expectedTurnId =
+          view.ownerSnapshot?.activeTurnId ??
+          view.thread.turns.find((turn) => turn.status === "inProgress")?.id;
+        if (!expectedTurnId)
+          throw new RpcError(
+            "session/steer-unavailable",
+            "CH reports no active Turn to steer.",
+          );
+        await this.host.request("turn/steer", {
+          threadId,
+          expectedTurnId,
+          input,
+          ...(request.requestId ? { clientUserMessageId: request.requestId } : {}),
+        });
+      } else {
+        await this.host.request("turn/start", {
+          threadId,
+          input,
+          ...(request.mode === "queue"
+            ? { delivery: "queue", presentationInput: request.content }
+            : {}),
+          ...(request.requestId ? { clientUserMessageId: request.requestId } : {}),
+        });
+      }
       this.fileInputs?.accepted(threadId, request.content);
       try {
         const view = await this.view(threadId);
@@ -643,15 +710,56 @@ export class ChSessions {
         throw new RpcError("session/attachment-not-found", "Image previews are unavailable.");
       return this.attachments.read(view, attachmentId);
     });
+    rpc.register("session/updateQueue", async (args) => {
+      const request = requestOf<{
+        sessionId: string;
+        itemId: string;
+        action:
+          | { kind: "edit"; content: Array<{ type: string; text?: string }> }
+          | { kind: "remove" }
+          | { kind: "steer" };
+      }>(args);
+      const threadId = this.id(request.sessionId);
+      await this.owner(threadId);
+      if (request.action.kind === "edit") {
+        await this.host.request("thread/queue/update", {
+          threadId,
+          queuedSubmissionId: request.itemId,
+          input: request.action.content,
+          presentationInput: request.action.content,
+        });
+      } else if (request.action.kind === "remove") {
+        await this.host.request("thread/queue/delete", {
+          threadId,
+          queuedSubmissionId: request.itemId,
+        });
+      } else {
+        await this.host.request("codexhost/thread/queue/send-now", {
+          threadId,
+          itemId: request.itemId,
+        });
+      }
+      await this.view(threadId, true);
+      return { accepted: true };
+    });
     rpc.register("session/cancel", async (args) => {
       const { sessionId } = requestOf<{ sessionId: string }>(args);
       const view = await this.view(sessionId);
-      const turn = view.thread.turns.find((value) => value.status === "inProgress");
-      if (turn)
-        await this.host.request("turn/interrupt", {
-          threadId: this.id(sessionId),
-          turnId: turn.id,
-        });
+      const turnId =
+        view.ownerSnapshot?.activeTurnId ??
+        view.thread.turns.find((value) => value.status === "inProgress")?.id;
+      if (!turnId) {
+        if (view.thread.status.type === "active")
+          throw new RpcError(
+            "session/stop-unavailable",
+            "CH reports active work, but no interruptible parent Turn is available.",
+          );
+        return { accepted: true };
+      }
+      await this.host.request("turn/interrupt", {
+        threadId: this.id(sessionId),
+        turnId,
+      });
       return { accepted: true };
     });
     rpc.register("session/rename", async (args) => {
@@ -751,6 +859,10 @@ export class ChSessions {
       const unfollow = this.realtime?.follow(this.id(request.address.sessionId));
       sink.onClose(() => unfollow?.());
       const view = await this.view(request.address.sessionId, true);
+      // Reopening a Thread must not retain a snapshot that went stale while it
+      // had no realtime follower. The initial open already has a read in flight.
+      if (this.usageReadAt.has(view.thread.id) && !this.loadingUsage.has(view.thread.id))
+        this.loadUsage(view, true);
       view.log.follow(sink, request);
       // Publish first; prefetch just one older page, never drain all history.
       const prefetch = setImmediate(() => {

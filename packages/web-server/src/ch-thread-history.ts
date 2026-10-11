@@ -79,6 +79,20 @@ export class ChThreadHistory extends ChThreadView {
           });
       this.ensureCurrent();
       this.ownerSnapshot = snapshot;
+      if (snapshot) {
+        this.log.setProjection("inbox", {
+          "next-turn": (snapshot.queue?.items ?? []).map((item) => ({
+            id: item.id,
+            role: "user",
+            content: item.presentationInput ?? item.input,
+            source: { kind: "user", rpcId: item.clientUserMessageId },
+          })),
+          "next-step": [],
+        });
+        this.log.setProjection("queueState", {
+          pausedReason: snapshot.queue?.pausedReason ?? null,
+        });
+      }
       if (
         !force &&
         this.loaded &&

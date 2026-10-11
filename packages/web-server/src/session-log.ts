@@ -55,6 +55,7 @@ export function defaultProjections(): Record<string, unknown> {
   return {
     title: null,
     goal: null,
+    codexhostUsage: null,
     tokenUsage: {
       uncachedInputTokens: 0,
       outputTokens: 0,
@@ -68,6 +69,7 @@ export function defaultProjections(): Record<string, unknown> {
     subagentTiming: { settledMs: 0 },
     subagent: null,
     inbox: { "next-turn": [], "next-step": [] },
+    queueState: { pausedReason: null },
     turnOutline: [],
     userQuestions: { active: [], settled: [] },
     permissions: { currentValue: "default" },

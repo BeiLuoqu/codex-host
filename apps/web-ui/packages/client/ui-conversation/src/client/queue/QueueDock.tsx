@@ -26,6 +26,15 @@ import css from "./QueueDock.module.css";
 
 const EMPTY_QUEUE = [] as const;
 const QUEUE_PREVIEW_CHARS = 200;
+type QueueState = {
+  readonly pausedReason?: "interrupted" | "outcome-unknown" | "failed" | null;
+};
+
+declare module "@deepseek-ai/dsh-session-projection/types" {
+  interface SessionProjectionMap {
+    queueState: QueueState;
+  }
+}
 
 function previewOf(content: InboxState["next-turn"][number]["content"]): string {
   const flat = content
@@ -147,6 +156,7 @@ export function QueueDock({
   t,
 }: QueueDockProps) {
   const inbox = useProjection("inbox") as unknown as InboxState | undefined;
+  const queueState = useProjection("queueState") as unknown as QueueState | undefined;
   const pendingSubmissions = useSession((s) => s.pendingSubmissions);
   const queue = useMemo(() => {
     const rows = inbox?.["next-turn"] ?? EMPTY_QUEUE;
@@ -181,6 +191,15 @@ export function QueueDock({
   const [busy, setBusy] = useState<MessageId | null>(null);
   const [collapsed, setCollapsed] = useState(true);
   const listId = useId();
+  const pausedReason = queueState?.pausedReason ?? null;
+  const pausedLabel =
+    pausedReason === "interrupted"
+      ? t("queue.paused.interrupted")
+      : pausedReason === "outcome-unknown"
+        ? t("queue.paused.unknown")
+        : pausedReason === "failed"
+          ? t("queue.paused.failed")
+          : null;
 
   useEffect(() => {
     if (rowCount === 0 && !collapsed) setCollapsed(true);
@@ -226,6 +245,11 @@ export function QueueDock({
   return (
     <div className={css.dock} data-queue-dock="">
       <div className={css.panel}>
+        {pausedLabel !== null && (
+          <div className={css.paused} role="status">
+            {pausedLabel}
+          </div>
+        )}
         {rowCount > 1 && (
           <button
             type="button"
@@ -379,19 +403,21 @@ export function QueueDock({
                           </Tooltip>
                           <Tooltip
                             portal
-                            label={t("queue.steer")}
+                            label={t(running ? "queue.steer" : "queue.resume")}
                             side="bottom"
                             delayMs={500}
-                            disabled={!running}
                           >
                             <button
                               type="button"
                               className={css.action}
-                              aria-label={t("queue.steer")}
-                              title={running ? undefined : t("queue.steer.unavailable")}
-                              disabled={busy !== null || !running}
+                              aria-label={t(running ? "queue.steer" : "queue.resume")}
+                              disabled={busy !== null}
                               onClick={() => {
-                                void applyAction(row.id, { kind: "steer" }, t("queue.steerFailed"));
+                                void applyAction(
+                                  row.id,
+                                  { kind: "steer" },
+                                  t(running ? "queue.steerFailed" : "queue.resumeFailed"),
+                                );
                               }}
                             >
                               <IconSendOutlineRegular />

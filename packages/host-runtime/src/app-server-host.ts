@@ -165,6 +165,10 @@ import {
 } from "./external-thread-runtime.js";
 import { ExternalSteerError, ExternalTurnSteering } from "./external-turn-steering.js";
 import {
+  ExternalThreadQueue,
+  type ExternalQueuedSubmission,
+} from "./external-thread-queue.js";
+import {
   ExternalCommandError,
   inspectLiveCommandCatalog,
   isExternalCommandCandidate,
@@ -564,15 +568,38 @@ function requestObject(request: JsonRpcRequest): JsonObject {
   return request.params as JsonObject;
 }
 
+function requestInput(params: JsonObject): JsonObject[] {
+  if (!Array.isArray(params.input) || params.input.some((item) => !isRecord(item)))
+    throw new Error("turn/start input must be an array of input objects");
+  return params.input as JsonObject[];
+}
+
+function requestPresentationInput(params: JsonObject): JsonObject[] | undefined {
+  if (params.presentationInput === undefined) return undefined;
+  if (
+    !Array.isArray(params.presentationInput) ||
+    params.presentationInput.some((item) => !isRecord(item))
+  )
+    throw new Error("presentationInput must be an array of input objects");
+  return params.presentationInput as JsonObject[];
+}
+
 function requestText(params: JsonObject): string {
-  if (!Array.isArray(params.input)) throw new Error("turn/start input must be an array");
-  const text = params.input
-    .filter((item): item is JsonObject => isRecord(item) && item.type === "text")
+  const text = requestInput(params)
+    .filter((item) => item.type === "text")
     .map((item) => item.text)
     .filter((value): value is string => typeof value === "string")
     .join("\n");
   if (!text) throw new Error("turn/start must contain text input");
   return text;
+}
+
+function nativeQueuedSubmission(item: ExternalQueuedSubmission): JsonObject {
+  return {
+    id: item.id,
+    clientUserMessageId: item.clientUserMessageId,
+    input: item.input,
+  };
 }
 
 function sandboxResult(params: JsonObject): JsonObject {
@@ -676,6 +703,14 @@ export class AppServerHost {
   #subagentThreadStatuses = new Map<string, "active" | "idle">();
   #runningSubagentsByParent = new Map<string, Set<string>>();
   #pendingExternalCommandRequests = new Set<string>();
+  readonly #externalQueue = new ExternalThreadQueue();
+  readonly #queuedTurnStarts = new Map<
+    string,
+    {
+      itemId: string;
+      result: Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }>;
+    }
+  >();
   #manualCompactionTurns = new WeakMap<ExternalThread, HostTurnId>();
   #closeRequested = false;
   readonly #pluginLoadAbort = new AbortController();
@@ -1293,6 +1328,7 @@ export class AppServerHost {
       JSON.parse(
         JSON.stringify({
           cursor: this.clientEvents.cursor,
+          activeTurnId: thread.activeTurnId,
           thread: { ...thread.thread, turns: [] },
           turnsPage: listExternalTurns(this.#externalHistoryTurns(thread, true), {
             limit: 5,
@@ -1304,6 +1340,7 @@ export class AppServerHost {
             effectiveThinkingOptionId: state.effectiveThinkingOptionId,
             effectivePermissionModeId: state.effectivePermissionModeId,
           },
+          queue: this.#externalQueue.snapshot(threadId),
           interactions,
         }),
       ),
@@ -1912,6 +1949,42 @@ export class AppServerHost {
     if (request.method === "codexhost/thread/command/execute") {
       await this.#executeThreadCommand(request);
       return;
+    }
+    if (request.method === "codexhost/thread/queue/send-now") {
+      const params = routingParams(request);
+      const resolution =
+        typeof params.threadId === "string"
+          ? await this.#resolveExternalThread(params.threadId)
+          : ({ kind: "official" } as const);
+      if (await this.#writeResolutionError(request, resolution)) return;
+      if (resolution.kind !== "external") {
+        await this.#writer.json(
+          rpcError(request, -32078, "Thread is not owned by this external Host"),
+        );
+        return;
+      }
+      this.#dispatchDesktopReply(
+        request,
+        () => this.#sendQueuedExternalTurnNow(request, resolution.thread),
+        resolution.thread.id,
+      );
+      return;
+    }
+    if (request.method.startsWith("thread/queue/")) {
+      const params = routingParams(request);
+      const resolution =
+        typeof params.threadId === "string"
+          ? await this.#resolveExternalThread(params.threadId)
+          : ({ kind: "official" } as const);
+      if (await this.#writeResolutionError(request, resolution)) return;
+      if (resolution.kind === "external") {
+        this.#dispatchDesktopReply(
+          request,
+          () => this.#handleExternalQueueRequest(request, resolution.thread),
+          resolution.thread.id,
+        );
+        return;
+      }
     }
     if (request.method === "thread/list") {
       let listRequest: DecodedThreadListRequest;
@@ -4522,6 +4595,8 @@ export class AppServerHost {
       return;
     }
     this.#externalRuntime.remove(location.record.hostThreadId);
+    this.#externalQueue.clear(location.record.hostThreadId);
+    this.#queuedTurnStarts.delete(location.record.hostThreadId);
     this.#routeObservationTracker.forgetThread(location.record.hostThreadId);
     if (!thread) {
       await this.#writer.json(rpcEnvelope(request, { result: {} }));
@@ -4787,12 +4862,6 @@ export class AppServerHost {
   }
 
   async #startExternalTurn(request: JsonRpcRequest, thread: ExternalThread): Promise<void> {
-    if (this.#externalThreadBusy(thread) || this.#pendingExternalCommandRequests.has(thread.id)) {
-      await this.#writer.json(
-        rpcError(request, -32072, "External Thread already has an active Turn"),
-      );
-      return;
-    }
     const params = requestObject(request);
     if (typeof params.model === "string") {
       let route: ReturnType<typeof decodeCreateRoute>;
@@ -4816,13 +4885,47 @@ export class AppServerHost {
       await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
       return;
     }
+    const clientRequest = String(request.id).startsWith(this.#clientRequestPrefix);
+    const queueRequested = clientRequest && params.delivery === "queue";
+    if (
+      queueRequested &&
+      (this.#externalThreadBusy(thread) ||
+        this.#pendingExternalCommandRequests.has(thread.id) ||
+        this.#externalQueue.has(thread.id))
+    ) {
+      try {
+        const queuedSubmission = this.#externalQueue.add(
+          thread.id,
+          requestInput(params),
+          typeof params.clientUserMessageId === "string"
+            ? params.clientUserMessageId
+            : undefined,
+          requestPresentationInput(params),
+        );
+        await this.#publishExternalQueue(thread.id);
+        await this.#writer.json(
+          rpcEnvelope(request, { result: { queued: true, queuedSubmission } }),
+        );
+        if (!this.#externalThreadBusy(thread) && !this.#externalQueue.isPaused(thread.id))
+          void this.#startNextQueuedExternalTurn(thread);
+      } catch (error) {
+        await this.#writer.json(rpcError(request, -32072, errorMessage(error)));
+      }
+      return;
+    }
+    if (this.#externalThreadBusy(thread) || this.#pendingExternalCommandRequests.has(thread.id)) {
+      await this.#writer.json(
+        rpcError(request, -32072, "External Thread already has an active Turn"),
+      );
+      return;
+    }
     try {
       const started = await this.#beginExternalInputTurn(
         thread,
         text,
         undefined,
         typeof params.clientUserMessageId === "string" ? params.clientUserMessageId : undefined,
-        String(request.id).startsWith(this.#clientRequestPrefix),
+        clientRequest,
       );
       try {
         await this.#writer.json(rpcEnvelope(request, { result: { turn: started.turn } }));
@@ -4830,6 +4933,229 @@ export class AppServerHost {
         started.gate.resolve();
       }
     } catch (error) {
+      await this.#writer.json(
+        rpcError(
+          request,
+          error instanceof ExternalSteerError || error instanceof ExternalCommandError
+            ? error.code
+            : -32073,
+          errorMessage(error),
+        ),
+      );
+    }
+  }
+
+  async #publishExternalQueue(threadId: string): Promise<void> {
+    this.clientEvents.changed(threadId, "codexhost/thread/queue/updated");
+    await this.#writer.json({ method: "thread/queue/changed", params: { threadId } });
+  }
+
+  async #startNextQueuedExternalTurn(thread: ExternalThread): Promise<void> {
+    if (
+      this.#closeRequested ||
+      this.#externalRuntime.get(thread.id) !== thread ||
+      this.#externalThreadBusy(thread) ||
+      this.#pendingExternalCommandRequests.has(thread.id) ||
+      this.#externalQueue.isPaused(thread.id)
+    )
+      return;
+    const next = this.#externalQueue.head(thread.id);
+    if (!next) return;
+    try {
+      const started = await this.#startQueuedExternalTurn(thread, next.id);
+      started.gate.resolve();
+    } catch (error) {
+      this.#diagnose(`Queued External Turn failed to start: ${errorMessage(error)}`);
+      if (this.#externalQueue.pause(thread.id, "failed")) await this.#publishExternalQueue(thread.id);
+    }
+  }
+
+  async #handleExternalQueueRequest(
+    request: JsonRpcRequest,
+    thread: ExternalThread,
+  ): Promise<void> {
+    const params = requestObject(request);
+    const itemId =
+      typeof params.queuedSubmissionId === "string" ? params.queuedSubmissionId : undefined;
+    try {
+      if (request.method === "thread/queue/list") {
+        await this.#writer.json(
+          rpcEnvelope(request, {
+            result: {
+              data: this.#externalQueue
+                .snapshot(thread.id)
+                .items.map(nativeQueuedSubmission),
+              nextCursor: null,
+            },
+          }),
+        );
+        return;
+      }
+      if (request.method === "thread/queue/add") {
+        requestText(params);
+        const queuedSubmission = this.#externalQueue.add(
+          thread.id,
+          requestInput(params),
+          typeof params.clientUserMessageId === "string"
+            ? params.clientUserMessageId
+            : undefined,
+          requestPresentationInput(params),
+        );
+        await this.#publishExternalQueue(thread.id);
+        await this.#writer.json(
+          rpcEnvelope(request, {
+            result: { queuedSubmission: nativeQueuedSubmission(queuedSubmission) },
+          }),
+        );
+        return;
+      }
+      if (request.method === "thread/queue/reorder") {
+        const ids = params.queuedSubmissionIds;
+        if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string"))
+          throw new ExternalSteerError(-32602, "Queued submission order is invalid");
+        if (!this.#externalQueue.reorder(thread.id, ids as string[]))
+          throw new ExternalSteerError(-32072, "Queued messages changed before reordering");
+        await this.#publishExternalQueue(thread.id);
+        await this.#writer.json(rpcEnvelope(request, { result: {} }));
+        return;
+      }
+      if (!itemId) throw new ExternalSteerError(-32602, "Queued submission identity is required");
+      if (request.method === "thread/queue/update") {
+        requestText(params);
+        const queuedSubmission = this.#externalQueue.update(
+          thread.id,
+          itemId,
+          requestInput(params),
+          requestPresentationInput(params),
+        );
+        if (!queuedSubmission) throw new ExternalSteerError(-32072, "Queued message not found");
+        await this.#publishExternalQueue(thread.id);
+        await this.#writer.json(
+          rpcEnvelope(request, {
+            result: { queuedSubmission: nativeQueuedSubmission(queuedSubmission) },
+          }),
+        );
+        return;
+      }
+      if (request.method === "thread/queue/delete") {
+        const deleted = this.#externalQueue.delete(thread.id, itemId);
+        if (deleted) await this.#publishExternalQueue(thread.id);
+        await this.#writer.json(rpcEnvelope(request, { result: { deleted } }));
+        return;
+      }
+      if (request.method === "thread/queue/start") {
+        const started = await this.#startQueuedExternalTurn(thread, itemId);
+        try {
+          await this.#writer.json(rpcEnvelope(request, { result: { turn: started.turn } }));
+        } finally {
+          started.gate.resolve();
+        }
+        return;
+      }
+      throw new ExternalSteerError(-32601, "Unsupported External Thread queue method");
+    } catch (error) {
+      await this.#writer.json(
+        rpcError(
+          request,
+          error instanceof ExternalSteerError || error instanceof ExternalCommandError
+            ? error.code
+            : -32072,
+          errorMessage(error),
+        ),
+      );
+    }
+  }
+
+  async #startQueuedExternalTurn(
+    thread: ExternalThread,
+    itemId: string,
+  ): Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }> {
+    const active = this.#queuedTurnStarts.get(thread.id);
+    if (active) {
+      if (active.itemId !== itemId)
+        throw new ExternalSteerError(-32072, "Another queued message is already starting");
+      return active.result;
+    }
+    if (this.#externalThreadBusy(thread) || this.#pendingExternalCommandRequests.has(thread.id))
+      throw new ExternalSteerError(-32072, "External Thread already has an active Turn");
+    const item = this.#externalQueue.find(thread.id, itemId);
+    if (!item) throw new ExternalSteerError(-32072, "Queued message not found");
+    const result = (async () => {
+      const started = await this.#beginExternalInputTurn(
+        thread,
+        requestText({ input: item.input }),
+        undefined,
+        item.clientUserMessageId,
+        true,
+      );
+      this.#externalQueue.resume(thread.id);
+      if (this.#externalQueue.delete(thread.id, item.id))
+        await this.#publishExternalQueue(thread.id);
+      return started;
+    })();
+    this.#queuedTurnStarts.set(thread.id, { itemId, result });
+    try {
+      return await result;
+    } catch (error) {
+      if (this.#queuedTurnStarts.get(thread.id)?.result === result)
+        this.#queuedTurnStarts.delete(thread.id);
+      throw error;
+    }
+  }
+
+  async #sendQueuedExternalTurnNow(
+    request: JsonRpcRequest,
+    thread: ExternalThread,
+  ): Promise<void> {
+    const params = requestObject(request);
+    const itemId = typeof params.itemId === "string" ? params.itemId : undefined;
+    if (!itemId) {
+      await this.#writer.json(rpcError(request, -32602, "Queued message identity is required"));
+      return;
+    }
+    const item = this.#externalQueue.find(thread.id, itemId);
+    if (!item) {
+      await this.#writer.json(rpcError(request, -32072, "Queued message not found"));
+      return;
+    }
+    try {
+      const started = this.#externalThreadBusy(thread)
+        ? await this.#externalSteering.run(
+            thread,
+            {
+              expectedTurnId: thread.activeTurnId,
+              input: item.input,
+              clientUserMessageId: item.clientUserMessageId,
+            },
+            (text, assertActive) =>
+              this.#beginExternalInputTurn(
+                thread,
+                text,
+                assertActive,
+                item.clientUserMessageId,
+                true,
+              ),
+          )
+        : await this.#startQueuedExternalTurn(thread, item.id);
+      if (this.#externalQueue.find(thread.id, item.id)) {
+        this.#externalQueue.resume(thread.id);
+        this.#externalQueue.delete(thread.id, item.id);
+        await this.#publishExternalQueue(thread.id);
+      }
+      try {
+        await this.#writer.json(
+          rpcEnvelope(request, { result: { sent: true, turnId: started.turnId } }),
+        );
+      } finally {
+        started.gate.resolve();
+      }
+    } catch (error) {
+      if (
+        !thread.running &&
+        !thread.activeTurnId &&
+        this.#externalQueue.pause(thread.id, "failed")
+      )
+        await this.#publishExternalQueue(thread.id);
       await this.#writer.json(
         rpcError(
           request,
@@ -4915,6 +5241,12 @@ export class AppServerHost {
       );
     } finally {
       this.#pendingExternalCommandRequests.delete(thread.id);
+      if (
+        !thread.running &&
+        !thread.activeTurnId &&
+        this.#externalQueue.pause(thread.id, "failed")
+      )
+        await this.#publishExternalQueue(thread.id);
     }
   }
 
@@ -5079,6 +5411,14 @@ export class AppServerHost {
         thread.id,
         new Error("External Harness output ended before replacement"),
       );
+      if (
+        !this.#closeRequested &&
+        (thread.running || thread.activeTurnId) &&
+        this.#externalQueue.pause(thread.id, "outcome-unknown")
+      ) {
+        this.#queuedTurnStarts.delete(thread.id);
+        await this.#publishExternalQueue(thread.id);
+      }
     }
   }
 
@@ -5230,8 +5570,11 @@ export class AppServerHost {
       return;
     }
     if (event.type === "session.faulted") {
+      this.#queuedTurnStarts.delete(thread.id);
       this.#externalSteering.fault(thread.id, new Error(event.error.message));
       thread.stateObserver.fault(new Error(event.error.message));
+      if (this.#externalQueue.pause(thread.id, "outcome-unknown"))
+        await this.#publishExternalQueue(thread.id);
       this.#diagnose(`${thread.harnessId} Harness Session faulted: ${event.error.message}`);
       return;
     }
@@ -5303,6 +5646,7 @@ export class AppServerHost {
       await this.#setThreadStatus(thread, { type: "active", activeFlags: [] });
     }
     if (event.type === "turn.completed") {
+      this.#queuedTurnStarts.delete(thread.id);
       if (!result.completedTurn) throw new Error("Turn projector returned no completed Turn");
       const completedAt = Math.floor(Date.now() / 1000);
       if (ephemeralTurn) {
@@ -5360,7 +5704,17 @@ export class AppServerHost {
           ? { type: "active", activeFlags: [] }
           : { type: "idle" },
       );
+      const steering = this.#externalSteering.hasPending(thread.id);
       this.#externalSteering.terminal(thread.id, event.turnId, event.outcome);
+      if (!steering) {
+        const status = event.outcome.status;
+        if (status === "succeeded") void this.#startNextQueuedExternalTurn(thread);
+        else {
+          const reason = status === "cancelled" ? "interrupted" : "failed";
+          if (this.#externalQueue.pause(thread.id, reason))
+            await this.#publishExternalQueue(thread.id);
+        }
+      }
     }
   }
 

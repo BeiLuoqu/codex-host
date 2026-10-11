@@ -54,6 +54,12 @@
   pointer-events: none;
 }
 
+.paused {
+  padding: 6px 12px 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xs-13);
+}
+
 .header {
   box-sizing: border-box;
   display: flex;
