@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import type { ClientInteraction } from "@codexhost/shared-contracts";
+import { REASONING_TRANSCRIPT_COMMAND, type ClientInteraction } from "@codexhost/shared-contracts";
 import { FakeChChannel } from "./support/ch-channel.ts";
 import { defined } from "./support/defined.ts";
 import { ChSessions } from "../src/ch-sessions.ts";
@@ -265,6 +265,90 @@ it("does not turn an acknowledged send into a rejection when the following read 
   assert.deepEqual(result, { ok: true, value: { accepted: true } });
   await delay(150);
   assert.equal(host.requests.filter((request) => request.method === "turn/start").length, 1);
+});
+
+it("keeps late paired reasoning transcripts out of tool projection without hiding real commands", () => {
+  const host = new FakeChChannel();
+  const row = host.add("reasoning", "/synthetic");
+  row.turns = [
+    {
+      id: "late-reasoning",
+      status: "inProgress",
+      items: [
+        {
+          id: "u",
+          type: "userMessage",
+          content: [{ type: "text", text: "input" }],
+        },
+        {
+          id: "reasoning-summary",
+          type: "reasoning",
+          summary: ["private analysis"],
+          content: [],
+        },
+        { id: "answer", type: "agentMessage", text: "Final answer" },
+      ],
+    },
+  ];
+  const view = new ChThreadView(structuredClone(row), "fake", () => {});
+  view.update(structuredClone(row));
+
+  const turn = defined(row.turns[0]);
+  turn.items.push({
+    id: "reasoning",
+    type: "commandExecution",
+    command: REASONING_TRANSCRIPT_COMMAND,
+    status: "completed",
+    aggregatedOutput: "private analysis",
+  });
+  turn.status = "completed";
+  view.update(structuredClone(row));
+
+  assert.equal(
+    view.log.events.some((event) => event.type === "tool/call"),
+    false,
+  );
+  const message = defined(view.log.events.findLast((event) => event.type === "assistant/message"))
+    .data as { message: { content: Array<{ type: string; text?: string }> } };
+  assert.deepEqual(message.message.content, [
+    { type: "reasoning", text: "private analysis" },
+    { type: "text", text: "Final answer" },
+  ]);
+
+  const commandHost = new FakeChChannel();
+  const commandRow = commandHost.add("real-command", "/synthetic");
+  commandRow.turns = [
+    {
+      id: "real-command",
+      status: "completed",
+      items: [
+        {
+          id: "command-user",
+          type: "userMessage",
+          content: [{ type: "text", text: "run it" }],
+        },
+        {
+          id: "real-thinking-command",
+          type: "commandExecution",
+          command: REASONING_TRANSCRIPT_COMMAND,
+          status: "completed",
+          aggregatedOutput: "real output",
+        },
+        { id: "command-answer", type: "agentMessage", text: "Done" },
+      ],
+    },
+  ];
+  const commandView = new ChThreadView(structuredClone(commandRow), "fake", () => {});
+  commandView.update(structuredClone(commandRow));
+  const call = defined(commandView.log.events.find((event) => event.type === "tool/call")).data as {
+    name: string;
+    arguments: string;
+  };
+  assert.equal(call.name, "bash");
+  assert.equal(
+    (JSON.parse(call.arguments) as { command: string }).command,
+    REASONING_TRANSCRIPT_COMMAND,
+  );
 });
 
 it("projects running tool output and individual completion without rebroadcasting unchanged controls", () => {

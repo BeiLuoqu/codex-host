@@ -1,4 +1,5 @@
 /** In-memory projection of the CH protocol onto the existing Web UI wire format. */
+import { REASONING_TRANSCRIPT_COMMAND } from "@codexhost/shared-contracts";
 import { SessionLog, type ProjectionListener } from "./session-log.ts";
 import { RpcError } from "./transport.ts";
 import {
@@ -35,7 +36,7 @@ export interface ChThread {
   canAcceptDirectInput?: boolean;
 }
 
-function itemOf(item: ChItem): HostItem | undefined {
+function itemOf(item: ChItem, reasoningPreviewIds: ReadonlySet<string>): HostItem | undefined {
   const itemId = item.id;
   switch (item.type) {
     case "agentMessage":
@@ -52,6 +53,17 @@ function itemOf(item: ChItem): HostItem | undefined {
           .join("\n"),
       };
     case "commandExecution":
+      // Codex Desktop receives each Host Reasoning Item twice: a `reasoning`
+      // preview and a Command Execution transcript twin. Web already renders
+      // the complete preview text, so projecting the paired twin as a real
+      // command can make a late arrival absorb the final answer into a tool Step.
+      // Require the exact preview pair so a Harness command literally named
+      // `thinking` remains a genuine command.
+      if (
+        item.command === REASONING_TRANSCRIPT_COMMAND &&
+        reasoningPreviewIds.has(`${itemId}-summary`)
+      )
+        return undefined;
       return {
         type: "commandExecution",
         itemId,
@@ -220,8 +232,11 @@ export class ChThreadView {
         this.turns.set(turn.id, view);
       }
       if (view.done) continue;
+      const reasoningPreviewIds = new Set(
+        turn.items.filter((item) => item.type === "reasoning").map((item) => item.id),
+      );
       for (const item of turn.items) {
-        const projected = itemOf(item);
+        const projected = itemOf(item, reasoningPreviewIds);
         if (!projected || view.completed.has(item.id)) continue;
         const old = view.items.get(item.id);
         if (!old) {
