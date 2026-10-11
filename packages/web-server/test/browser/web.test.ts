@@ -134,6 +134,7 @@ for (const width of [390, 1280]) {
       await thinking.getByRole("menuitem", { name: "Other Model", exact: true }).click();
       const models = page.getByRole("menu", { name: "Model", exact: true });
       await models.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).waitFor();
+      assert.equal(await models.getByText("Other Harness", { exact: true }).count(), 0);
       if (width >= 600) {
         const modelPanel = page.getByRole("group", { name: "Model", exact: true });
         const [modelBounds, thinkingBounds, triggerBounds] = await Promise.all([

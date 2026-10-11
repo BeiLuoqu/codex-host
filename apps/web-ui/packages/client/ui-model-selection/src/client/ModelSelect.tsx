@@ -27,11 +27,7 @@
  * chevron, and each row whose value that selection carries shows one in place
  * of its check mark.
  */
-import {
-  MenuGroup,
-  MenuSurface,
-  observeStickyMenuGroups,
-} from "@deepseek-ai/dsh-client-ui-primitives";
+import { MenuSurface } from "@deepseek-ai/dsh-client-ui-primitives";
 import {
   useEffect,
   useId,
@@ -146,7 +142,6 @@ export function ModelSelect({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const modelPanelRef = useRef<HTMLDivElement | null>(null);
-  const groupsRef = useRef<HTMLDivElement | null>(null);
   const [menuPos, setMenuPos] = useState<CSSProperties | null>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const modelRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -293,12 +288,6 @@ export function ModelSelect({
       : triggerRef.current
     )?.focus();
   }, [open, pane, showSearch]);
-
-  useEffect(() => {
-    const viewport = groupsRef.current;
-    if (viewport === null) return;
-    return observeStickyMenuGroups(viewport);
-  }, [available, open, pane, filteredGroups]);
 
   useLayoutEffect(() => {
     if (open && pane === "model" && activeModelIndex >= 0) {
@@ -776,87 +765,85 @@ export function ModelSelect({
                     </div>
                   ))}
                 <div
-                  ref={groupsRef}
                   id={`${id}-models`}
                   className={clsx(css.groups, "scrollable")}
                   role="menu"
                   aria-label={t("menu.model")}
                   hidden={filteredGroups.length === 0}
                 >
-                  {filteredGroups.map((group) => (
-                    <MenuGroup
-                      key={group.id}
-                      label={group.id === "deepseek-account" ? t("provider.account") : group.name}
-                    >
-                      {group.models.map((model) => {
-                        const index = modelIndex++;
-                        const selected =
-                          state.current?.provider === group.id && state.current.model === model.id;
-                        const favorite = favorites.has(modelKey(group.id, model.id));
-                        return (
-                          <div className={css.modelRow} role="none" key={model.id}>
-                            <button
-                              ref={modelRef(index)}
-                              type="button"
-                              role="menuitemradio"
-                              aria-checked={selected}
-                              id={`${id}-model-${index}`}
-                              tabIndex={showSearch ? -1 : 0}
-                              onFocus={() => {
-                                setHighlightedIndex(index);
-                              }}
-                              data-highlighted={index === activeModelIndex ? "" : undefined}
-                              className={clsx(
-                                css.option,
-                                css.modelOption,
-                                selected && css.selected,
-                                index === activeModelIndex && css.optionActive,
-                              )}
-                              onMouseMove={
-                                busy || index === activeModelIndex
-                                  ? undefined
-                                  : () => {
-                                      if (showSearch) setHighlightedIndex(index);
-                                      else modelRefs.current[index]?.focus();
-                                    }
-                              }
-                              title={model.name}
-                              disabled={busy}
-                              onClick={() => {
-                                choose({ provider: group.id, model: model.id });
-                              }}
-                            >
-                              <span className={css.optionCopy}>
-                                <span className={css.modelName}>{model.name}</span>
-                              </span>
-                              <span className={css.check}>
-                                {pending?.provider === group.id && pending.model === model.id ? (
-                                  <StateDot state="ongoing" />
-                                ) : selected ? (
-                                  <IconCheckOutlineRegular />
-                                ) : null}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className={clsx(css.favorite, favorite && css.favoriteActive)}
-                              aria-label={t(favorite ? "favorite.remove" : "favorite.add", {
-                                model: model.name,
-                              })}
-                              aria-pressed={favorite}
-                              disabled={busy}
-                              onClick={() => {
-                                toggleFavorite(group.id, model.id);
-                              }}
-                            >
-                              <StarIcon filled={favorite} />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </MenuGroup>
-                  ))}
+                  {filteredGroups.map((group) =>
+                    group.models.map((model) => {
+                      const index = modelIndex++;
+                      const selected =
+                        state.current?.provider === group.id && state.current.model === model.id;
+                      const favorite = favorites.has(modelKey(group.id, model.id));
+                      return (
+                        <div
+                          className={css.modelRow}
+                          role="none"
+                          key={modelKey(group.id, model.id)}
+                        >
+                          <button
+                            ref={modelRef(index)}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={selected}
+                            id={`${id}-model-${index}`}
+                            tabIndex={showSearch ? -1 : 0}
+                            onFocus={() => {
+                              setHighlightedIndex(index);
+                            }}
+                            data-highlighted={index === activeModelIndex ? "" : undefined}
+                            className={clsx(
+                              css.option,
+                              css.modelOption,
+                              selected && css.selected,
+                              index === activeModelIndex && css.optionActive,
+                            )}
+                            onMouseMove={
+                              busy || index === activeModelIndex
+                                ? undefined
+                                : () => {
+                                    if (showSearch) setHighlightedIndex(index);
+                                    else modelRefs.current[index]?.focus();
+                                  }
+                            }
+                            title={model.name}
+                            disabled={busy}
+                            onClick={() => {
+                              choose({ provider: group.id, model: model.id });
+                            }}
+                          >
+                            <span className={css.optionCopy}>
+                              <span className={css.modelName}>{model.name}</span>
+                            </span>
+                            <span className={css.check}>
+                              {pending?.provider === group.id && pending.model === model.id ? (
+                                <StateDot state="ongoing" />
+                              ) : selected ? (
+                                <IconCheckOutlineRegular />
+                              ) : null}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className={clsx(css.favorite, favorite && css.favoriteActive)}
+                            aria-label={t(favorite ? "favorite.remove" : "favorite.add", {
+                              model: model.name,
+                            })}
+                            aria-pressed={favorite}
+                            disabled={busy}
+                            onClick={() => {
+                              toggleFavorite(group.id, model.id);
+                            }}
+                          >
+                            <StarIcon filled={favorite} />
+                          </button>
+                        </div>
+                      );
+                    }),
+                  )}
                 </div>
                 {state.status === "ready" && filteredGroups.length === 0 && (
                   <div className={css.empty} role="status">
