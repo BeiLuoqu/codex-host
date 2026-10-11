@@ -201,6 +201,8 @@ export function createHarnessAdapter({
     defaultModeId: "ask",
   },
   permissionModeScope = "live",
+  thinkingOptions = [],
+  defaultThinkingOptionId,
 }: {
   harnessId?: string;
   modelId?: string;
@@ -210,6 +212,8 @@ export function createHarnessAdapter({
     defaultModeId: string;
   };
   permissionModeScope?: "live" | "atCreate";
+  thinkingOptions?: Array<{ id: string; label: string }>;
+  defaultThinkingOptionId?: string;
 } = {}) {
   return {
     harnessId,
@@ -219,13 +223,14 @@ export function createHarnessAdapter({
         catalog: {
           models: [{ ref: { id: modelId }, label: modelLabel }],
           defaultModel: { id: modelId },
-          thinkingOptions: [],
+          thinkingOptions,
+          ...(defaultThinkingOptionId === undefined ? {} : { defaultThinkingOptionId }),
         },
         permissionModes,
         capabilities: {
           configuration: {
             selectModel: true,
-            selectThinkingOption: false,
+            selectThinkingOption: thinkingOptions.length > 0,
             selectPermissionMode: true,
             permissionModeScope,
           },

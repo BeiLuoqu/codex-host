@@ -123,21 +123,61 @@ for (const width of [390, 1280]) {
       await page.getByRole("menuitem", { name: "Other Harness", exact: true }).click();
       await harness().waitFor();
       await page
-        .getByRole("button", { name: "Select model, current Other Model", exact: true })
+        .getByRole("button", {
+          name: "Select model, current Other Model, reasoning effort High",
+          exact: true,
+        })
         .click();
-      await page
-        .getByRole("menuitem")
-        .filter({ hasText: /^Model/u })
-        .click();
-      await page.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).waitFor();
+      const thinking = page.getByRole("menu", { name: "Thinking", exact: true });
+      await thinking
+        .getByRole("menuitemradio", { name: "High", exact: true, checked: true })
+        .waitFor();
+      await thinking.getByRole("menuitem", { name: "Other Model", exact: true }).click();
+      const models = page.getByRole("menu", { name: "Model", exact: true });
+      await models.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).waitFor();
+      if (width >= 600) {
+        const [modelBounds, thinkingBounds] = await Promise.all([
+          models.boundingBox(),
+          thinking.boundingBox(),
+        ]);
+        assert.ok(
+          modelBounds && thinkingBounds && modelBounds.x + modelBounds.width <= thinkingBounds.x,
+        );
+      } else {
+        assert.equal(await thinking.isVisible(), false);
+        await page.getByRole("button", { name: "Back to Thinking", exact: true }).waitFor();
+      }
       assert.equal(
         await page.getByRole("menuitemradio", { name: "Fake Model", exact: true }).count(),
         0,
       );
+      const favorite = page.getByRole("menuitem", {
+        name: "Favorite model Other Alternate",
+        exact: true,
+      });
+      await favorite.click();
+      await page
+        .getByRole("menuitem", {
+          name: "Remove model Other Alternate from favorites",
+          exact: true,
+        })
+        .waitFor();
       await screenshot(page, `harness-models-${width}`);
       await page.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).click();
       await page
-        .getByRole("button", { name: "Select model, current Other Alternate", exact: true })
+        .getByRole("button", {
+          name: "Select model, current Other Alternate, reasoning effort High",
+          exact: true,
+        })
+        .waitFor();
+      assert.equal(await page.getByRole("menu", { name: "Model", exact: true }).isVisible(), true);
+      await page.keyboard.press("Escape");
+      await thinking.getByRole("menuitemradio", { name: "Low", exact: true }).click();
+      await page
+        .getByRole("button", {
+          name: "Select model, current Other Alternate, reasoning effort Low",
+          exact: true,
+        })
         .waitFor();
       await page
         .getByRole("textbox", { name: composerLabel, exact: true })
@@ -164,7 +204,10 @@ for (const width of [390, 1280]) {
       await page.reload();
       await harness().waitFor();
       await page
-        .getByRole("button", { name: "Select model, current Other Alternate", exact: true })
+        .getByRole("button", {
+          name: "Select model, current Other Alternate, reasoning effort Low",
+          exact: true,
+        })
         .waitFor();
       assert.deepEqual(errors, []);
     },

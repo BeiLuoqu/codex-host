@@ -85,35 +85,74 @@
   transform: rotate(180deg);
 }
 
-/* Portaled to body and placed from the trigger rect by the component (the
-   Menu primitive's portal rules), so the sidebar and the columns' overflow
-   clips cannot crop it; z matches the primitive's .portal layer. */
+/* The fixed wrapper keeps the Thinking card aligned with the trigger while
+   the Model sibling grows to its left, like Codex-CH's nested selector. */
 .menu {
   position: fixed;
   z-index: 1100;
   display: flex;
-  flex-direction: column;
-  /* Let the visible pane's rows set the card width, but keep pathological ids
-     and narrow screens inside a bounded card where ellipsis remains. */
+  align-items: flex-start;
+  gap: 8px;
   width: max-content;
-  min-width: min(240px, calc(100vw - 32px));
-  max-width: min(420px, calc(100vw - 32px));
-  max-height: min(360px, calc(100vh - 96px));
+  max-width: calc(100vw - 24px);
+  color: var(--dsw-alias-label-primary);
+}
+
+.panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: min(520px, calc(100dvh - 96px));
   overflow: hidden;
-  padding: 4px;
-  /* Surface tokens match the Menu primitive card (ui-primitives
-   * Menu.module.css) so every dropdown reads as the same material. */
+  padding: 8px;
   border: 0;
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   box-shadow: var(--dsw-elevation-prominent);
-  color: var(--dsw-alias-label-primary);
-  /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens.
-     Declared here rather than on the scrolling `.groups` child so the
-     elevation choice sits with the surface; the custom properties inherit
-     down to whichever descendant actually scrolls (see ui-theme
-     styles/scrollbar.css for the rebinding contract). */
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.modelPanel {
+  order: 1;
+  width: min(360px, calc(100vw - 292px));
+}
+
+.thinkingPanel {
+  order: 2;
+  width: 256px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 2px 8px 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.backButton {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.backButton:hover,
+.backButton:focus-visible {
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .status,
@@ -214,8 +253,62 @@
 }
 
 .groups {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: var(--dsw-radius-md);
+}
+
+.modelRow:has(.modelOption:hover),
+.modelRow:has(.modelOption:focus-visible),
+.modelRow:has(.optionActive) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.modelRow .modelOption {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+}
+
+.favorite {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  padding: 5px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-dimmed);
+  cursor: pointer;
+}
+
+.favorite svg {
+  width: 18px;
+  height: 18px;
+}
+
+.favorite:hover:not(:disabled),
+.favorite:focus-visible {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.favoriteActive {
+  color: var(--dsw-alias-state-warn-primary, #f5a524);
+}
+
+.favorite:disabled {
+  cursor: default;
 }
 
 .option {
@@ -282,7 +375,14 @@
   height: 14px;
 }
 
-/* Two-level root cells use the same compact rhythm as the model rows. */
+/* The current Model is the nested-menu row pinned below Thinking. */
+.modelCellWrap {
+  flex: 0 0 auto;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
 .cell {
   box-sizing: border-box;
   display: flex;
@@ -319,8 +419,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: right;
-  color: var(--dsw-alias-label-tertiary);
+  text-align: left;
+  color: var(--dsw-alias-label-primary);
 }
 
 .cellChevron {
@@ -328,4 +428,21 @@
   width: 12px;
   height: 12px;
   color: var(--dsw-alias-menu-icon);
+}
+
+@media (max-width: 640px) {
+  .menu,
+  .modelPanel,
+  .thinkingPanel {
+    width: min(320px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+  }
+
+  .modelOpen .thinkingPanel {
+    display: none;
+  }
+
+  .backButton {
+    display: inline-flex;
+  }
 }

@@ -6,6 +6,11 @@ export function createHarnessAdapter() {
     harnessId: "other",
     modelId: "other-model",
     modelLabel: "Other Model",
+    thinkingOptions: [
+      { id: "low", label: "Low" },
+      { id: "high", label: "High" },
+    ],
+    defaultThinkingOptionId: "high",
     permissionModeScope: "atCreate",
     permissionModes: {
       modes: [
