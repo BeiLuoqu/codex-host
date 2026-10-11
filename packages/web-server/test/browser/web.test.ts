@@ -46,9 +46,13 @@ for (const viewport of [
       await page.getByRole("textbox", { name: composerLabel, exact: true }).waitFor();
       if (viewport.width < 600)
         await page.getByRole("button", { name: "Open sidebar", exact: true }).click();
-      const brandMark = page.locator('svg[data-codexhost-mark="app-icon"]');
+      const brandMark = page.locator('svg[data-codexhost-mark="otter"]');
       await brandMark.first().waitFor();
-      assert.equal(await brandMark.first().getAttribute("viewBox"), "0 0 64 64");
+      assert.equal(await brandMark.first().getAttribute("viewBox"), "0 0 384 384");
+      assert.equal(await brandMark.first().locator("image, mask").count(), 0);
+      assert.equal(await brandMark.first().locator("path").count(), 2);
+      assert.equal(await brandMark.first().locator("path").first().getAttribute("fill"), "#082e59");
+      assert.equal(await brandMark.first().locator("circle").isVisible(), false);
       await page.getByRole("button", { name: "Settings", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
       await dialog.getByRole("button", { name: "English", exact: true }).waitFor();
@@ -76,6 +80,8 @@ for (const viewport of [
       await screenshot(page, `settings-scrolled-${viewport.width}`);
       await dialog.getByRole("button", { name: "Close", exact: true }).click();
       await dialog.waitFor({ state: "hidden" });
+      assert.equal(await brandMark.first().locator("circle").isVisible(), true);
+      assert.equal(await brandMark.first().locator("path").first().getAttribute("fill"), "#082e59");
       await page.reload();
       await page.getByRole("textbox", { name: composerLabel, exact: true }).waitFor();
       if (viewport.width < 600)
