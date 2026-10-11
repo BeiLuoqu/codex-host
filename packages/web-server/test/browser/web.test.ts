@@ -145,6 +145,7 @@ for (const width of [390, 1280]) {
         assert.ok(
           modelBounds && thinkingBounds && modelBounds.x + modelBounds.width <= thinkingBounds.x,
         );
+        assert.ok(modelBounds.width >= 276 && modelBounds.width <= 284);
         assert.ok(triggerBounds && thinkingBounds);
         const triggerGap = triggerBounds.y - (thinkingBounds.y + thinkingBounds.height);
         assert.ok(triggerGap >= 4 && triggerGap <= 12, `Thinking card gap was ${triggerGap}px`);
