@@ -91,6 +91,7 @@ for (const dark of [false, true])
             fontWeight: text.fontWeight,
             lineHeight: text.lineHeight,
             letterSpacing: text.letterSpacing,
+            fontSynthesisWeight: text.getPropertyValue("font-synthesis-weight"),
             iconWidth: marker.width,
             iconHeight: marker.height,
             artworkWidth: art.getBoundingClientRect().width,
@@ -111,12 +112,75 @@ for (const dark of [false, true])
         assert.equal(appearance.fontWeight, "430");
         assert.equal(appearance.lineHeight, "20px");
         assert.equal(appearance.letterSpacing, "normal");
+        assert.equal(appearance.fontSynthesisWeight, "none");
+        const heading = await page
+          .locator('[data-sidebar-pinned] [class*="heading"]')
+          .evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              family: style.fontFamily,
+              size: style.fontSize,
+              weight: style.fontWeight,
+              line: style.lineHeight,
+              color: style.color,
+            };
+          });
+        assert.deepEqual(heading, {
+          family: appearance.fontFamily,
+          size: "14px",
+          weight: "500",
+          line: "21px",
+          // This Chromium serializes native 0.495 alpha to its 8-bit 0.494 value.
+          color: dark ? "rgba(255, 255, 255, 0.498)" : "rgba(26, 28, 31, 0.494)",
+        });
+        const navigation = await page
+          .getByRole("button", { name: "New session", exact: true })
+          .filter({ has: page.locator('[class*="newSessionLabel"]') })
+          .evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              family: style.fontFamily,
+              weight: style.fontWeight,
+              line: style.lineHeight,
+              color: style.color,
+            };
+          });
+        assert.deepEqual(navigation, {
+          family: appearance.fontFamily,
+          weight: "430",
+          line: "21px",
+          color: appearance.color,
+        });
         assert.equal(appearance.iconWidth, 14);
         assert.equal(appearance.iconHeight, 14);
         assert.equal(appearance.artworkWidth, 14);
         assert.equal(appearance.viewBox, "0 0 24 24");
         const folder = page.getByRole("treeitem").filter({ hasText: /^project$/u });
         if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
+        const project = await folder
+          .locator('[class*="title"]')
+          .first()
+          .evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              family: style.fontFamily,
+              size: style.fontSize,
+              weight: style.fontWeight,
+              color: style.color,
+              synthesis: style.getPropertyValue("font-synthesis-weight"),
+            };
+          });
+        assert.deepEqual(project, {
+          family: appearance.fontFamily,
+          size: "14px",
+          weight: "430",
+          color: appearance.color,
+          synthesis: "none",
+        });
+        const timestamp = await row
+          .locator('[class*="time"]')
+          .evaluate((element) => getComputedStyle(element).color);
+        assert.equal(timestamp, heading.color);
         const brand = page.locator(
           '[data-row-key="session:claude"] [data-harness-id="claude-code"] svg',
         );

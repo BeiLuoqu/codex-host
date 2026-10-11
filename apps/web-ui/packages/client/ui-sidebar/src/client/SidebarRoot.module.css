@@ -7,6 +7,16 @@
    mid-slide. */
 
 .root {
+  /* Codex sidebar text hierarchy, shared by navigation, projects and Threads.
+     Keep these local so conversation/Composer and semantic status colors do
+     not become a second theme. Native also disables synthetic font weight. */
+  --ch-sidebar-text-primary: #1a1c1f;
+  --ch-sidebar-text-muted: rgba(26, 28, 31, 0.495);
+  --dsw-font-family: -apple-system, "system-ui", "Segoe UI", sans-serif;
+  --dsw-alias-label-primary: color-mix(in oklab, var(--ch-sidebar-text-primary) 85%, transparent);
+  --dsw-alias-label-secondary: color-mix(in srgb, var(--ch-sidebar-text-primary) 65%, transparent);
+  --dsw-alias-label-tertiary: var(--ch-sidebar-text-muted);
+  --dsw-alias-label-caption: var(--ch-sidebar-text-muted);
   --dsh-sidebar-inline-padding: 12px;
   display: flex;
   flex-direction: column;
@@ -15,11 +25,20 @@
   box-sizing: border-box;
   background: var(--dsw-specific-sidebar-fill);
   color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-family);
   font-size: 14px;
+  font-weight: 430;
+  line-height: 20px;
+  font-synthesis-weight: none;
   /* The sidebar is elevated above the conversation surface, so a revealed
      scrollbar uses the l2 pair. .quietBars hides it without changing layout. */
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+:global(body[data-ds-dark-theme]) .root {
+  --ch-sidebar-text-primary: #ffffff;
+  --ch-sidebar-text-muted: rgba(255, 255, 255, 0.498);
 }
 
 /* macOS desktop: the AppFrame column owns the translucent sidebar tint; an
@@ -414,9 +433,10 @@
   border-radius: var(--dsw-radius-md);
   background: transparent;
   color: var(--dsw-alias-label-primary);
+  font-family: inherit;
   font-size: 14px;
-  font-weight: 500;
-  line-height: 22px;
+  font-weight: 430;
+  line-height: 21px;
   cursor: pointer;
   overflow: hidden;
 }

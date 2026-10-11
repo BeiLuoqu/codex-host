@@ -72,14 +72,14 @@
 }
 
 .sectionLabel {
-  font-size: 12px;
-  font-weight: 400;
+  font-size: 14px;
+  font-weight: 500;
   flex: none;
   max-width: 45%;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  line-height: 20px;
+  line-height: 21px;
   opacity: 1;
   visibility: visible;
   transition:
