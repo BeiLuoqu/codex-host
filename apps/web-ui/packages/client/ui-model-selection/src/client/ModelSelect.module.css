@@ -115,7 +115,7 @@
   position: absolute;
   top: 0;
   right: calc(100% + 8px);
-  width: min(280px, calc(100vw - 292px));
+  width: min(264px, calc(100vw - 292px));
 }
 
 .modelRight .modelPanel {
@@ -289,8 +289,9 @@
   border-radius: var(--dsw-radius-md);
 }
 
-.modelRow:has(.modelOption:hover),
+.modelRow:hover,
 .modelRow:has(.modelOption:focus-visible),
+.modelRow:has(.favorite:focus-visible),
 .modelRow:has(.optionActive) {
   background: var(--dsw-alias-interactive-bg-hover);
 }
@@ -323,7 +324,6 @@
 
 .favorite:hover:not(:disabled),
 .favorite:focus-visible {
-  background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -354,8 +354,8 @@
 }
 
 .option:not(.modelOption):hover:not(:disabled),
-.option:focus-visible,
-.optionActive:not(:disabled) {
+.option:not(.modelOption):focus-visible,
+.optionActive:not(.modelOption):not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 

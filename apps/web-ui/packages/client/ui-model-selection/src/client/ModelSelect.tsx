@@ -320,7 +320,7 @@ export function ModelSelect({
       let x = rect.right - lw;
       const y = Math.max(MARGIN, rect.top - GAP - placedHeight);
       if (lw > 0) x = Math.min(Math.max(x, MARGIN), window.innerWidth - lw - MARGIN);
-      const modelWidth = modelPanelRef.current?.offsetWidth ?? 280;
+      const modelWidth = modelPanelRef.current?.offsetWidth ?? 264;
       const leftFits = x - GAP - modelWidth >= MARGIN;
       const rightFits = x + lw + GAP + modelWidth <= window.innerWidth - MARGIN;
       setModelSide(leftFits ? "left" : rightFits ? "right" : "replace");

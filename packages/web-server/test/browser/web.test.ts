@@ -133,7 +133,24 @@ for (const width of [390, 1280]) {
         .waitFor();
       await thinking.getByRole("menuitem", { name: "Other Model", exact: true }).click();
       const models = page.getByRole("menu", { name: "Model", exact: true });
-      await models.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).waitFor();
+      const alternateModel = models.getByRole("menuitemradio", {
+        name: "Other Alternate",
+        exact: true,
+      });
+      await alternateModel.waitFor();
+      await alternateModel.focus();
+      const rowBackgrounds = await alternateModel.evaluate((element) => {
+        const row = element.parentElement;
+        const favorite = row?.querySelector<HTMLElement>("[aria-pressed]");
+        if (row === null || favorite == null) throw new Error("Model row controls are missing");
+        return {
+          row: getComputedStyle(row).backgroundColor,
+          model: getComputedStyle(element).backgroundColor,
+          favorite: getComputedStyle(favorite).backgroundColor,
+        };
+      });
+      assert.notEqual(rowBackgrounds.row, rowBackgrounds.model);
+      assert.equal(rowBackgrounds.model, rowBackgrounds.favorite);
       assert.equal(await models.getByText("Other Harness", { exact: true }).count(), 0);
       if (width >= 600) {
         const modelPanel = page.getByRole("group", { name: "Model", exact: true });
@@ -145,7 +162,7 @@ for (const width of [390, 1280]) {
         assert.ok(
           modelBounds && thinkingBounds && modelBounds.x + modelBounds.width <= thinkingBounds.x,
         );
-        assert.ok(modelBounds.width >= 276 && modelBounds.width <= 284);
+        assert.ok(modelBounds.width >= 260 && modelBounds.width <= 268);
         assert.ok(triggerBounds && thinkingBounds);
         const triggerGap = triggerBounds.y - (thinkingBounds.y + thinkingBounds.height);
         assert.ok(triggerGap >= 4 && triggerGap <= 12, `Thinking card gap was ${triggerGap}px`);
