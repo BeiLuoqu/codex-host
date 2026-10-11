@@ -133,6 +133,7 @@ export function ModelSelect({
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const [selectionFocus, setSelectionFocus] = useState(false);
   const [favorites, setFavorites] = useState(readFavorites);
+  const [modelSide, setModelSide] = useState<"left" | "right" | "replace">("left");
   // The in-menu error strip serves catalog loads (its Retry re-runs the
   // load); a rejected SELECTION announces through the transient toast
   // instead, so the strip renders only while the latest failure-capable
@@ -322,13 +323,27 @@ export function ModelSelect({
       const rect = triggerRef.current?.getBoundingClientRect();
       if (rect === undefined) return;
       const MARGIN = 12;
+      const GAP = 8;
       const lw = menuRef.current?.offsetWidth ?? 0;
       const lh = menuRef.current?.offsetHeight ?? 0;
+      const availableHeight = Math.max(0, rect.top - GAP - MARGIN);
+      const placedHeight = Math.min(lh, availableHeight);
       let x = rect.right - lw;
-      let y = rect.top - 8 - lh;
+      const y = Math.max(MARGIN, rect.top - GAP - placedHeight);
       if (lw > 0) x = Math.min(Math.max(x, MARGIN), window.innerWidth - lw - MARGIN);
-      if (lh > 0) y = Math.min(Math.max(y, MARGIN), window.innerHeight - lh - MARGIN);
-      setMenuPos({ left: x, top: y });
+      const modelWidth = modelPanelRef.current?.offsetWidth ?? 360;
+      const leftFits = x - GAP - modelWidth >= MARGIN;
+      const rightFits = x + lw + GAP + modelWidth <= window.innerWidth - MARGIN;
+      setModelSide(leftFits ? "left" : rightFits ? "right" : "replace");
+      const panelMaxHeight = Math.max(
+        0,
+        Math.min(availableHeight, window.innerHeight - y - MARGIN),
+      );
+      setMenuPos({
+        left: x,
+        top: y,
+        "--ch-model-menu-max-height": `${String(panelMaxHeight)}px`,
+      } as CSSProperties);
     };
     // First run measures the hidden pre-render (same commit as `open`), so
     // the card lands placed before anything paints.
@@ -668,7 +683,12 @@ export function ModelSelect({
           <div
             ref={menuRef}
             id={`${id}-menu`}
-            className={clsx(css.menu, pane === "model" && css.modelOpen)}
+            className={clsx(
+              css.menu,
+              pane === "model" && css.modelOpen,
+              pane === "model" && modelSide === "right" && css.modelRight,
+              pane === "model" && modelSide === "replace" && css.modelReplace,
+            )}
             style={menuPos ?? MEASURE_STYLE}
             aria-label={t("menu.aria")}
             aria-busy={state.status === "loading" || busy}
@@ -852,46 +872,48 @@ export function ModelSelect({
               aria-label={t("menu.effort")}
             >
               <div className={css.panelHeader}>{t("menu.effort")}</div>
-              {state.error !== null && lastActionRef.current === "load" && (
-                <div className={css.error}>
-                  <span>{t("error.action", { message: state.error })}</span>
-                  <button type="button" className={css.retry} onClick={reload}>
-                    {t("action.reload")}
-                  </button>
-                </div>
-              )}
-              {effortChoices.length === 0 ? (
-                <div className={css.empty}>{t("empty.efforts")}</div>
-              ) : (
-                effortChoices.map((level) => (
-                  <button
-                    ref={itemRef()}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={effectiveEffort === level.effort}
-                    className={clsx(css.option, effectiveEffort === level.effort && css.selected)}
-                    key={level.key}
-                    disabled={busy}
-                    onClick={() => {
-                      chooseEffort(level.effort);
-                    }}
-                  >
-                    <span className={css.optionCopy}>
-                      <span className={css.modelName}>{level.label}</span>
-                    </span>
-                    <span className={css.check}>
-                      {pending !== null &&
-                      pending.provider === state.current?.provider &&
-                      pending.model === state.current.model &&
-                      pending.reasoningEffort === level.effort ? (
-                        <StateDot state="ongoing" />
-                      ) : effectiveEffort === level.effort ? (
-                        <IconCheckOutlineRegular />
-                      ) : null}
-                    </span>
-                  </button>
-                ))
-              )}
+              <div className={css.thinkingOptions}>
+                {state.error !== null && lastActionRef.current === "load" && (
+                  <div className={css.error}>
+                    <span>{t("error.action", { message: state.error })}</span>
+                    <button type="button" className={css.retry} onClick={reload}>
+                      {t("action.reload")}
+                    </button>
+                  </div>
+                )}
+                {effortChoices.length === 0 ? (
+                  <div className={css.empty}>{t("empty.efforts")}</div>
+                ) : (
+                  effortChoices.map((level) => (
+                    <button
+                      ref={itemRef()}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={effectiveEffort === level.effort}
+                      className={clsx(css.option, effectiveEffort === level.effort && css.selected)}
+                      key={level.key}
+                      disabled={busy}
+                      onClick={() => {
+                        chooseEffort(level.effort);
+                      }}
+                    >
+                      <span className={css.optionCopy}>
+                        <span className={css.modelName}>{level.label}</span>
+                      </span>
+                      <span className={css.check}>
+                        {pending !== null &&
+                        pending.provider === state.current?.provider &&
+                        pending.model === state.current.model &&
+                        pending.reasoningEffort === level.effort ? (
+                          <StateDot state="ongoing" />
+                        ) : effectiveEffort === level.effort ? (
+                          <IconCheckOutlineRegular />
+                        ) : null}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
               <div className={css.modelCellWrap}>
                 <button
                   ref={itemRef()}

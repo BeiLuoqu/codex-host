@@ -101,7 +101,7 @@ for (const width of [390, 1280]) {
       const browser = await chromium.launch();
       t.after(() => browser.close());
       const page = await browser.newPage({
-        viewport: { width, height: 900 },
+        viewport: { width, height: width >= 600 ? 585 : 900 },
         isMobile: width < 600,
         hasTouch: width < 600,
       });
@@ -122,12 +122,11 @@ for (const width of [390, 1280]) {
       await screenshot(page, `harness-menu-${width}`);
       await page.getByRole("menuitem", { name: "Other Harness", exact: true }).click();
       await harness().waitFor();
-      await page
-        .getByRole("button", {
-          name: "Select model, current Other Model, reasoning effort High",
-          exact: true,
-        })
-        .click();
+      const modelTrigger = page.getByRole("button", {
+        name: "Select model, current Other Model, reasoning effort High",
+        exact: true,
+      });
+      await modelTrigger.click();
       const thinking = page.getByRole("menu", { name: "Thinking", exact: true });
       await thinking
         .getByRole("menuitemradio", { name: "High", exact: true, checked: true })
@@ -136,13 +135,18 @@ for (const width of [390, 1280]) {
       const models = page.getByRole("menu", { name: "Model", exact: true });
       await models.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).waitFor();
       if (width >= 600) {
-        const [modelBounds, thinkingBounds] = await Promise.all([
-          models.boundingBox(),
+        const modelPanel = page.getByRole("group", { name: "Model", exact: true });
+        const [modelBounds, thinkingBounds, triggerBounds] = await Promise.all([
+          modelPanel.boundingBox(),
           thinking.boundingBox(),
+          modelTrigger.boundingBox(),
         ]);
         assert.ok(
           modelBounds && thinkingBounds && modelBounds.x + modelBounds.width <= thinkingBounds.x,
         );
+        assert.ok(triggerBounds && thinkingBounds);
+        const triggerGap = triggerBounds.y - (thinkingBounds.y + thinkingBounds.height);
+        assert.ok(triggerGap >= 4 && triggerGap <= 12, `Thinking card gap was ${triggerGap}px`);
       } else {
         assert.equal(await thinking.isVisible(), false);
         await page.getByRole("button", { name: "Back to Thinking", exact: true }).waitFor();
