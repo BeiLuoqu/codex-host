@@ -46,6 +46,9 @@ for (const viewport of [
       await page.getByRole("textbox", { name: composerLabel, exact: true }).waitFor();
       if (viewport.width < 600)
         await page.getByRole("button", { name: "Open sidebar", exact: true }).click();
+      const brandMark = page.locator('svg[data-codexhost-mark="app-icon"]');
+      await brandMark.first().waitFor();
+      assert.equal(await brandMark.first().getAttribute("viewBox"), "0 0 64 64");
       await page.getByRole("button", { name: "Settings", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
       await dialog.getByRole("button", { name: "English", exact: true }).waitFor();
