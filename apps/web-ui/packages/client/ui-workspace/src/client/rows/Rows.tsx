@@ -42,9 +42,8 @@ type RowTranslate = WorkspaceBrowserProps["t"];
 /**
  * Child-seat renderer threaded from the browser root: the row's action lists,
  * its leading decoration, and its hover-card section. The leading seat is
- * rendered only while the row's primary state is idle, so a status dot and a
- * leading occupant never share the row; the hover seat only while the row's
- * card is open.
+ * still idle-only; transient status belongs to the trailing time cell, never
+ * the Harness identity. The hover seat renders only while the card is open.
  */
 type RowRenderSlots = PropsRenderSlots<
   | "sidebar.workspaces.session.menu.item"
@@ -378,7 +377,7 @@ function SessionStatusDots({
 }) {
   return (
     <>
-      <StateDot state={statuses[0].state} />
+      <StateDot state={statuses[0].state} size={statuses[0].state === "ongoing" ? 16 : undefined} />
       {statuses.map((status) => (
         <span className={css.visuallyHidden} key={status.label}>
           {status.label}
@@ -485,15 +484,13 @@ export function SearchResultItem({
       }}
     >
       <span className={css.searchResultHeading}>
-        {/* Like session rows, the leading slot owns every row marker; on
-            archived rows it stays blank — the grayed row carries the
-            archived look. */}
-        <span className={css.slot}>
-          {!result.archived && primaryStatus.state !== "idle" && (
-            <SessionStatusDots statuses={statuses} />
-          )}
-        </span>
+        <span className={css.slot} />
         <span className={css.searchResultTitle}>{result.title || t("session.untitled")}</span>
+        {!result.archived && primaryStatus.state !== "idle" && (
+          <span className={css.timeStatus} data-session-status={primaryStatus.state}>
+            <SessionStatusDots statuses={statuses} />
+          </span>
+        )}
         {result.archived && (
           <span className={css.rowActions}>
             <Tooltip label={t("actions.unarchive")} side="bottom" align="end" delayMs={500}>
@@ -525,12 +522,10 @@ export function SearchResultItem({
 }
 
 /**
- * One top-level 32px session row: leading 16px cell (status dot, or the
- * leading seat while the row's primary state is idle), title, relative time or
- * compact pending label, and the row actions menu. A row that owns a state dot
- * keeps that cell and renders no seat, so an ambient automation mark never
- * appears beside the row's own state dot. An archived row keeps the cell blank:
- * neither marker renders there, and its live status stays on the hover card.
+ * One top-level session row: persistent Harness identity, idle-only ambient
+ * decoration, title, and a trailing time/status cell. Activity and completion
+ * reminders replace the time instead of overlaying the Harness. Archived rows
+ * keep their identity and time; live status stays on the hover card.
  * @param props.node - derived session node.
  * @param props.currentId - selected session id (row highlight).
  * @param props.now - epoch ms for relative-time formatting.
@@ -578,7 +573,7 @@ export function SessionNodeItem({
   const selected = node.id === currentId;
   const statuses = sessionStatuses(node, t);
   const primaryStatus = statuses[0];
-  const showStatus = primaryStatus.state !== "idle";
+  const showStatus = !row.archived && primaryStatus.state !== "idle";
   // Archived rows hold their in-place grayed slot, so manual reorder cannot
   // move them. Pinned rows drag within the pinned block: the browser gates
   // their drop targets to fellow pinned rows.
@@ -662,21 +657,15 @@ export function SessionNodeItem({
             }
       }
     >
-      {/* Pending interaction and own or descendant activity outrank the
-          finished-but-unviewed reminder, which returns after activity stops
-          and is cleared by opening the session. Archived rows keep the slot
-          blank — the grayed row carries the archived look — and their live
-          status stays on the hover card only. */}
+      {/* Identity never changes with activity. Keep the existing ambient
+          decoration idle-only; transient status is rendered at the right. */}
       <span className={css.slot}>
         {renderSlot("sidebar.session.row.identity", { sessionId: node.id })}
         <span className={css.statusOverlay}>
           {!row.archived &&
             !row.blank &&
-            (showStatus ? (
-              <SessionStatusDots statuses={statuses} />
-            ) : (
-              renderSlot("sidebar.session.row.leading", { sessionId: node.id })
-            ))}
+            !showStatus &&
+            renderSlot("sidebar.session.row.leading", { sessionId: node.id })}
         </span>
       </span>
       <span
@@ -700,10 +689,19 @@ export function SessionNodeItem({
           exist — both trailing cells stay off until the first prompt. */}
         {!row.blank && (
           <span
-            className={css.time}
-            aria-hidden={primaryStatus.trailingLabel === undefined ? undefined : true}
+            className={clsx(css.time, showStatus && css.timeStatus)}
+            data-session-status={showStatus ? primaryStatus.state : undefined}
           >
-            {primaryStatus.trailingLabel ?? timeLabel(row.updatedAt, now, t)}
+            {showStatus ? (
+              <>
+                <SessionStatusDots statuses={statuses} />
+                {primaryStatus.trailingLabel !== undefined && (
+                  <span aria-hidden="true">{primaryStatus.trailingLabel}</span>
+                )}
+              </>
+            ) : (
+              timeLabel(row.updatedAt, now, t)
+            )}
           </span>
         )}
         {/* Trails the time so the marker occupies the same right-edge cell as

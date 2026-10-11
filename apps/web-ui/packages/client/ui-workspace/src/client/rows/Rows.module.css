@@ -97,7 +97,7 @@
 }
 
 .searchResultTitle {
-  flex: 0 1 auto;
+  flex: 1;
   min-width: 0;
   margin-left: 4px;
   overflow: hidden;
@@ -183,7 +183,7 @@
   display: contents;
 }
 
-/* Keep the actual Harness visible while activity overlays a small status badge. */
+/* Only an idle ambient decoration may overlay identity; activity lives at the right. */
 .slot:has([data-harness-id]) .statusOverlay {
   display: inline-flex;
   position: absolute;
@@ -273,6 +273,25 @@
   line-height: 16px;
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-tertiary);
+}
+
+.timeStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 20px;
+  gap: 6px;
+}
+
+/* Completion unread is an informational reminder, not a Harness success badge. */
+.timeStatus [data-state="done"] {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+/* Keep accessible status text available when hover actions cover the glyph. */
+.timeStatus .visuallyHidden {
+  visibility: visible;
 }
 
 .trailing:has(.pinIndicator) .time {
@@ -487,9 +506,20 @@
     display: none;
   }
 
-  .sessionRow .time,
+  .sessionRow .trailing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .sessionRow .time:not(.timeStatus),
   .sessionRow .pinIndicator {
     display: none;
+  }
+
+  .sessionRow .timeStatus {
+    visibility: visible;
+    padding-inline-end: 0;
   }
 
   .iconButton {

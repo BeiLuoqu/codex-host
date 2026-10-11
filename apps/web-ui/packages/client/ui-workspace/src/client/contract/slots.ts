@@ -138,21 +138,18 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
       scope: "root";
       owner: DirectoryFlowOwnerProps;
     };
-    /**
-     * Leading decoration of one Session row, in the 16px cell before the title
-     * that the row's own state dot otherwise occupies. A higher-priority state
-     * (a pending interaction, a new message, live activity) replaces the seat
-     * with that dot for the same row, so an occupant here never renders beside
-     * a status dot and is mounted only by a row whose primary state is idle.
-     * An archived row keeps that cell blank — neither its status dot nor this
-     * seat renders there, and its live status appears on the hover card only.
-     */
     /** Persistent identity decoration, independent of transient activity and available on archived rows. */
     "sidebar.session.row.identity": {
       kind: "list";
       scope: "root";
       owner: SessionRowScheduleOwnerProps;
     };
+    /**
+     * Idle-only ambient decoration in the leading identity cell. Pending
+     * interaction, activity and completion reminders suppress this seat, but
+     * their own marker renders in the trailing time cell, never over identity.
+     * Archived rows retain identity but do not mount this ambient decoration.
+     */
     "sidebar.session.row.leading": {
       kind: "list";
       scope: "root";
