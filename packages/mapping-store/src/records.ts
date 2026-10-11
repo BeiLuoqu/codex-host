@@ -82,11 +82,23 @@ const storedThreadCoreV1Shape = {
  */
 const storedThreadMetadataFieldsShape = {
   projectId: nonBlankTextSchema.max(1_024).optional(),
+  projectlessWorkspace: z
+    .object({
+      workspaceRoot: nonBlankTextSchema.max(16_384),
+      outputDirectory: nonBlankTextSchema.max(16_384),
+    })
+    .strict()
+    .optional(),
   daybreakEnabled: z.boolean().optional(),
   gitInfo: storedGitInfoV1Schema.optional(),
 };
 
-export const THREAD_METADATA_FIELDS = ["projectId", "daybreakEnabled", "gitInfo"] as const;
+export const THREAD_METADATA_FIELDS = [
+  "projectId",
+  "projectlessWorkspace",
+  "daybreakEnabled",
+  "gitInfo",
+] as const;
 
 export const storedThreadMetadataV1Schema = z
   .object({
@@ -236,6 +248,7 @@ export interface FindRecentDelegationInput {
  */
 export interface ThreadMetadataPatch {
   projectId?: string | null;
+  projectlessWorkspace?: StoredThreadRecordV1["projectlessWorkspace"] | null;
   daybreakEnabled?: boolean;
   gitInfo?: {
     branch?: string | null;
@@ -253,6 +266,7 @@ export interface CreateProvisionalThreadInput {
   transportModelId: string;
   ephemeral: boolean;
   historyMode: "legacy" | "paginated";
+  projectlessWorkspace?: StoredThreadRecordV1["projectlessWorkspace"];
   forkSource?: { hostThreadId: HostThreadId; hostTurnId: HostTurnId };
   subagent?: {
     parentHostThreadId: HostThreadId;

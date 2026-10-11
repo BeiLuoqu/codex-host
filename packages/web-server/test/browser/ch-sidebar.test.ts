@@ -66,6 +66,31 @@ for (const mobile of [false, true]) {
       assert.equal(await folderIcon.getAttribute("width"), "16");
       assert.equal(await folderIcon.getAttribute("stroke-width"), "1");
       assert.equal(await folderIcon.getAttribute("aria-hidden"), "true");
+      await rows.first().locator('[data-harness-id="fake"]').waitFor();
+      const headingGeometry = await folder.evaluate((element) => ({
+        left: element.getBoundingClientRect().left,
+        width: element.getBoundingClientRect().width,
+        padding: Number.parseFloat(getComputedStyle(element).paddingInlineStart),
+        titleX: element.children.item(1)?.getBoundingClientRect().left ?? NaN,
+      }));
+      const childGeometry = await rows.first().evaluate((element) => ({
+        left: element.getBoundingClientRect().left,
+        width: element.getBoundingClientRect().width,
+        padding: Number.parseFloat(getComputedStyle(element).paddingInlineStart),
+        iconX: element.querySelector("[data-harness-id]")?.getBoundingClientRect().left ?? NaN,
+      }));
+      assert.equal(childGeometry.padding - headingGeometry.padding, 22);
+      assert.ok(Math.abs(childGeometry.iconX - headingGeometry.titleX) < 1);
+      assert.equal(childGeometry.left, headingGeometry.left, "keep the full-width row hit area");
+      assert.equal(childGeometry.width, headingGeometry.width);
+      const moreX = await page
+        .getByRole("button", { name: "Show 10 more", exact: true })
+        .evaluate(
+          (element) =>
+            element.getBoundingClientRect().left +
+            Number.parseFloat(getComputedStyle(element).paddingInlineStart),
+        );
+      assert.ok(Math.abs(moreX - childGeometry.iconX) < 1, "paging aligns with child glyphs");
       const expandedFolderPath = await folderIcon.locator("path").first().getAttribute("d");
       const openColor = await folderIcon.evaluate((element) => getComputedStyle(element).color);
       if (!mobile) await folder.hover();
@@ -184,12 +209,22 @@ for (const mobile of [false, true]) {
         await shot(page, "sidebar-desktop-hover");
         await row.getByRole("button", { name: "Pin session", exact: true }).click();
         await row.getByRole("button", { name: "Unpin session", exact: true }).waitFor();
+        assert.equal(
+          await row.evaluate((element) => getComputedStyle(element).paddingInlineStart),
+          "8px",
+          "top-level pins must not inherit project indentation",
+        );
         await page.mouse.move(800, 800);
         await row.getByRole("img", { name: "Pinned", exact: true }).waitFor();
         await shot(page, "sidebar-desktop-pinned");
         await row.hover();
         await row.getByRole("button", { name: "Unpin session", exact: true }).click();
         await row.getByRole("button", { name: "Pin session", exact: true }).waitFor();
+        assert.equal(
+          await row.evaluate((element) => getComputedStyle(element).paddingInlineStart),
+          "30px",
+          "unpinning restores the group's child indentation",
+        );
         await page.mouse.move(800, 800);
         assert.equal(
           await trigger.isVisible(),
@@ -264,6 +299,12 @@ for (const mobile of [false, true]) {
         await page.getByRole("menuitem", { name: "In one list", exact: true }).click();
         const flatRows = page.locator('[data-row-key^="session:"]');
         assert.ok((await flatRows.count()) >= 10 && (await flatRows.count()) <= 11);
+        assert.ok(
+          await flatRows.evaluateAll((elements) =>
+            elements.every((element) => getComputedStyle(element).paddingInlineStart === "8px"),
+          ),
+          "flat-list rows remain top-level",
+        );
         assert.equal(
           await page.locator(`[data-row-key="${lastKey}"]`).getAttribute("aria-current"),
           "page",

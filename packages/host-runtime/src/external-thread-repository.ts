@@ -507,6 +507,7 @@ export function createExternalThreadRecordInput(input: {
   transportModelId: string;
   ephemeral: boolean;
   historyMode: "legacy" | "paginated";
+  projectlessWorkspace?: CreateProvisionalThreadInput["projectlessWorkspace"];
   forkSource?: CreateProvisionalThreadInput["forkSource"];
   subagent?: CreateProvisionalThreadInput["subagent"];
 }): CreateProvisionalThreadInput {
@@ -519,6 +520,7 @@ export function createExternalThreadRecordInput(input: {
     transportModelId: input.transportModelId,
     ephemeral: input.ephemeral,
     historyMode: input.historyMode,
+    ...(input.projectlessWorkspace ? { projectlessWorkspace: input.projectlessWorkspace } : {}),
     ...(input.forkSource ? { forkSource: input.forkSource } : {}),
     ...(input.subagent ? { subagent: input.subagent } : {}),
   };
@@ -620,6 +622,12 @@ export function externalThreadValue(input: {
     historyMode: record.historyMode,
     isPinned: false,
     projectId: record.projectId ?? null,
+    ...(record.projectlessWorkspace && !record.projectId
+      ? {
+          workspaceKind: "projectless",
+          projectlessOutputDirectory: record.projectlessWorkspace.outputDirectory,
+        }
+      : {}),
     daybreakEnabled: record.daybreakEnabled ?? null,
     ...threadSectionFields(input.placement),
     agentNickname: record.subagent ? record.title || null : null,

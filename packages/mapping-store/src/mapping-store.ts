@@ -167,8 +167,8 @@ function threadMetadataOf(record: StoredThreadRecordV1): StoredThreadMetadataV1 
 
 /** The record as written to the Thread file, which older releases must still accept. */
 function withoutThreadMetadata(record: StoredThreadRecordV1): StoredThreadRecordV1 {
-  const { projectId, daybreakEnabled, gitInfo, ...core } = record;
-  void [projectId, daybreakEnabled, gitInfo];
+  const { projectId, projectlessWorkspace, daybreakEnabled, gitInfo, ...core } = record;
+  void [projectId, projectlessWorkspace, daybreakEnabled, gitInfo];
   return core;
 }
 
@@ -191,6 +191,10 @@ function applyThreadMetadataPatch(
   if (patch.projectId !== undefined) {
     if (patch.projectId === null) delete next.projectId;
     else next.projectId = patch.projectId;
+  }
+  if (patch.projectlessWorkspace !== undefined) {
+    if (patch.projectlessWorkspace === null) delete next.projectlessWorkspace;
+    else next.projectlessWorkspace = patch.projectlessWorkspace;
   }
   if (patch.daybreakEnabled !== undefined) next.daybreakEnabled = patch.daybreakEnabled;
   if (patch.gitInfo !== undefined) {
@@ -633,6 +637,7 @@ export class MappingStore {
         transportModelId: input.transportModelId,
         ephemeral: input.ephemeral,
         historyMode: input.historyMode,
+        ...(input.projectlessWorkspace ? { projectlessWorkspace: input.projectlessWorkspace } : {}),
         ...(input.forkSource ? { forkSource: input.forkSource } : {}),
         ...(input.subagent ? { subagent: input.subagent } : {}),
         turnMappings: [],
@@ -1081,7 +1086,17 @@ export class MappingStore {
 
   async #writeNew(record: StoredThreadRecordV1): Promise<void> {
     this.#validateGlobal(record, null);
-    await this.#replaceFile(this.#recordPath(record.hostThreadId), record, false);
+    // Publish placement metadata first. A crash may leave an orphan sidecar
+    // (initialize removes it), never an admitted Thread missing its no-project fact.
+    const metadata = threadMetadataOf(record);
+    if (metadata) await this.#writeMetadataFile(record.hostThreadId, metadata);
+    try {
+      await this.#replaceFile(this.#recordPath(record.hostThreadId), record, false);
+    } catch (error) {
+      if (metadata)
+        await rm(this.#metadataPath(record.hostThreadId), { force: true }).catch(() => undefined);
+      throw error;
+    }
     this.#records.set(record.hostThreadId, record);
     this.#rebuildIndexes();
   }

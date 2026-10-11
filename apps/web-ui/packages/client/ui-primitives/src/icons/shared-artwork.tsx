@@ -5,31 +5,27 @@ interface WeightedArtworkProps extends IconProps {
 }
 
 /**
- * Render new-conversation geometry — the bubble around a plus — for product icons.
- * @param props - Size, optional CSS class, and inherited stroke width.
+ * Render the compose glyph used by the native New Session control.
+ * Keep the original 20px filled paths so every entry point uses the same geometry.
+ * @param props - Size and optional CSS class; color follows the surrounding control.
  * @returns The decorative SVG artwork.
  */
-export const NewChatOutlineArtwork = ({
-  size = 16,
-  className,
-  strokeWidth,
-}: WeightedArtworkProps) => (
+export const NewChatOutlineArtwork = ({ size = 16, className }: IconProps) => (
   <svg
     width={size}
     height={size}
     className={className}
-    viewBox="0 0 16 16"
-    fill="none"
+    viewBox="0 0 20 20"
+    fill="currentColor"
     xmlns="http://www.w3.org/2000/svg"
     aria-hidden="true"
-    strokeWidth={strokeWidth}
   >
+    <path d="M8.16675 2.50127C8.53391 2.50127 8.83161 2.7992 8.83179 3.16631C8.83179 3.53358 8.53402 3.83135 8.16675 3.83135H5.83374C4.72836 3.83135 3.83197 4.72797 3.83179 5.8333V14.1663C3.83179 15.2718 4.72825 16.1683 5.83374 16.1683H14.1667C15.2722 16.1683 16.1687 15.2718 16.1687 14.1663V11.8333C16.1689 11.4662 16.4666 11.1683 16.8337 11.1683C17.2007 11.1684 17.4986 11.4663 17.4988 11.8333V14.1663C17.4988 16.0063 16.0068 17.4983 14.1667 17.4983H5.83374C3.99371 17.4983 2.50171 16.0063 2.50171 14.1663V5.8333C2.50189 3.99343 3.99382 2.50127 5.83374 2.50127H8.16675Z" />
     <path
-      d="M2.37091 11.2501C1.58745 9.89288 1.32067 8.29835 1.61969 6.76006C1.91872 5.22177 2.76342 3.8433 3.99826 2.87846C5.2331 1.91362 6.77494 1.42737 8.33988 1.50925C9.90482 1.59113 11.3875 2.23562 12.5149 3.32406C13.6425 4.41269 14.3387 5.87206 14.4754 7.4334C14.612 8.99474 14.18 10.5529 13.2587 11.8209C12.3375 13.0888 10.9891 13.9813 9.46194 14.3337C8.18691 14.628 6.85895 14.5294 5.64989 14.0605C5.1712 13.8748 4.76962 13.4932 4.26534 13.3967C3.67413 13.2835 2.95257 13.5598 2.03794 14.3337"
-      stroke="currentColor"
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M13.4265 3.10381C14.3857 2.15908 15.9276 2.16466 16.8796 3.11651C17.8339 4.07106 17.8372 5.61827 16.8865 6.57647L11.7244 11.7786C11.3005 12.2058 10.7622 12.5027 10.1746 12.6321L7.78784 13.1565C7.20661 13.2842 6.6889 12.766 6.81714 12.1849L7.34253 9.80498C7.47294 9.21426 7.77197 8.67391 8.20288 8.24932L13.4265 3.10381ZM15.9392 4.05694C15.5038 3.62172 14.7988 3.61907 14.3601 4.05108L9.13647 9.19659C8.88861 9.44077 8.71644 9.75138 8.64136 10.0911L8.28979 11.6849L9.88843 11.3333C10.2265 11.2588 10.5362 11.0878 10.78 10.8421L15.9421 5.63897C16.3769 5.20075 16.3756 4.49352 15.9392 4.05694Z"
     />
-    <path d="M8 5V11" stroke="currentColor" />
-    <path d="M5 8H11" stroke="currentColor" />
   </svg>
 );
 

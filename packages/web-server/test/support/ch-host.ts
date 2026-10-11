@@ -1,6 +1,7 @@
 /** Real CH wire-shape fixture, not an independent Harness implementation. */
 import { createServer } from "node:http";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
+import { tmpdir } from "node:os";
 import { runInNewContext } from "node:vm";
 import { WebSocketServer } from "ws";
 import type { ChHostClient, ChPinChange, ChProjectSnapshot } from "../../src/ch-host-client.ts";
@@ -86,7 +87,8 @@ export class FakeChHost implements ChHostClient {
   }
   async request<T>(method: string, params: Record<string, unknown>): Promise<T> {
     if (this.closed) throw new Error("Host offline");
-    this.requests.push({ method, params });
+    // CDP fixtures receive values from a VM realm; retain wire facts with local prototypes.
+    this.requests.push({ method, params: structuredClone(params) });
     let value: unknown;
     const row = this.threads.get(String(params.threadId));
     switch (method) {
@@ -157,12 +159,19 @@ export class FakeChHost implements ChHostClient {
       case "thread/start": {
         const route = decodeHarnessPluginRoute(params.model);
         if (route?.harnessId !== "fake") throw new Error("Wrong Harness route");
+        const id = "canonical-" + (this.threads.size + 1);
+        const projectless = params.projectlessWorkspace !== undefined;
+        if (!projectless && (typeof params.cwd !== "string" || !params.cwd))
+          throw new Error("thread/start requires cwd or a projectless choice");
         const created = this.add(
-          "canonical-" + (this.threads.size + 1),
-          String(params.cwd),
+          id,
+          projectless ? join(tmpdir(), "codexhost-projectless-fixture", id) : String(params.cwd),
           "Web-created CH Thread",
           false,
         );
+        if (projectless) created.workspaceKind = "projectless";
+        else
+          this.projectSnapshot.projectless.splice(this.projectSnapshot.projectless.indexOf(id), 1);
         created.turns = [];
         value = { thread: structuredClone(created) };
         break;

@@ -12,7 +12,6 @@ import { prepareLocalCodex } from "./native-account-host.js";
 import { startClientChannelServer } from "./client-channel-server.js";
 import { startConsoleControlServer } from "./console-control-server.js";
 import { SharedThreadOwner } from "./shared-thread-owner.js";
-import { readNativeWorkspaceSnapshot } from "./native-workspace-snapshot.js";
 import { sharedHostDesktop } from "./shared-host-desktop.js";
 import type { DelegationControlRegistration } from "./delegation-types.js";
 import { watchRemoteListenerSupervisor } from "./remote-listener-supervisor.js";
@@ -191,24 +190,7 @@ export async function runSharedHostService(
             },
             target: {
               clientEvents: host.clientEvents,
-              handleClientRequest: async (method, params) => {
-                if (method !== "codexhost/workspace/read")
-                  return host.handleClientRequest(method, params);
-                const snapshot = await readNativeWorkspaceSnapshot(env);
-                const owned = new Set(
-                  (await store.listThreads()).map((thread) => String(thread.hostThreadId)),
-                );
-                return {
-                  result: {
-                    ...snapshot,
-                    assignments: Object.fromEntries(
-                      Object.entries(snapshot.assignments).filter(([id]) => owned.has(id)),
-                    ),
-                    projectless: snapshot.projectless.filter((id) => owned.has(id)),
-                    pinned: snapshot.pinned.filter((id) => owned.has(id)),
-                  },
-                };
-              },
+              handleClientRequest: (method, params) => host.handleClientRequest(method, params),
               clientSnapshot: (id) => host.clientSnapshot(id),
               respondClient: (input) => host.respondClient(input),
             },

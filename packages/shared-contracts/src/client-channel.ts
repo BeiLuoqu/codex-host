@@ -32,6 +32,13 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/harness/session-import/list",
   "codexhost/harness/session-import/import",
 ] as const;
+/** Explicit no-project creation; naming input is not a cwd or a project ID. */
+export const clientProjectlessWorkspaceSchema = z
+  .object({
+    prompt: z.string().max(16_384).optional(),
+  })
+  .strict();
+
 export const clientWorkspaceSnapshotSchema = z.object({
   projects: z.array(z.object({ id: z.string(), name: z.string(), rootPaths: z.array(z.string()) })),
   assignments: z.record(z.string(), z.string()),

@@ -27,7 +27,7 @@ Web / App → Web 网关 → 客户端通道 ───────────�
 - 认证描述文件标记 `owner: service`。发现不仅校验 PID，还用认证 hello/epoch 探测端点。Web 的服务模式断线后重新发现或按需启动同一数据目录的所有者；不切换到独立插件模式。
 - 已运行的旧 Desktop-owned Host 不会被接管、停止或绕过存储锁。旧客户端通道与显式 CDP 仍可连接；切换独立后台需要用户另行更新并重启 Desktop。构建源码不等于正在运行的进程已经升级。
 
-项目归属由后台只读读取 `CODEX_HOME/.codex-global-state.json` 中已有项目、归属、未选项目和保存的置顶信息；没有文件时返回空集合，损坏文件明确失败，不推测 `cwd` 为项目、不写原生文件。置顶写入仍走 Desktop 的原生服务，未接入 headless 置顶操作；保存的置顶读取不等于所有 Desktop 版本的实时分区状态。远程 SSH 的原有执行所有权保持原样，公开客户端通道仍只支持本地 external Threads；移动后台推送不是此改造的能力。
+既有 GUI 项目归属由后台只读读取 `CODEX_HOME/.codex-global-state.json`；没有文件时 GUI 集合为空，损坏文件明确失败，不写原生文件。`codexhost/workspace/read` 只投影 canonical external IDs，并合并唯一 Mapping Store 中明确记录的项目/无项目事实；生成的执行目录不凭 cwd 匹配变成项目。置顶写入仍走 Desktop 的原生服务，未接入 headless 置顶操作；保存的置顶读取不等于所有 Desktop 版本的实时分区状态。远程 SSH 的原有执行所有权保持原样，公开客户端通道仍只支持本地 external Threads；移动后台推送不是此改造的能力。
 
 ## 认证与传输
 
@@ -45,6 +45,8 @@ Host 只监听 `127.0.0.1`，使用随机 Bearer token，拒绝带 Origin 的直
 服务还提供认证的 Host-private `/v1/desktop` WebSocket 和 `/v1/shutdown` 管理入口，不通过 Web 网关公开。Desktop 连接携带有界、版本化的运行时上下文，不能改写后台的存储目录、Codex home 或委派认证。Web 发行包携带原生 Launcher 和同一 Host bundle；它不是纯浏览器即可启动的后台，也不包含 Node 或 Harness CLI。
 
 POST 使用 JSON，正文上限 1 MiB；返回 `{result: …}` 或 `{error: {code, message}}`。RPC 参数为 `{method, params}`，快照参数为 `{threadId}`，回答参数为 `{epoch, threadId, requestId, result}`。可用 RPC 在 `CLIENT_CHANNEL_METHODS` 中；不允许 `thread/resume`、官方 Codex 创建或非本地 external Thread 操作。具体 Harness 能力仍须通过已有 inspect 契约查询，不能因 RPC 在名单内便假定该 Harness 支持它。
+
+本地 external `thread/start` 可传 `{model, projectlessWorkspace: {prompt?}}` 明确不选项目，由执行 Host 在创建时独占分配默认 `~/Documents/Codex/<日期>/<名称>/`；不能同时传 cwd 或 ephemeral，客户端不能指定生成根目录。cwd 是会话目录，`outputs/`、`work/` 只是其子目录。Host 将路径/无项目事实写入现有 Mapping Store metadata sidecar 后发布 Thread；普通选中目录仍传 cwd，真实 Harness 的执行与权限能力不改变。Web 在首次发送前仅持有无 cwd 草稿，不自行分配目录、不注册生成目录为项目；不读取或修改 Electron 私有根目录设置。创建结果未知不重发，也不自动删除可能已被 Native Session 引用的路径。详细目录/侧栏行为见[独立 Web](../product/standalone-web.md#新会话与无工作区目录)。
 
 通知是 `application/x-ndjson`，空行是心跳，不是事件。慢消费者超过有界写缓冲时断开，不能阻塞 GUI。Node 通道断线重新发现描述文件；网关在底层 Host 离线时结束 App 的通知流，App 可携带游标重新连接。
 

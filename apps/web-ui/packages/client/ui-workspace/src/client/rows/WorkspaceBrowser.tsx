@@ -67,6 +67,7 @@ import {
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from "./Rows.tsx";
 import { AnimatedRows } from "./AnimatedRows.tsx";
 import { PinnedSection } from "./PinnedSection.tsx";
+import { RecentHeader } from "./RecentHeader.tsx";
 import { GROUP_INITIAL_ROWS, SIDEBAR_PAGE_ROWS, sidebarWindow } from "./sidebar-window.ts";
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from "../stores.ts";
 import { WorkspacePickFlow } from "../WorkspacePicker.tsx";
@@ -289,6 +290,7 @@ type SessionTreeProps = Pick<
     ungroupedSessionIds: readonly SessionId[];
     /** Whether the current Workspace stream has a complete Host baseline. */
     workspaceReady: boolean;
+    canStartProjectless: boolean;
     /** Grouping, ordering, and filter changes replace the view without row motion. */
     animationResetKey: string;
     /** Nest Workspaces under their nearest registered ancestors. */
@@ -350,6 +352,7 @@ function SessionTree({
   rowState,
   onLeaveArchivedOnly,
   workspaceReady,
+  canStartProjectless,
   animationResetKey,
   usePanelInfo,
   onRenameRequest,
@@ -411,18 +414,37 @@ function SessionTree({
   const expandedGroups = useMemo(() => {
     const ancestorKeys = new Set<string | undefined>(parents.values());
     return [...workspaces.map((workspace) => workspace.workspaceId), UNGROUPED_KEY].filter(
-      (key) => groupExpansion[key] ?? ancestorKeys.has(key),
+      (key) => groupExpansion[key] ?? (key === UNGROUPED_KEY || ancestorKeys.has(key)),
     );
   }, [groupExpansion, parents, workspaces]);
-  const groups = useMemo(
-    () =>
-      deriveGroups(list, workspaces, rowState, statuses, {
-        expandedGroups,
-        excludePinned: true,
-        ungroupedOrder: ungroupedSessionIds,
-      }),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
-  );
+  const groups = useMemo(() => {
+    const result = deriveGroups(list, workspaces, rowState, statuses, {
+      expandedGroups,
+      excludePinned: true,
+      ungroupedOrder: ungroupedSessionIds,
+    });
+    if (canStartProjectless && !result.some((group) => group.key === UNGROUPED_KEY))
+      result.push({
+        key: UNGROUPED_KEY,
+        workspaceId: undefined,
+        cwd: undefined,
+        createdAt: undefined,
+        label: "",
+        sessionCount: 0,
+        expanded: expandedGroups.includes(UNGROUPED_KEY),
+        containsCurrent: false,
+        sessions: [],
+      });
+    return result;
+  }, [
+    list,
+    workspaces,
+    rowState,
+    statuses,
+    expandedGroups,
+    ungroupedSessionIds,
+    canStartProjectless,
+  ]);
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
       if (groupExpansion[key] === false || (key === revealGroup && groupExpansion[key] !== true)) {
@@ -603,124 +625,151 @@ function SessionTree({
               }
         }
       >
-        <ProjectRowItem
-          newShortcut={shortcuts.find((row) => row.id === "session.new")}
-          group={group}
-          home={home}
-          t={t}
-          onToggle={() => {
-            if (group.expanded) {
-              setSessionLimits((limits) => ({ ...limits, [group.key]: GROUP_INITIAL_ROWS }));
-            }
-            setGroupExpanded(group.key, !group.expanded);
-          }}
-          onCreate={() => {
-            if (group.workspaceId !== undefined) {
+        {workspaceId === undefined ? (
+          <RecentHeader
+            expanded={group.expanded}
+            canCreate={canStartProjectless}
+            t={t}
+            onToggle={() => setGroupExpanded(group.key, !group.expanded)}
+            onCreate={() => {
               setGroupExpanded(group.key, true);
-              startSession(group.workspaceId);
-            }
-          }}
-          drag={workspaceDragProps}
-          actions={
-            group.workspaceId === undefined
-              ? undefined
-              : {
-                  rename: () => {
-                    /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                    if (group.workspaceId !== undefined)
-                      onRenameRequest(group.workspaceId, group.label);
-                  },
-                  delete: () => {
-                    /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                    if (group.workspaceId !== undefined)
-                      onDeleteRequest(group.workspaceId, group.label);
-                  },
-                }
-          }
-        />
-        {childRows.length > 0 && <div role="group">{childRows}</div>}
-        {sessions.map((node) => {
-          // Session drag never leaves its browser-local account, and pinned
-          // rows reorder only within their leading pinned block.
-          const sameGroupDrag = drag !== null && drag.accountKey === group.key;
-          const compatibleTarget = sameGroupDrag && drag.pinned === node.pinned;
-          const normalizeHalf = (half: "before" | "after"): "before" | "after" =>
-            node.blank ? "after" : half;
-          const dragProps = {
-            start: () => {
-              sessionDropCommitted.current = false;
-              setDrag({
-                accountKey: group.key,
-                sessionId: node.id,
-                pinned: node.pinned,
-                over: null,
-              });
-            },
-            active: compatibleTarget,
-            marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
-            hover: (half: "before" | "after") => {
-              /* v8 ignore next -- narrowing guard: Rows gates hover on `active`, which is false while the drag state is null. */
-              setDrag((d) =>
-                d === null
-                  ? d
-                  : {
-                      ...d,
-                      over: { id: node.id, half: normalizeHalf(half) },
-                    },
-              );
-            },
-            drop: (half: "before" | "after") => {
-              /* v8 ignore next -- narrowing guard: Rows gates drop on `active`, which is false while the drag state is null. */
-              if (drag === null) return;
-              commitSessionDrag(drag, { id: node.id, half: normalizeHalf(half) });
-            },
-            end: () => {
-              if (drag?.over !== null && drag?.over !== undefined)
-                commitSessionDrag(drag, drag.over);
-              else setDrag(null);
-              sessionDropCommitted.current = false;
-            },
-          };
-          return (
-            <SessionNodeItem
-              key={node.id}
-              node={node}
-              currentId={current}
-              now={now}
-              onOpen={open}
-              onRenameRequest={onSessionRenameRequest}
-              renderSlot={renderSlot}
-              onReveal={
-                node.id === revealSessionId && group.key === revealGroup
-                  ? () => {
-                      onSessionRevealed(node.id);
-                    }
-                  : undefined
-              }
-              drag={dragProps}
-              t={t}
-            />
-          );
-        })}
-        {collapsed.hiddenCount > 0 && (
-          <button
-            type="button"
-            className={css.sessionOverflowButton}
-            data-row-key={`overflow:${group.key}`}
-            aria-expanded={sessionsExpanded}
-            onClick={() => {
-              setSessionLimits((limits) => ({
-                ...limits,
-                [group.key]: sessionsExpanded
-                  ? GROUP_INITIAL_ROWS
-                  : (limits[group.key] ?? GROUP_INITIAL_ROWS) + SIDEBAR_PAGE_ROWS,
-              }));
+              startSession();
             }}
+          />
+        ) : (
+          <ProjectRowItem
+            newShortcut={shortcuts.find((row) => row.id === "session.new")}
+            group={group}
+            home={home}
+            t={t}
+            onToggle={() => {
+              if (group.expanded) {
+                setSessionLimits((limits) => ({ ...limits, [group.key]: GROUP_INITIAL_ROWS }));
+              }
+              setGroupExpanded(group.key, !group.expanded);
+            }}
+            onCreate={() => {
+              if (group.workspaceId !== undefined) {
+                setGroupExpanded(group.key, true);
+                startSession(group.workspaceId);
+              }
+            }}
+            drag={workspaceDragProps}
+            actions={
+              group.workspaceId === undefined
+                ? undefined
+                : {
+                    rename: () => {
+                      /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                      if (group.workspaceId !== undefined)
+                        onRenameRequest(group.workspaceId, group.label);
+                    },
+                    delete: () => {
+                      /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                      if (group.workspaceId !== undefined)
+                        onDeleteRequest(group.workspaceId, group.label);
+                    },
+                  }
+            }
+          />
+        )}
+        {childRows.length > 0 && <div role="group">{childRows}</div>}
+        {(sessions.length > 0 || collapsed.hiddenCount > 0) && (
+          <div
+            role="group"
+            className={css.groupSessions}
+            // A 16px folder slot plus its 6px gap: child glyphs start at the
+            // project's title edge. Keep the same inherited indent for exit clones.
+            style={
+              {
+                "--dsh-workspace-indent": `${workspaceId === undefined ? 0 : depth * 12 + 22}px`,
+              } as CSSProperties
+            }
           >
-            {sessionsExpanded
-              ? t("sessions.collapse")
-              : t("sessions.expand", { n: Math.min(SIDEBAR_PAGE_ROWS, visible.hiddenCount) })}
-          </button>
+            {sessions.map((node) => {
+              // Session drag never leaves its browser-local account, and pinned
+              // rows reorder only within their leading pinned block.
+              const sameGroupDrag = drag !== null && drag.accountKey === group.key;
+              const compatibleTarget = sameGroupDrag && drag.pinned === node.pinned;
+              const normalizeHalf = (half: "before" | "after"): "before" | "after" =>
+                node.blank ? "after" : half;
+              const dragProps = {
+                start: () => {
+                  sessionDropCommitted.current = false;
+                  setDrag({
+                    accountKey: group.key,
+                    sessionId: node.id,
+                    pinned: node.pinned,
+                    over: null,
+                  });
+                },
+                active: compatibleTarget,
+                marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
+                hover: (half: "before" | "after") => {
+                  /* v8 ignore next -- narrowing guard: Rows gates hover on `active`, which is false while the drag state is null. */
+                  setDrag((d) =>
+                    d === null
+                      ? d
+                      : {
+                          ...d,
+                          over: { id: node.id, half: normalizeHalf(half) },
+                        },
+                  );
+                },
+                drop: (half: "before" | "after") => {
+                  /* v8 ignore next -- narrowing guard: Rows gates drop on `active`, which is false while the drag state is null. */
+                  if (drag === null) return;
+                  commitSessionDrag(drag, { id: node.id, half: normalizeHalf(half) });
+                },
+                end: () => {
+                  if (drag?.over !== null && drag?.over !== undefined)
+                    commitSessionDrag(drag, drag.over);
+                  else setDrag(null);
+                  sessionDropCommitted.current = false;
+                },
+              };
+              return (
+                <SessionNodeItem
+                  key={node.id}
+                  node={node}
+                  currentId={current}
+                  now={now}
+                  onOpen={open}
+                  onRenameRequest={onSessionRenameRequest}
+                  renderSlot={renderSlot}
+                  onReveal={
+                    node.id === revealSessionId && group.key === revealGroup
+                      ? () => {
+                          onSessionRevealed(node.id);
+                        }
+                      : undefined
+                  }
+                  drag={workspaceId === undefined ? undefined : dragProps}
+                  t={t}
+                />
+              );
+            })}
+            {collapsed.hiddenCount > 0 && (
+              <button
+                type="button"
+                className={css.sessionOverflowButton}
+                data-row-key={`overflow:${group.key}`}
+                aria-expanded={sessionsExpanded}
+                onClick={() => {
+                  setSessionLimits((limits) => ({
+                    ...limits,
+                    [group.key]: sessionsExpanded
+                      ? GROUP_INITIAL_ROWS
+                      : (limits[group.key] ?? GROUP_INITIAL_ROWS) + SIDEBAR_PAGE_ROWS,
+                  }));
+                }}
+              >
+                {sessionsExpanded
+                  ? t("sessions.collapse")
+                  : t("sessions.expand", { n: Math.min(SIDEBAR_PAGE_ROWS, visible.hiddenCount) })}
+              </button>
+            )}
+          </div>
         )}
       </div>
     );
@@ -1082,6 +1131,7 @@ export function WorkspaceBrowser({
   // Ordering remains live while the rail or search replaces the list body.
   const list = useSessions((state) => state);
   const storedWorkspaces = useWorkspaces((state) => state.items);
+  const canStartProjectless = useWorkspaces((state) => state.canStartProjectless === true);
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
   const defaultWorkspaceName = t("workspace.defaultName");
@@ -1165,23 +1215,10 @@ export function WorkspaceBrowser({
       }),
     [currentBlank, list.byId, orderBy, orderState, sessionOrderByAccount, workspaces],
   );
-  const orderedUngroupedSessionIds = useMemo(() => {
-    const baseOrder =
-      orderBy === "updated"
-        ? orderByRecency(ungroupedMemberIds, list.byId)
-        : reconcileManualOrder(
-            ungroupedMemberIds,
-            sessionOrderByAccount[UNGROUPED_KEY],
-            list.byId,
-            orderState,
-          );
-    return pinCurrentBlank(
-      baseOrder,
-      currentBlank !== undefined && ungroupedMemberIds.includes(currentBlank)
-        ? currentBlank
-        : undefined,
-    );
-  }, [currentBlank, list.byId, orderBy, orderState, sessionOrderByAccount, ungroupedMemberIds]);
+  const orderedUngroupedSessionIds = useMemo(
+    () => orderByRecency(ungroupedMemberIds, list.byId),
+    [list.byId, ungroupedMemberIds],
+  );
   const orderedFlatSessionIds = useMemo(() => {
     const baseOrder =
       orderBy === "updated"
@@ -1693,6 +1730,7 @@ export function WorkspaceBrowser({
               renderSlot={renderSlot}
               workspaces={orderedWorkspaces}
               ungroupedSessionIds={orderedUngroupedSessionIds}
+              canStartProjectless={canStartProjectless}
               workspaceReady={workspaceReady}
               nestWorkspaces={groupBy === "workspace-tree"}
               animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}

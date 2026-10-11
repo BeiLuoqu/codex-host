@@ -42,12 +42,14 @@ export function workspaceLabel(cwd: string): string {
 export function WorkspaceChip({
   buttonRef,
   label,
+  projectless = false,
   menuOpen = false,
   onClick,
   t,
 }: {
   buttonRef?: RefObject<HTMLButtonElement>;
   label?: string | undefined;
+  projectless?: boolean;
   menuOpen?: boolean;
   onClick?: () => void;
   t: HeroTranslate;
@@ -62,7 +64,7 @@ export function WorkspaceChip({
       aria-expanded={menuOpen}
       onClick={onClick}
     >
-      {label === undefined ? (
+      {label === undefined || projectless ? (
         <IconFolderCloseRegular className={css.folder} size={16} />
       ) : (
         <IconFolderOpenRegular className={css.folder} size={16} />

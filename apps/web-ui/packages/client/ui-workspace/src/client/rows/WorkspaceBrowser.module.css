@@ -381,7 +381,8 @@
 
 .flatList > * + *,
 .searchTree > [role="treeitem"] + [role="treeitem"],
-.groupSection > * + * {
+.groupSection > * + *,
+.groupSessions > * + * {
   margin-top: 2px;
 }
 
@@ -523,8 +524,10 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-.groupSection > .sessionOverflowButton {
+/* Group paging aligns with its child glyphs; flat-list paging is unchanged. */
+.groupSessions > .sessionOverflowButton {
   margin-top: 0;
+  padding-inline-start: calc(8px + var(--dsh-workspace-indent, 0px));
 }
 
 .sessionOverflowButton:hover {

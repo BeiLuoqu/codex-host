@@ -234,8 +234,11 @@ const CONSOLE_REQUEST_TIMEOUT_MS = 120_000;
 
 import { ClientChannelEvents } from "./client-channel-events.js";
 import { ClientCommandReceipts } from "./client-command-receipts.js";
+import { allocateProjectlessWorkspace } from "./projectless-workspace.js";
+import { readExternalWorkspaceSnapshot } from "./native-workspace-snapshot.js";
 import {
   CLIENT_CHANNEL_METHODS,
+  clientProjectlessWorkspaceSchema,
   clientThreadSnapshotSchema,
   type ClientThreadSnapshot,
   type ClientChannelResponse,
@@ -1191,6 +1194,17 @@ export class AppServerHost {
     if (!parsed.success || !isRecord(parsed.data.params))
       return { error: { code: -32602, message: "Invalid client parameters" } };
     const params = parsed.data.params as JsonObject;
+    if (method === "codexhost/workspace/read") {
+      await this.#waitForPlugins();
+      return {
+        result: jsonValueSchema.parse(
+          await readExternalWorkspaceSnapshot(
+            this.#options.environment ?? process.env,
+            await this.#repository.list(),
+          ),
+        ),
+      };
+    }
     if (method === "thread/start") {
       const route = classifyCreateRequestRoute(parsed.data);
       if (!route || route.selectedHarness === "codex")
@@ -4144,7 +4158,37 @@ export class AppServerHost {
       route && route.harnessId === harnessId
         ? route.transportModelId
         : transportModelIdForHarness(harnessId);
-    const cwd = params.cwd;
+    let cwd = params.cwd;
+    let projectlessWorkspace: StoredThreadRecordV1["projectlessWorkspace"];
+    if (params.projectlessWorkspace !== undefined) {
+      const choice = clientProjectlessWorkspaceSchema.safeParse(params.projectlessWorkspace);
+      if (!choice.success || cwd !== undefined || params.ephemeral === true) {
+        this.#routeObservationTracker.rejectCreate(request.id);
+        await this.#writer.json(rpcError(request, -32602, "Invalid projectless workspace choice"));
+        return;
+      }
+      try {
+        const allocated = await allocateProjectlessWorkspace(
+          this.#options.environment ?? process.env,
+          choice.data.prompt ?? "",
+        );
+        cwd = allocated.cwd;
+        projectlessWorkspace = {
+          workspaceRoot: allocated.workspaceRoot,
+          outputDirectory: allocated.outputDirectory,
+        };
+      } catch (error) {
+        this.#routeObservationTracker.rejectCreate(request.id);
+        await this.#writer.json(
+          rpcError(
+            request,
+            -32081,
+            `Projectless workspace could not be allocated: ${errorMessage(error)}`,
+          ),
+        );
+        return;
+      }
+    }
     if (typeof cwd !== "string" || cwd.length === 0) {
       this.#routeObservationTracker.rejectCreate(request.id);
       await this.#writer.json(
@@ -4157,6 +4201,7 @@ export class AppServerHost {
       harnessId: adapter.harnessId,
       cwd,
       transportModelId,
+      ...(projectlessWorkspace ? { projectlessWorkspace } : {}),
       ephemeral: params.ephemeral === true,
       historyMode: params.historyMode === "paginated" ? "paginated" : "legacy",
     });

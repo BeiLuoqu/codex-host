@@ -157,6 +157,8 @@ export interface WorkspacePinValue {
 
 /** Complete reconnect baseline for Workspace browser state. */
 export interface WorkspaceBaseline {
+  /** Shared owner allocates no-project cwd on first submission. */
+  readonly canStartProjectless?: boolean;
   readonly items: readonly WorkspaceView[];
   readonly archivedSessionIds: readonly SessionId[];
   /** Registry-global pin set, most recently pinned first. */

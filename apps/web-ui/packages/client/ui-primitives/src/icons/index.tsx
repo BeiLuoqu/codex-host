@@ -29,15 +29,11 @@ export const ICON_REGULAR_STROKE = 1;
 /** Medium stroke width used by emphasized product icons. */
 export const ICON_MEDIUM_STROKE = 1.3;
 
-/** Regular one-pixel IconNewChatOutline artwork. */
-export const IconNewChatOutlineRegular = (props: IconProps) => (
-  <NewChatOutlineArtwork {...props} strokeWidth={ICON_REGULAR_STROKE} />
-);
+/** Native compose artwork for New Session controls. */
+export const IconNewChatOutlineRegular = (props: IconProps) => <NewChatOutlineArtwork {...props} />;
 
-/** Medium IconNewChatOutline artwork with a 1.3px stroke. */
-export const IconNewChatOutlineMedium = (props: IconProps) => (
-  <NewChatOutlineArtwork {...props} strokeWidth={ICON_MEDIUM_STROKE} />
-);
+/** Keep the emphasized entry point identical to the native filled compose glyph. */
+export const IconNewChatOutlineMedium = (props: IconProps) => <NewChatOutlineArtwork {...props} />;
 
 const IconSearchOutlineArtwork = ({ size = 16, className, strokeWidth }: WeightedIconProps) => (
   <svg

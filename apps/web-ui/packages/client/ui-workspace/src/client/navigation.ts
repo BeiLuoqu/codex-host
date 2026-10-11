@@ -54,7 +54,7 @@ export interface UiWorkspace {
    * notice unless a later navigation or disposal superseded the request.
    */
   openWorkspace(
-    workspaceId: WorkspaceId,
+    workspaceId: WorkspaceId | null,
     beforeOpen?: (sessionId: SessionId) => void,
   ): Promise<void>;
   /**
@@ -73,7 +73,7 @@ export interface UiWorkspace {
   /**
    * Start a New Session flow and navigate to its Session; a creation the Host
    * refuses is shown through the Workspace notice and leaves the selection as it was.
-   * @param workspaceId - explicit target; absent inherits the current or most recent Workspace.
+   * @param workspaceId - explicit target; shared mode defaults to no project, standalone inherits a Workspace.
    * @param options - initial content; existing text or attachments are preserved unless clearPreviousDraft is true.
    */
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void;
@@ -230,13 +230,18 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   async openWorkspace(
-    workspaceId: WorkspaceId,
+    workspaceId: WorkspaceId | null,
     beforeOpen?: (sessionId: SessionId) => void,
   ): Promise<void> {
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal]);
     let sessionId: SessionId;
     try {
-      sessionId = await this.connectWorkspace(workspaceId);
+      if (workspaceId === null && !this.workspaces.list.getSnapshot().canStartProjectless)
+        throw new Error("This Host requires a Workspace.");
+      sessionId =
+        workspaceId === null
+          ? await this.sessions.create()
+          : await this.connectWorkspace(workspaceId);
     } catch (error: unknown) {
       // Reported here, not in connectWorkspace: startup restoration calls that
       // directly and stays console-only.
@@ -275,7 +280,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       workspace.phase === "ready" && sessions.phase === "ready"
         ? recentWorkspace(workspace.items, sessions.byId)
         : undefined;
-    const target = workspaceId ?? currentWorkspaceId ?? recent;
+    const target =
+      workspaceId ?? (workspace.canStartProjectless ? null : (currentWorkspaceId ?? recent));
     if (target === undefined) {
       if (initializeDraft) {
         this.notify({
@@ -424,6 +430,11 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       !workspaces.archivedSessionIds.includes(summary.id)
     ) {
       sessionId = await this.reuseBlank(workspace.workspaceId, summary.id);
+    }
+    if (sessionId === undefined && workspaces.canStartProjectless && summary === undefined) {
+      sessionId = await this.sessions.create();
+      if (!navigation.aborted) this.replaceMain(sessionId, navigation, "preserve");
+      return;
     }
     let target = workspace?.workspaceId ?? recentWorkspace(workspaces.items, sessions.byId);
     if (target === undefined && workspaces.items.length === 0 && sessions.ids.length === 0) {

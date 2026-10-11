@@ -34,6 +34,7 @@ export type WorkspaceListPhase = "pending" | "ready";
 
 /** Immutable Client Workspace state. */
 export interface WorkspaceSnapshot {
+  readonly canStartProjectless?: boolean;
   readonly items: readonly WorkspaceView[];
   /** Complete registry-global archive set in Host order. */
   readonly archivedSessionIds: WorkspaceArchiveValue["archivedSessionIds"];
@@ -64,6 +65,7 @@ export interface WorkspaceFollowSink {
  * Owns the Client Workspace projection, mutation echoes, and stream/unary race resolution.
  */
 export class ClientWorkspaceModel implements WorkspaceFollowSink {
+  private canStartProjectless = false;
   private items: readonly WorkspaceView[] = [];
   private archivedSessionIds: WorkspaceArchiveValue["archivedSessionIds"] = [];
   private pinnedSessionIds: WorkspacePinValue["pinnedSessionIds"] = [];
@@ -271,6 +273,7 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
     this.orderFrameGeneration++;
     this.archiveRequestSeq++;
     this.pinRequestSeq++;
+    this.canStartProjectless = baseline.canStartProjectless === true;
     this.installViews(baseline.items);
     this.installArchived(baseline.archivedSessionIds);
     this.installPinned(baseline.pinnedSessionIds);
@@ -356,6 +359,7 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
   private buildSnapshot(): WorkspaceSnapshot {
     return {
       items: this.items,
+      canStartProjectless: this.canStartProjectless,
       archivedSessionIds: this.archivedSessionIds,
       pinnedSessionIds: this.pinnedSessionIds,
       state: this.state,

@@ -1,6 +1,7 @@
 import { open } from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
+import type { StoredThreadRecordV1 } from "@codexhost/mapping-store";
 import {
   clientWorkspaceSnapshotSchema,
   type ClientWorkspaceSnapshot,
@@ -64,4 +65,33 @@ export async function readNativeWorkspaceSnapshot(
     projectless: state["projectless-thread-ids"] ?? [],
     pinned: state["pinned-thread-ids"] ?? [],
   });
+}
+
+/** Combine read-only GUI facts with this owner's canonical no-project records. */
+export async function readExternalWorkspaceSnapshot(
+  environment: NodeJS.ProcessEnv,
+  threads: readonly StoredThreadRecordV1[],
+): Promise<ClientWorkspaceSnapshot> {
+  const snapshot = await readNativeWorkspaceSnapshot(environment);
+  const owned = new Set(threads.map((thread) => String(thread.hostThreadId)));
+  const assignments = Object.fromEntries(
+    Object.entries(snapshot.assignments).filter(([id]) => owned.has(id)),
+  );
+  const projectless = new Set(
+    snapshot.projectless.filter((id) => owned.has(id) && !assignments[id]),
+  );
+  for (const thread of threads) {
+    if (thread.projectId) {
+      assignments[thread.hostThreadId] = thread.projectId;
+      projectless.delete(thread.hostThreadId);
+    } else if (thread.projectlessWorkspace && !assignments[thread.hostThreadId]) {
+      projectless.add(thread.hostThreadId);
+    }
+  }
+  return {
+    ...snapshot,
+    assignments,
+    projectless: [...projectless],
+    pinned: snapshot.pinned.filter((id) => owned.has(id)),
+  };
 }

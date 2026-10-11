@@ -30,6 +30,7 @@ export class Workspaces {
   private state: WorkspaceState;
   private readonly followers = new Set<StreamSink>();
   private referenceGroups: Map<string, string | undefined> | undefined;
+  private referenceProjectless: ReadonlySet<string> = new Set();
   private referencePins: string[] | undefined;
 
   constructor(
@@ -85,19 +86,31 @@ export class Workspaces {
           (id) =>
             !references.has(id) ||
             references.get(id) === workspace.path ||
-            (workspace.origin === "web" && references.get(id) === undefined),
+            (workspace.origin === "web" &&
+              references.get(id) === undefined &&
+              !this.referenceProjectless.has(id)),
         ),
       }));
   }
 
   /** Replace only the shared navigation view; never delete user records or any directories. */
-  addDraftReference(sessionId: string, cwd: string): void {
-    this.setReferenceGroups(new Map([...(this.referenceGroups ?? []), [sessionId, resolve(cwd)]]));
+  addDraftReference(sessionId: string, cwd: string | undefined): void {
+    const projectless = new Set(this.referenceProjectless);
+    if (cwd) projectless.delete(sessionId);
+    else projectless.add(sessionId);
+    this.setReferenceGroups(
+      new Map([...(this.referenceGroups ?? []), [sessionId, cwd ? resolve(cwd) : undefined]]),
+      projectless,
+    );
   }
 
-  setReferenceGroups(groups: Map<string, string | undefined>): void {
+  setReferenceGroups(
+    groups: Map<string, string | undefined>,
+    projectless: ReadonlySet<string> = new Set(),
+  ): void {
     const before = this.list();
     this.referenceGroups = groups;
+    this.referenceProjectless = projectless;
     const after = this.list();
     const ids = new Set(after.map((workspace) => workspace.workspaceId));
     for (const workspace of before)
@@ -320,6 +333,7 @@ export class Workspaces {
           ...this.state,
           items: this.list(),
           pinnedSessionIds: this.referencePins ?? this.state.pinnedSessionIds,
+          ...(this.referenceOnlyDefault ? { canStartProjectless: true } : {}),
         },
       });
     });

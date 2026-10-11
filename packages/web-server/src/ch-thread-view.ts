@@ -23,6 +23,8 @@ export interface ChThread {
   id: string;
   cwd: string;
   modelProvider: string;
+  workspaceKind?: "projectless";
+  projectId?: string | null;
   name?: string | null | undefined;
   preview?: string | undefined;
   createdAt: number;

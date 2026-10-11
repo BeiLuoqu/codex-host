@@ -33,7 +33,7 @@ import { defaultProjections } from "./session-log.ts";
 
 interface Draft {
   id: string;
-  cwd: string;
+  cwd?: string;
   selection: ModelSelection;
   permissionModeId?: string;
   createdAt: number;
@@ -179,8 +179,14 @@ export class ChSessions {
     this.rows = new Map([...found].filter(([id]) => ownership.has(id)));
     const projects = await this.host.projects([...this.rows.keys()]);
     const groups = new Map<string, string | undefined>();
+    const projectless = new Set(projects.projectless.filter((id) => !projects.assignments[id]));
     for (const row of this.rows.values()) {
-      const root = row.cwd ? projectGroupRoot(projects, row.id, row.cwd) : undefined;
+      if (row.workspaceKind === "projectless" && !row.projectId && !projects.assignments[row.id])
+        projectless.add(row.id);
+      const root =
+        row.cwd && !projectless.has(row.id)
+          ? projectGroupRoot(projects, row.id, row.cwd)
+          : undefined;
       groups.set(row.id, root);
       if (root)
         this.workspaces.attachReferencedSession(
@@ -189,8 +195,12 @@ export class ChSessions {
           projects.projects.find((project) => project.rootPaths.includes(root))?.name,
         );
     }
-    for (const draft of this.drafts.values()) groups.set(draft.id, draft.cwd);
-    this.workspaces.setReferenceGroups(groups);
+    for (const draft of this.drafts.values()) {
+      if (draft.canonicalId) continue;
+      groups.set(draft.id, draft.cwd);
+      if (!draft.cwd) projectless.add(draft.id);
+    }
+    this.workspaces.setReferenceGroups(groups, projectless);
     await this.publishCatalogChanges();
     // A missing Desktop pin service must not hide readable Threads. Retain the
     // last confirmed pins; a user command still reports its failure explicitly.
@@ -440,21 +450,29 @@ export class ChSessions {
     const cwd =
       request.cwd ??
       (request.workspaceId ? this.workspaces.get(request.workspaceId)?.path : undefined);
-    if (!cwd) throw new RpcError("workspace/invalid-path", "Choose a computer working directory.");
+    if ((request.workspaceId !== undefined || request.cwd !== undefined) && !cwd)
+      throw new RpcError("workspace/invalid-path", "Choose a valid computer working directory.");
     const id = request.sessionId ?? `draft-${randomUUID()}`;
+    const existing = this.drafts.get(id);
+    if (existing && !existing.canonicalId && !existing.creating && existing.cwd === cwd)
+      return { sessionId: id, agentPreset: "standard" };
+    if (existing || this.rows.has(id))
+      throw new RpcError("session/busy", "This Session already exists; start a new draft.");
     const selection = (await this.catalog.models()).default;
-    const draft = { id, cwd, selection, createdAt: Date.now() };
+    const draft = { id, ...(cwd ? { cwd } : {}), selection, createdAt: Date.now() };
     this.drafts.set(id, draft);
-    this.workspaces.attachReferencedSession(id, cwd);
+    if (cwd) this.workspaces.attachReferencedSession(id, cwd);
     this.workspaces.addDraftReference(id, cwd);
     this.events.emit("api-session/added", await this.draftSummary(draft));
     return { sessionId: id, agentPreset: "standard" };
   }
-  private async commit(draft: Draft): Promise<string> {
+  private async commit(draft: Draft, prompt: string): Promise<string> {
     if (draft.canonicalId) return draft.canonicalId;
     draft.creating ??= (async () => {
       const result = await this.host.request<{ thread: ChThread }>("thread/start", {
-        cwd: draft.cwd,
+        ...(draft.cwd
+          ? { cwd: draft.cwd }
+          : { projectlessWorkspace: { prompt: prompt.slice(0, 16_384) } }),
         model: encodeHarnessPluginRoute(
           harnessPluginRouteSchema.parse({
             harnessId: draft.selection.provider,
@@ -470,9 +488,14 @@ export class ChSessions {
       this.files?.bind(draft.id, result.thread.id);
       this.rows.set(result.thread.id, result.thread);
       this.ownership.set(result.thread.id, (await this.owner(result.thread.id)).harnessId);
-      this.workspaces.selectReferenceWorkspace(draft.cwd);
       this.workspaces.detachSession(draft.id);
-      this.workspaces.attachReferencedSession(result.thread.id, result.thread.cwd);
+      if (draft.cwd) {
+        this.workspaces.selectReferenceWorkspace(draft.cwd);
+        this.workspaces.attachReferencedSession(result.thread.id, result.thread.cwd);
+        this.workspaces.addDraftReference(result.thread.id, draft.cwd);
+      } else {
+        this.workspaces.addDraftReference(result.thread.id, undefined);
+      }
       this.events.emit("api-session/added", await this.summary(result.thread));
       this.publishedCatalog?.set(result.thread.id, this.catalogKey(result.thread));
       this.events.emit("codexhost/session-bound", draft.id, result.thread.id);
@@ -580,7 +603,15 @@ export class ChSessions {
       const input = this.fileInputs
         ? await this.fileInputs.prepare(this.id(request.sessionId), request.content)
         : (this.images?.prepare(request.content) ?? request.content);
-      const threadId = draft ? await this.commit(draft) : this.id(request.sessionId);
+      const threadId = draft
+        ? await this.commit(
+            draft,
+            request.content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text ?? "")
+              .join("\n"),
+          )
+        : this.id(request.sessionId);
       await this.owner(threadId);
       await this.host.request("turn/start", {
         threadId,

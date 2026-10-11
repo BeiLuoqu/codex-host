@@ -55,7 +55,7 @@ export function ConversationContent(props: ConversationContentProps) {
   const composerBlock = useComposerBlock((block) => block);
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pendingWorkspaceId, setPendingWorkspaceId] = useState<WorkspaceId | undefined>();
+  const [pendingWorkspaceId, setPendingWorkspaceId] = useState<WorkspaceId | null | undefined>();
   const pickerAnchor = useRef<HTMLButtonElement>(null);
 
   // Publishes the two live measurements floating View chrome reads off the
@@ -95,8 +95,12 @@ export function ConversationContent(props: ConversationContentProps) {
   useEffect(() => {
     if (pendingWorkspaceId === undefined) return;
     if (
-      sessionWorkspace?.workspaceId === pendingWorkspaceId ||
-      (workspaces.phase === "ready" && pendingWorkspace === undefined)
+      (pendingWorkspaceId === null
+        ? sessionWorkspace === undefined
+        : sessionWorkspace?.workspaceId === pendingWorkspaceId) ||
+      (pendingWorkspaceId !== null &&
+        workspaces.phase === "ready" &&
+        pendingWorkspace === undefined)
     ) {
       setPendingWorkspaceId(undefined);
     }
@@ -116,8 +120,8 @@ export function ConversationContent(props: ConversationContentProps) {
   // A title still automatic reads in the reader's language, matching the
   // sidebar row the same Workspace has there.
   const storedChipTitle =
-    pendingWorkspace?.title ??
-    (sessionId === undefined
+    (pendingWorkspaceId === null ? undefined : pendingWorkspace?.title) ??
+    (pendingWorkspaceId === null || sessionId === undefined
       ? undefined
       : (sessionWorkspace?.title ??
         (workspaces.phase === "ready" || cwd === undefined || cwd === ""
@@ -132,7 +136,8 @@ export function ConversationContent(props: ConversationContentProps) {
     <div className={css.heroWorkspaceRow}>
       <WorkspaceChip
         buttonRef={pickerAnchor}
-        label={chipTitle}
+        label={chipTitle ?? (workspaces.canStartProjectless ? t("hero.noWorkspace") : undefined)}
+        projectless={workspaces.canStartProjectless === true && chipTitle === undefined}
         menuOpen={pickerOpen}
         onClick={() => {
           setPickerOpen((open) => !open);
@@ -142,7 +147,10 @@ export function ConversationContent(props: ConversationContentProps) {
       {renderSlot("conversation.hero.workspace", {
         open: pickerOpen,
         anchorRef: pickerAnchor,
-        selectedId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId,
+        selectedId:
+          pendingWorkspaceId === null
+            ? undefined
+            : (pendingWorkspaceId ?? sessionWorkspace?.workspaceId),
         onPick: (workspaceId) => {
           setPickerOpen(false);
           setPendingWorkspaceId(workspaceId);
@@ -163,7 +171,8 @@ export function ConversationContent(props: ConversationContentProps) {
   // blank session whose workspace vanished (deleted from the sidebar). The
   // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
   // not a different tree, so the textarea DOM survives the transition.
-  const inert = sessionId === undefined || (hero && chipTitle === undefined);
+  const inert =
+    sessionId === undefined || (hero && chipTitle === undefined && !workspaces.canStartProjectless);
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.
