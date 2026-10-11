@@ -47,6 +47,11 @@ function turnOf(node: ChatNode | undefined): number | undefined {
   return location?.kind === "turn" || location?.kind === "step" ? location.turn.turn : undefined;
 }
 
+/** Compaction is a user-visible context boundary, not ordinary folded tool work. */
+function isContextCompaction(node: ChatNode | undefined): boolean {
+  return node?.kind === "tool-call" && node.data.root.name === "compact_context";
+}
+
 /**
  * Subscribe, apply Turn-process visibility, and dispatch one stable Context key.
  * Policy reads select this seat's own conclusion, so a mode change re-renders
@@ -107,6 +112,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
     routedNode !== undefined &&
     processWindowReady &&
     !TURN_PROCESS_INDEPENDENT_KINDS.has(routedNode.kind) &&
+    !isContextCompaction(routedNode) &&
     routedNode.anchorSeq >= processSpec.processStartSeq &&
     (liveProcess ||
       processSpec.answerAnchorSeq === null ||

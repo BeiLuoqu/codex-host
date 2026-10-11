@@ -14,6 +14,7 @@ import { fileMutationToolview } from "./tool/toolviews/file-mutation-row.tsx";
 import { readToolview } from "./tool/toolviews/read-row.tsx";
 import { readImageToolview } from "./tool/toolviews/read-image-row.tsx";
 import { searchToolview } from "./tool/toolviews/search-row.tsx";
+import { contextCompactionToolview } from "./tool/toolviews/context-compaction-row.tsx";
 import { detailsToolview } from "./tool/toolviews/details-row.tsx";
 import { todoToolview } from "./tool/toolviews/todo-row.tsx";
 import { webToolview } from "./tool/toolviews/web-row.tsx";
@@ -52,6 +53,7 @@ export function apply(ctx: ClientContext): void {
   ctx.plugin(fileMutationToolview);
   ctx.plugin(searchToolview);
   ctx.plugin(webToolview);
+  ctx.plugin(contextCompactionToolview);
   ctx.plugin(todoToolview);
   ctx.plugin(detailsToolview);
   ctx.plugin(askQuestionToolview);

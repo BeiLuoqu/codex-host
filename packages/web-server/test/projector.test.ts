@@ -224,6 +224,37 @@ describe("TurnProjector", () => {
     assert.deepEqual(result.meta, { diffs: [{ path: "/w/a.ts", oldText: "a", newText: "b" }] });
   });
 
+  it("projects context compaction as a visible running and settled lifecycle", () => {
+    const log = newLog();
+    const projector = new TurnProjector(log, { live: true });
+    projector.begin([{ type: "text", text: "continue" }], undefined);
+    const item: HostItem = { type: "contextCompaction", itemId: "compact-1" };
+
+    projector.itemStarted(item);
+
+    const call = defined(log.events.find((event) => event.type === "tool/call"));
+    assert.deepEqual(call.data, {
+      turn: 1,
+      step: 1,
+      callId: "compact-1",
+      name: "compact_context",
+      arguments: "{}",
+    });
+    assert.equal(
+      log.events.some((event) => event.type === "tool/result"),
+      false,
+    );
+
+    projector.itemCompleted(item, { status: "succeeded" });
+    const result = defined(log.events.find((event) => event.type === "tool/result"));
+    assert.equal(
+      (result.data as { message: { content: Array<{ text: string }> } }).message.content[0]?.text,
+      "Context compacted.",
+    );
+    projector.finish({ status: "succeeded" });
+    assertBalancedSteps(log.events);
+  });
+
   it("replays history without presentation frames", () => {
     const log = newLog();
     const frames: unknown[] = [];

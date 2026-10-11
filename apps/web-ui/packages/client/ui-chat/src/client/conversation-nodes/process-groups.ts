@@ -32,6 +32,13 @@ function turnOf(node: ChatNode): number | undefined {
   return location.kind === "turn" || location.kind === "step" ? location.turn.turn : undefined;
 }
 
+function independent(node: ChatNode): boolean {
+  return (
+    INDEPENDENT.has(node.kind) ||
+    (node.kind === "tool-call" && node.data.root.name === "compact_context")
+  );
+}
+
 function reasoning(node: ChatNode): boolean {
   return (
     node.kind === "assistant-step" &&
@@ -215,7 +222,7 @@ class TurnGroups {
       const node = readNode(input, key);
       // Both Definitions retain the same message id; only its question presentation renders.
       if (node.kind === "turn-trigger" && replies.has(node.id)) continue;
-      if (INDEPENDENT.has(node.kind)) {
+      if (independent(node)) {
         flush(true);
         emit(key, { kind: "node", key });
       } else if (node.kind === "turn-process") {

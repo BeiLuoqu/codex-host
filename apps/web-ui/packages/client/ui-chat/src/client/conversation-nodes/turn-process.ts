@@ -45,6 +45,8 @@ interface TurnProcessState {
   readonly messageCount: number;
   readonly toolCallCount: number;
   readonly subagentCount: number;
+  /** Calls rendered as first-class context boundaries rather than folded process work. */
+  readonly contextCompactionCalls: ReadonlySet<string>;
 }
 
 type ConversationEvent = Parameters<ConversationNodeDefinition["match"]>[0];
@@ -89,7 +91,15 @@ type ProcessEvidence =
   | { readonly kind: "assistant"; readonly seq: number; readonly step: number }
   | { readonly kind: "other"; readonly seq: number };
 
-function processEvidence(event: ConversationEvent): ProcessEvidence | undefined {
+function isContextCompactionEvent(event: ConversationEvent, calls: ReadonlySet<string>): boolean {
+  if (event.type === "tool/call") return event.data.name === "compact_context";
+  return event.type === "tool/result" && calls.has(String(event.data.message.source.callId));
+}
+
+function processEvidence(
+  event: ConversationEvent,
+  contextCompactionCalls: ReadonlySet<string>,
+): ProcessEvidence | undefined {
   if (visibleAssistantEvent(event)) {
     if (
       event.type !== "assistant/live-chunk" &&
@@ -100,9 +110,10 @@ function processEvidence(event: ConversationEvent): ProcessEvidence | undefined 
     return { kind: "assistant", seq: event.seq, step: event.data.step };
   }
   if (
-    event.type === "tool/call" ||
-    (event.type === "tool/result" && event.surfaceOp === "append") ||
-    event.type === "llm/retry"
+    !isContextCompactionEvent(event, contextCompactionCalls) &&
+    (event.type === "tool/call" ||
+      (event.type === "tool/result" && event.surfaceOp === "append") ||
+      event.type === "llm/retry")
   )
     return { kind: "other", seq: event.seq };
   return undefined;
@@ -130,6 +141,7 @@ function fallbackState(
     messageCount: 0,
     toolCallCount: 0,
     subagentCount: 0,
+    contextCompactionCalls: new Set(),
   };
   for (const match of context.matches) state = updateProcessState(state, match.event);
   return state;
@@ -208,14 +220,20 @@ function updateProcessState(state: TurnProcessState, event: ConversationEvent): 
     current = { ...current, messageCountByStep, messageCount: current.messageCount + 1 };
   }
   if (event.type === "tool/call") {
-    const subagent = isSubagentDelegationTool(event.data.name);
-    current = {
-      ...current,
-      toolCallCount: current.toolCallCount + (subagent ? 0 : 1),
-      subagentCount: current.subagentCount + (subagent ? 1 : 0),
-    };
+    if (event.data.name === "compact_context") {
+      const contextCompactionCalls = new Set(current.contextCompactionCalls);
+      contextCompactionCalls.add(String(event.data.callId));
+      current = { ...current, contextCompactionCalls };
+    } else {
+      const subagent = isSubagentDelegationTool(event.data.name);
+      current = {
+        ...current,
+        toolCallCount: current.toolCallCount + (subagent ? 0 : 1),
+        subagentCount: current.subagentCount + (subagent ? 1 : 0),
+      };
+    }
   }
-  const evidence = processEvidence(event);
+  const evidence = processEvidence(event, current.contextCompactionCalls);
   if (evidence === undefined) return current;
   if (evidence.kind === "other") {
     return current.otherStartSeq === undefined
@@ -271,6 +289,7 @@ export const turnProcessDefinition: ConversationNodeDefinition<TurnProcessState>
       messageCount: 0,
       toolCallCount: 0,
       subagentCount: 0,
+      contextCompactionCalls: new Set(),
     };
   },
   update: (context, match) => updateProcessState(context.state, match.event),

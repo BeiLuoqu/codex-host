@@ -401,7 +401,14 @@ export const toolDefinition: ConversationNodeDefinition<ToolState> = {
       ("kind" in state.root ? state.root.seq : (context.matches[0]?.event.seq ?? 0));
     const preparing = !("kind" in projected) && projected.phase === "preparing";
     const visibility = preparing && interruptedAt !== undefined ? "hidden" : "visible";
-    const location = contextLocation(context);
+    const eventLocation = contextLocation(context);
+    // Context compaction is a Turn-level boundary. Keeping its standard Tool
+    // transport identity while lifting it out of the Step prevents completed
+    // compaction from disappearing inside ordinary folded work details.
+    const location =
+      projected.name === "compact_context" && eventLocation.kind === "step"
+        ? { kind: "turn" as const, turn: eventLocation.turn }
+        : eventLocation;
     const data =
       current?.data.root === projected
         ? current.data
