@@ -41,6 +41,25 @@
   );
 }
 
+/* Match Codex Desktop 26.1007 sidebar typography and text-primary/85.
+   Harness artwork using currentColor shares the title color, not the tertiary
+   status-slot tint. Workspace folders and status colors keep DSH semantics. */
+.sessionRow,
+.searchResultRow {
+  --ch-sidebar-text-primary: #1a1c1f;
+  font-family: -apple-system, "system-ui", "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 430;
+  line-height: 20px;
+  letter-spacing: normal;
+  color: color-mix(in oklab, var(--ch-sidebar-text-primary) 85%, transparent);
+}
+
+:global(body[data-ds-dark-theme]) .sessionRow,
+:global(body[data-ds-dark-theme]) .searchResultRow {
+  --ch-sidebar-text-primary: #ffffff;
+}
+
 .projectRow:focus-visible,
 .sessionRow:focus-visible,
 .iconButton:focus-visible {
@@ -61,7 +80,6 @@
   background: transparent;
   cursor: pointer;
   text-align: left;
-  color: var(--dsw-alias-label-primary);
 }
 
 .searchResultRow:hover {
@@ -149,6 +167,16 @@
   align-items: center;
   justify-content: center;
   color: var(--dsw-alias-label-tertiary);
+}
+
+.slot:has([data-harness-id]) {
+  width: 14px;
+  color: inherit;
+}
+
+.sessionRow:has([data-harness-id]) .title,
+.searchResultHeading:has([data-harness-id]) .searchResultTitle {
+  margin-left: 8px;
 }
 
 .statusOverlay {

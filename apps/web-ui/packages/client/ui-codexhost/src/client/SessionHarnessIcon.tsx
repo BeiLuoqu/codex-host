@@ -5,6 +5,8 @@ import type { HostObservable } from "@deepseek-ai/dsh-client-ui-slots";
 import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import { IconDataOutlineRegular, RemotePluginIcon } from "@deepseek-ai/dsh-client-ui-primitives";
 
+const SIDEBAR_ICON_SIZE = 14;
+
 declare module "@deepseek-ai/dsh-session-projection/types" {
   interface SessionProjectionMap {
     /** The bound Harness, or this draft's explicitly selected Harness; never another session's default. */
@@ -30,14 +32,20 @@ export function SessionHarnessIcon({
       title={identity.name}
       role="img"
       aria-label={identity.name}
-      style={{ display: "inline-flex", width: 16, height: 16, flexShrink: 0 }}
+      style={{
+        display: "inline-flex",
+        width: SIDEBAR_ICON_SIZE,
+        height: SIDEBAR_ICON_SIZE,
+        flexShrink: 0,
+        color: "inherit",
+      }}
     >
       <RemotePluginIcon
         id={identity.id}
         src={`/harness-icons/${encodeURIComponent(identity.id)}`}
         presentationUrl="/harness-icons/presentation.json"
-        size={16}
-        fallback={<IconDataOutlineRegular size={16} />}
+        size={SIDEBAR_ICON_SIZE}
+        fallback={<IconDataOutlineRegular size={SIDEBAR_ICON_SIZE} />}
       />
     </span>
   );
