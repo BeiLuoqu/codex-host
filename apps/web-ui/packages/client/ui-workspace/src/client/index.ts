@@ -278,8 +278,12 @@ export function apply(ctx: Context): void {
             click_position: "sidebar",
           });
         })
-        .catch(() => {
-          // Fork or child-title failure leaves the list as it was.
+        .then((childId) => uiWorkspace.openSession(childId))
+        .catch((error: unknown) => {
+          notify({
+            kind: "forkFailed",
+            message: error instanceof Error ? error.message : String(error),
+          });
         });
     },
   });

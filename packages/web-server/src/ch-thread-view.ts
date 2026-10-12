@@ -173,6 +173,19 @@ export class ChThreadView {
     );
   }
 
+  /** Resolve a Web turn/end coordinate to its canonical CH Turn, including prepended pages. */
+  forkTurnId(atSeq?: number): string | undefined {
+    this.ensureCurrent();
+    const end =
+      atSeq === undefined
+        ? this.log.events.findLast((event) => event.type === "turn/end")
+        : this.log.events.find((event) => event.seq === atSeq && event.type === "turn/end");
+    if (!end) return undefined;
+    const turn = (end.data as { turn: number }).turn;
+    for (const [id, view] of this.turns) if (view.done && view.projector.turn === turn) return id;
+    return undefined;
+  }
+
   /** Older native pages are projected separately, without changing the visible tail. */
   prepend(turns: ChTurn[]): void {
     this.ensureCurrent();

@@ -31,6 +31,7 @@ export class FakeChHost implements ChHostClient {
   }
   closed = false;
   historyError: string | undefined;
+  forkError: string | undefined;
   readonly inspection = {
     status: "ready",
     catalog: {
@@ -174,6 +175,20 @@ export class FakeChHost implements ChHostClient {
           this.projectSnapshot.projectless.splice(this.projectSnapshot.projectless.indexOf(id), 1);
         created.turns = [];
         value = { thread: structuredClone(created) };
+        break;
+      }
+      case "codexhost/thread/fork": {
+        if (this.forkError) throw new Error(this.forkError);
+        if (!row || !this.inspection.capabilities.history.fork)
+          throw new Error("Native fork unavailable");
+        const index = row.turns.findIndex((turn) => turn.id === params.lastTurnId);
+        if (index < 0) throw new Error("Native fork checkpoint unavailable");
+        const id = "fork-" + this.threads.size;
+        const child = this.add(id, row.cwd ?? "", row.name ?? row.id, false);
+        child.turns = structuredClone(row.turns.slice(0, index + 1));
+        const project = this.projectSnapshot.assignments[row.id];
+        if (project) this.projectSnapshot.assignments[id] = project;
+        value = { threadId: id };
         break;
       }
       case "turn/start": {

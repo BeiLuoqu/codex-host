@@ -14,6 +14,7 @@ import type { Inspection } from "./harnesses.ts";
 import { nativePermissionView } from "./session-presentation.ts";
 import { projectGroupRoot } from "./ch-project-groups.ts";
 import { ChThreadHistory } from "./ch-thread-history.ts";
+import { forkChThread, forkUnavailable } from "./ch-thread-fork.ts";
 import { ChPinnedThreads } from "./ch-pinned-threads.ts";
 import { type WebImages, WEB_IMAGE_INPUT, WEB_IMAGE_LIMITS } from "./web-images.ts";
 import { ChAttachments } from "./ch-attachments.ts";
@@ -597,6 +598,29 @@ export class ChSessions {
       };
     });
     rpc.register("session/create", (args) => this.create(args));
+    rpc.register("session/fork", async (args) => {
+      const request = requestOf<{ sessionId: string; atSeq?: number }>(args);
+      if (
+        typeof request.sessionId !== "string" ||
+        !request.sessionId ||
+        (request.atSeq !== undefined && (!Number.isSafeInteger(request.atSeq) || request.atSeq < 0))
+      )
+        throw new RpcError("session/fork-invalid", "Invalid fork request.");
+      const id = this.id(request.sessionId);
+      if (this.drafts.has(id))
+        return forkUnavailable(id, "Send a message before forking this session.");
+      const displayed = this.views.get(id);
+      if (request.atSeq !== undefined && !displayed)
+        return forkUnavailable(id, "Fork history expired. Reopen the conversation.");
+      const view = await this.view(id);
+      if (request.atSeq !== undefined && view !== displayed)
+        return forkUnavailable(id, "Fork history changed. Reopen the conversation.");
+      const result = await forkChThread(this.host, view, request.atSeq);
+      // A failed catalog read must not turn a confirmed fork into a rejected write.
+      // The next list/notification refresh will reconcile the canonical child.
+      await this.refresh().catch(() => undefined);
+      return result;
+    });
     rpc.register("session/modelCatalog", () => this.catalog.models());
     rpc.register("session/selectModel", async (args) => {
       const request = requestOf<ModelSelection & { sessionId: string }>(args);

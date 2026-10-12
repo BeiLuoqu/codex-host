@@ -68,11 +68,13 @@ export function RowActionToast({
       />
     );
   }
-  if (toast.kind === "createFailed") {
+  if (toast.kind === "createFailed" || toast.kind === "forkFailed") {
     return (
       <Toast
         key={`toast-${String(toast.seq)}`}
-        text={t("toast.createFailed", { message: toast.message })}
+        text={t(toast.kind === "forkFailed" ? "toast.forkFailed" : "toast.createFailed", {
+          message: toast.message,
+        })}
         icon={<IconWarningOutlineRegular />}
         holdMs={LONG_TOAST_HOLD_MS}
         onDone={dismissToast}
@@ -91,7 +93,10 @@ export function RowActionToast({
 
 /** The copy of one plain warning, keyed by the notice kind the union closes over. */
 function plainNoticeText(
-  toast: Exclude<RowToastState, { kind: "archived" | "stoppedAndArchived" | "createFailed" }>,
+  toast: Exclude<
+    RowToastState,
+    { kind: "archived" | "stoppedAndArchived" | "createFailed" | "forkFailed" }
+  >,
   t: RowToastProps["t"],
 ): string {
   switch (toast.kind) {

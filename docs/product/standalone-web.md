@@ -58,6 +58,12 @@ npm run start:web -- --port 3181
 
 通用 App 可通过 Web 原有认证访问 `/api/ch/v1/{events,rpc,snapshot,respond}`，不需要理解 DSH 渲染日志，也拿不到 Host 私有 token。协议、恢复顺序和部署边界见[客户端通道](../architecture/host-client-channel.md)。本地草稿、滚动位置和当前选中会话不共享。旧 CDP 模式的审批仍在 GUI 处理；共享 Web 的通用文件预览/下载、完整子会话/后台任务投影仍有边界。公开远程 Host 通道、原生 App、真机后台与推送生命周期不在本次接入内。
 
+### 普通会话 Fork
+
+共享模式的侧栏“分叉会话”和消息尾部“在新对话中分支”通过 `session/fork` 转发至 CH 的 `codexhost/thread/fork`。侧栏选择最近已结束的轮次；消息入口必须对应当前内存历史窗口中的精确 `turn/end`，Web 将展示坐标映射成 canonical `lastTurnId`，包括已向前分页的历史，不把局部序号当成原生 ID，也不自动改到相邻轮次。过期窗口、空历史、草稿和不支持 Fork 的 Thread 明确拒绝；具体 checkpoint 是否可用及运行期间是否允许派生仍由 CH/Adapter 判断。
+
+只实现原执行目录中的普通 Fork，不创建 worktree、不传 cwd 覆盖、不新建 Web 历史副本。CH 负责原生派生、身份及持久化，确认后 Web 刷新目录并使用返回的 Thread ID 打开新会话。两个点击入口均显示失败原因；请求结果未知时不自动重试。Fork 已确认后目录刷新失败不改报创建失败，后续目录同步恢复可见性。客户端仍沿用既有的派生标题更新；标题更新失败不回滚已创建的 Thread。
+
 ### 附件：落盘后沿用原生路径上下文
 
 本地共享模式支持 PNG/JPEG/WebP/GIF 的粘贴、文件选择及拖放；图片先在浏览器草稿中预览，只有点击发送才上传。服务端验证整批图片后，将收到的原始字节保存到 `<--data>/attachments/images/<sha256>.<ext>`，目录/文件默认权限为 0700/0600，不使用用户文件名或路径作为落盘位置。内容寻址用于去重与完整性校验，不建立新的 Thread 索引。

@@ -326,7 +326,7 @@ export function apply(ctx: Context): void {
                 (turn) => turn.end?.seq === seq,
               );
               const messageId = turn?.data.get("turn-tail")?.closing?.finalNode.messageId;
-              ctx.sessions
+              return ctx.sessions
                 .fork({
                   sessionId,
                   atSeq: seq,
@@ -342,9 +342,6 @@ export function apply(ctx: Context): void {
                 })
                 .then((childId) => {
                   ctx.uiWorkspace.openSession(childId);
-                })
-                .catch(() => {
-                  // Fork or child-title failure leaves the source view unchanged.
                 });
             },
           };

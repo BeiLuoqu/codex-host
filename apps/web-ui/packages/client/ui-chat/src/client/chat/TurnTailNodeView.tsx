@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useRef, useState } from "react";
 import type { InjectFace, PropsRenderSlots } from "@deepseek-ai/dsh-client-ui-slots";
 import type {
   ChatNodeViewProps,
@@ -47,6 +47,9 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
   useChat,
   usePerformanceUsage,
 }: TurnTailNodeViewProps) {
+  const forking = useRef(false);
+  const [forkPending, setForkPending] = useState(false);
+  const [forkError, setForkError] = useState<string>();
   const detailed = usePerformanceUsage((mode) => mode) === "detailed";
   const data = node.data;
   const hasLaterChatNode = useChat(
@@ -100,9 +103,20 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
         // The branch action owns boundary resolution: it sends the real
         // turn/end seq it already has, and the Host cuts exactly there.
         onBranch={() => {
-          forkAt(data.seq);
+          if (forking.current) return;
+          forking.current = true;
+          setForkPending(true);
+          setForkError(undefined);
+          void forkAt(data.seq)
+            .catch((error: unknown) => {
+              setForkError(error instanceof Error ? error.message : String(error));
+            })
+            .finally(() => {
+              forking.current = false;
+              setForkPending(false);
+            });
         }}
-        branchUnavailable={data.branchUnavailable || hasLaterChatNode}
+        branchUnavailable={forkPending || data.branchUnavailable || hasLaterChatNode}
         className={css.actions}
         extraActions={assistantActions}
         usageAction={
@@ -112,6 +126,9 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
         }
         t={t}
       />
+      {forkError !== undefined && (
+        <p role="alert">{t("message.branchFailed", { message: forkError })}</p>
+      )}
     </div>
   );
 });
