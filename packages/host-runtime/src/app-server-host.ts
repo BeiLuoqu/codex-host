@@ -57,6 +57,7 @@ import { managedDelegationSkillReference } from "./delegation-skill.js";
 import { AccountRateLimits } from "./codex-runtime/account-rate-limits.js";
 import { NativeAccountObserver } from "./native-account-observer.js";
 import { nativeThreadSupportsReferences } from "./native-thread-reference-capability.js";
+import { THREAD_REFERENCE_SOURCE_HOST_PARAM } from "@codexhost/shared-contracts";
 import {
   HarnessAccountInspectionCache,
   listedHarnessAccounts,
@@ -77,14 +78,17 @@ import type {
   HostApprovalResponse,
   HostQuestionInteraction,
 } from "@codexhost/harness-adapter";
-import type { HostEvent, HostUsage } from "@codexhost/harness-adapter";
+import {
+  parseHarnessAccountCredits,
+  type HostEvent,
+  type HostUsage,
+} from "@codexhost/harness-adapter";
 import type {
   HarnessPluginContext,
   HarnessUsageStatisticsAdapter,
 } from "@codexhost/harness-adapter/plugin";
 import type { StoredThreadRecordV1 } from "@codexhost/mapping-store";
 import {
-  accountCreditsSnapshotSchema,
   harnessAccountInspectParamsSchema,
   harnessAccountInspectResultSchema,
   type HarnessAccountInspectResult,
@@ -402,21 +406,6 @@ function officialThreadBusy(thread: Record<string, unknown> | null): boolean {
   );
 }
 
-function isCreditsAdapter(adapter: HarnessAdapter): adapter is HarnessAdapter & {
-  credits(): unknown;
-  refreshCredits?: () => Promise<unknown>;
-} {
-  return typeof (adapter as { credits?: unknown }).credits === "function";
-}
-
-function projectAccountCredits(value: unknown): AccountCreditsSnapshot | null {
-  if (!isRecord(value)) return null;
-  const rest = { ...value };
-  delete rest.fetchedAt;
-  const parsed = accountCreditsSnapshotSchema.safeParse(rest);
-  return parsed.success ? parsed.data : null;
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -665,6 +654,7 @@ export class AppServerHost {
   readonly #launchSettings: HarnessLaunchSettingsStore;
   readonly #accountInspections = new HarnessAccountInspectionCache();
   #externalRuntime: ExternalThreadRuntime;
+  readonly #executionHosts = new WeakMap<ExternalThread, string>();
   readonly #externalPrewarms = new ExternalThreadPrewarms();
   readonly #externalSteering = new ExternalTurnSteering();
   readonly #liveCommandCache = new LiveCommandCatalogCache();
@@ -845,6 +835,7 @@ export class AppServerHost {
       consumeOutputs: (thread) => this.#consumeHarnessOutputs(thread),
       diagnose: (error) => this.#diagnose(error),
       subagentRunning: (threadId) => this.#subagentThreadStatuses.get(threadId) === "active",
+      hasRunningDescendants: (threadId) => this.#hasRunningSubagents(threadId),
       idleRelease: {
         queue: this.#desktopRequests,
         onClosed: async (thread) => {
@@ -918,6 +909,10 @@ export class AppServerHost {
       list: (input) => this.#waitForPlugins().then(() => this.#delegationCoordinator.list(input)),
       canHandleStart: (input) => this.#canHandleDelegationStart(input),
       ownsThread: (threadId) => this.#ownsDelegationThread(threadId),
+      executionHostId: (threadId) => {
+        const thread = this.#externalRuntime.get(threadId);
+        return thread ? this.#executionHosts.get(thread) : undefined;
+      },
     });
     this.#unregisterDelegationApi =
       typeof unregisterDelegationApi === "function" ? unregisterDelegationApi : undefined;
@@ -1080,6 +1075,7 @@ export class AppServerHost {
       await Promise.allSettled(threads.map(({ session }) => session.close()));
       await Promise.allSettled(threads.map(({ outputTask }) => outputTask));
       await this.#closeAdapters();
+      await this.#externalRuntime.drain();
       for (const pending of [...this.#pendingDesktopApprovals.values()]) {
         await this.#resolveDesktopApproval(pending.interaction.interactionId).catch(
           () => undefined,
@@ -3647,6 +3643,7 @@ export class AppServerHost {
       const result = threadUsageInspectionSchema.parse({
         threadId: params.data.threadId,
         usage: await this.#observedSessionUsage.read(params.data.threadId),
+        accountCreditsSupported: true,
         ...(accountCredits ? { accountCredits } : {}),
       });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
@@ -3654,12 +3651,20 @@ export class AppServerHost {
     }
     if (params.data.refresh === "exact") void resolution.thread.session.refreshUsage?.();
     const adapter = this.#externalAdapters.get(resolution.thread.harnessId);
-    if (adapter && isCreditsAdapter(adapter)) void adapter.refreshCredits?.();
-    const credits =
-      adapter && isCreditsAdapter(adapter) ? projectAccountCredits(adapter.credits()) : null;
+    if (adapter?.credits && adapter.refreshCredits)
+      void Promise.resolve()
+        .then(() => adapter.refreshCredits?.())
+        .catch(() => undefined);
+    let credits: AccountCreditsSnapshot | null = null;
+    try {
+      credits = parseHarnessAccountCredits(adapter?.credits?.());
+    } catch {
+      // Optional account telemetry cannot fail the Thread's usage inspection.
+    }
     const result = threadUsageInspectionSchema.parse({
       threadId: params.data.threadId,
       usage: await this.#threadUsage(resolution.thread),
+      accountCreditsSupported: typeof adapter?.credits === "function",
       ...(credits ? { accountCredits: credits } : {}),
     });
     await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
@@ -3889,6 +3894,7 @@ export class AppServerHost {
     descriptor: HarnessCommandDescriptor,
     arguments_: JsonObject | undefined,
     requestedTurnId?: HostTurnId,
+    sourceHostId?: unknown,
   ): Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }> {
     const commands = thread.session.commands;
     if (!commands) {
@@ -3921,6 +3927,7 @@ export class AppServerHost {
     if (descriptor.invocation === "/compact") this.#manualCompactionTurns.set(thread, turnId);
     else this.#manualCompactionTurns.delete(thread);
 
+    const restoreExecutionHost = this.#setExecutionHost(thread, sourceHostId);
     try {
       if (thread.unsubmittedPrewarm && (await this.#externalRuntime.submitPrewarm(thread))) {
         await this.#notifyExternalThreadStarted(thread.thread);
@@ -3933,6 +3940,7 @@ export class AppServerHost {
       if (!result.ok) throw new ExternalCommandError(-32073, result.error.message);
       return { turnId: result.value.turnId, turn: projection.projector.pendingTurn(), gate };
     } catch (error) {
+      restoreExecutionHost();
       thread.running = false;
       thread.activeTurnId = null;
       thread.projectedTurns.delete(turnId);
@@ -4926,6 +4934,7 @@ export class AppServerHost {
         undefined,
         typeof params.clientUserMessageId === "string" ? params.clientUserMessageId : undefined,
         clientRequest,
+        params[THREAD_REFERENCE_SOURCE_HOST_PARAM],
       );
       try {
         await this.#writer.json(rpcEnvelope(request, { result: { turn: started.turn } }));
@@ -5182,6 +5191,7 @@ export class AppServerHost {
               ? (requestObject(request).clientUserMessageId as string)
               : undefined,
             String(request.id).startsWith(this.#clientRequestPrefix),
+            requestObject(request)[THREAD_REFERENCE_SOURCE_HOST_PARAM],
           ),
       );
       try {
@@ -5211,12 +5221,13 @@ export class AppServerHost {
     assertActive?: () => void,
     clientUserMessageId?: string,
     publishInput = false,
+    sourceHostId?: unknown,
   ): Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }> {
     const text = restoreHarnessCommandMentions(inputText);
     const commands = thread.session.commands;
     if (!commands || !isExternalCommandCandidate(text)) {
       assertActive?.();
-      return this.#beginExternalTurn(thread, text, clientUserMessageId, publishInput);
+      return this.#beginExternalTurn(thread, text, clientUserMessageId, publishInput, sourceHostId);
     }
     this.#pendingExternalCommandRequests.add(thread.id);
     try {
@@ -5229,9 +5240,21 @@ export class AppServerHost {
       assertActive?.();
       if (!command) {
         this.#pendingExternalCommandRequests.delete(thread.id);
-        return await this.#beginExternalTurn(thread, text, clientUserMessageId, publishInput);
+        return await this.#beginExternalTurn(
+          thread,
+          text,
+          clientUserMessageId,
+          publishInput,
+          sourceHostId,
+        );
       }
-      return await this.#beginExternalCommand(thread, command.descriptor, command.arguments);
+      return await this.#beginExternalCommand(
+        thread,
+        command.descriptor,
+        command.arguments,
+        undefined,
+        sourceHostId,
+      );
     } catch (error) {
       if (error instanceof ExternalCommandError || error instanceof ExternalSteerError) throw error;
       this.#diagnose(error);
@@ -5250,11 +5273,31 @@ export class AppServerHost {
     }
   }
 
+  /** Apply context before native execution; a rejected start restores the prior identity. */
+  #setExecutionHost(thread: ExternalThread, sourceHostId: unknown): () => void {
+    const previousHostId = this.#executionHosts.get(thread);
+    if (
+      typeof sourceHostId === "string" &&
+      sourceHostId.length > 0 &&
+      sourceHostId.length <= 1024 &&
+      !/[\u0000-\u0020\u007f]/u.test(sourceHostId)
+    ) {
+      this.#executionHosts.set(thread, sourceHostId);
+    } else {
+      this.#executionHosts.delete(thread);
+    }
+    return () => {
+      if (previousHostId === undefined) this.#executionHosts.delete(thread);
+      else this.#executionHosts.set(thread, previousHostId);
+    };
+  }
+
   async #beginExternalTurn(
     thread: ExternalThread,
     text: string,
     clientUserMessageId?: string,
     publishInput = false,
+    sourceHostId?: unknown,
   ): Promise<{
     turnId: HostTurnId;
     turn: JsonObject;
@@ -5292,6 +5335,7 @@ export class AppServerHost {
     thread.projectedTurns.set(turnId, projection);
     thread.responseGates.set(turnId, gate);
 
+    const restoreExecutionHost = this.#setExecutionHost(thread, sourceHostId);
     try {
       if (thread.unsubmittedPrewarm && (await this.#externalRuntime.submitPrewarm(thread))) {
         await this.#notifyExternalThreadStarted(thread.thread);
@@ -5304,6 +5348,7 @@ export class AppServerHost {
       if (!result.ok) throw new ExternalSteerError(-32073, result.error.message);
       return { turnId, turn: projection.projector.pendingTurn(), gate };
     } catch (error) {
+      restoreExecutionHost();
       thread.running = false;
       thread.activeTurnId = null;
       thread.projectedTurns.delete(turnId);
@@ -5573,9 +5618,21 @@ export class AppServerHost {
       this.#queuedTurnStarts.delete(thread.id);
       this.#externalSteering.fault(thread.id, new Error(event.error.message));
       thread.stateObserver.fault(new Error(event.error.message));
+      this.#externalRuntime.markSessionUnavailable(thread);
       if (this.#externalQueue.pause(thread.id, "outcome-unknown"))
         await this.#publishExternalQueue(thread.id);
       this.#diagnose(`${thread.harnessId} Harness Session faulted: ${event.error.message}`);
+      // Idle Threads must not keep a dead Session; the next open restores from disk.
+      if (
+        !thread.running &&
+        !thread.activeTurnId &&
+        !this.#hasRunningSubagents(thread.id) &&
+        !thread.session.hasBackgroundWork?.()
+      ) {
+        // Do not await: discard drains this outputTask. Runtime synchronously admits the
+        // cleanup to its Thread lifecycle barrier so resolve/refresh cannot bypass it.
+        void this.#externalRuntime.discardUnavailableIdle(thread);
+      }
       return;
     }
 
@@ -5749,6 +5806,12 @@ export class AppServerHost {
   }
 
   async #refreshOpenSubagentThread(threadId: string, terminal = true): Promise<void> {
+    await this.#desktopRequests.run(threadId, async () => {
+      await this.#refreshOpenSubagentThreadBody(threadId, terminal);
+    });
+  }
+
+  async #refreshOpenSubagentThreadBody(threadId: string, terminal: boolean): Promise<void> {
     const child = this.#externalRuntime.get(threadId);
     if (!child) return;
     const previousItems = new Map(
