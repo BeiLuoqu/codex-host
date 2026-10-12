@@ -1611,16 +1611,10 @@ export class GrokAdapter implements HarnessAdapter {
 
   async inspectAccount(): Promise<HarnessAccountSnapshot | null> {
     if (this.#closePromise) return null;
-    const account = await (this.#dependencies.fetchAccount ?? fetchGrokAccount)({
+    return (this.#dependencies.fetchAccount ?? fetchGrokAccount)({
       ...(this.#environment ? { environment: this.#environment } : {}),
       signal: this.#accountAbort.signal,
     });
-    // The account overview reports the shared plan cap. Product breakdowns
-    // remain available through credits(), not a Renderer Harness-ID filter.
-    if (!account?.credits) return account;
-    const credits = { ...account.credits };
-    delete credits.productUsage;
-    return { ...account, credits };
   }
 
   credits(): GrokCreditsSnapshot | null {

@@ -9,6 +9,7 @@ import {
   harnessInspectionSchema,
   harnessCommandCatalogSchema,
   harnessInstallationStateSchema,
+  harnessAccountInspectResultSchema,
   localizeHarnessPresentation,
   localizeHarnessText,
   threadUsageInspectionSchema,
@@ -123,7 +124,8 @@ async function fixtureFor(credits: string) {
 
 describe("installed plugin presentation through Host RPC", () => {
   it("loads an unknown plugin and transports its permissions, commands, notices and quota without client registration", async () => {
-    const f = await fixtureFor(`credits: () => (${JSON.stringify(quota)}),`);
+    const f = await fixtureFor(`credits: () => (${JSON.stringify(quota)}),
+      inspectAccount: async () => ({ credits: ${JSON.stringify(quota)} }),`);
     try {
       const inspection = harnessInspectionSchema.parse(
         await f.rpc("codexhost/harness/inspect", { harnessId: id }),
@@ -154,6 +156,10 @@ describe("installed plugin presentation through Host RPC", () => {
       );
       expect(usage.accountCreditsSupported).toBe(true);
       expect(usage.accountCredits).toEqual(quota);
+      const account = harnessAccountInspectResultSchema.parse(
+        await f.rpc("codexhost/harness/accounts/inspect", { harnessId: id }),
+      );
+      expect(account.account?.credits).toEqual(quota);
       const product = usage.accountCredits?.productUsage?.[0];
       if (!product) throw new Error("Missing quota window");
       expect(accountCreditsWindowLabel(product, "zh-CN", (period) => period)).toBe(
