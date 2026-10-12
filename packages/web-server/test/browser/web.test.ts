@@ -207,14 +207,20 @@ for (const width of [390, 1280]) {
         .waitFor();
       await screenshot(page, `harness-models-${width}`);
       await page.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).click();
-      await page
-        .getByRole("button", {
-          name: "Select model, current Other Alternate, reasoning effort High",
-          exact: true,
-        })
-        .waitFor();
-      assert.equal(await page.getByRole("menu", { name: "Model", exact: true }).isVisible(), true);
-      await page.keyboard.press("Escape");
+      const alternateModelTrigger = page.getByRole("button", {
+        name: "Select model, current Other Alternate, reasoning effort High",
+        exact: true,
+      });
+      await alternateModelTrigger.waitFor();
+      // The selection projection can update the caption before the RPC settles.
+      await models.waitFor({ state: "hidden" });
+      await thinking.waitFor({ state: "hidden" });
+      assert.equal(await alternateModelTrigger.getAttribute("aria-expanded"), "false");
+      assert.equal(
+        await alternateModelTrigger.evaluate((element) => element === document.activeElement),
+        true,
+      );
+      await alternateModelTrigger.click();
       await thinking.getByRole("menuitemradio", { name: "Low", exact: true }).click();
       await page
         .getByRole("button", {

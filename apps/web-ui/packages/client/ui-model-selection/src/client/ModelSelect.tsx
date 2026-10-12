@@ -12,9 +12,9 @@
  * Model pane focuses the current model or its search field. Provider headings
  * paint their background only while pinned
  * by scrolling. Clearing a query restores the full list and search focus.
- * A Model selection keeps both cards open for a follow-up Thinking choice;
- * choosing Thinking closes and restores trigger focus without a ring. Model
- * names match a case-insensitive ordered subsequence
+ * Choosing a Model or Thinking level closes the cards and restores trigger
+ * focus without a ring, unless the user has already left or reopened the menu.
+ * Model names match a case-insensitive ordered subsequence
  * within each provider group, ranked by
  * prefix, alignment score, then catalog order. Returning to the root pane
  * hands focus back to the cell that opened it. Data and submission ride the
@@ -513,23 +513,19 @@ export function ModelSelect({
 
   const settleSelection = (
     result: Awaited<ReturnType<ModelSelectInjected["select"]>>,
-    closeOnSuccess: boolean,
+    submittedMenu: HTMLDivElement | null,
   ): void => {
     if (result === undefined) return;
     if (result.ok) {
-      if (rootRef.current !== null) {
-        if (closeOnSuccess) closeAfterSelection();
-        else
-          queueMicrotask(() => {
-            if (showSearch) searchRef.current?.focus();
-            else
-              modelPanelRef.current
-                ?.querySelector<HTMLElement>(
-                  '[role="menuitemradio"][aria-checked="true"]:not([disabled])',
-                )
-                ?.focus();
-          });
-      }
+      // A late reply owns only the menu that submitted it, not a subsequent
+      // opening or focus the user has moved elsewhere while waiting.
+      if (
+        submittedMenu !== null &&
+        menuRef.current === submittedMenu &&
+        (rootRef.current?.contains(document.activeElement) === true ||
+          submittedMenu.contains(document.activeElement))
+      )
+        closeAfterSelection();
       return;
     }
     const { error } = result;
@@ -543,21 +539,23 @@ export function ModelSelect({
     });
   };
 
-  const submit = (selection: ModelSelection, closeOnSuccess: boolean): void => {
+  const submit = (selection: ModelSelection): void => {
     lastActionRef.current = "select";
     // Disabled option rows cannot retain focus while a selection is pending.
     setSelectionFocus(true);
     triggerRef.current?.focus();
+    const submittedMenu = menuRef.current;
     void select(selection).then((result) => {
-      settleSelection(result, closeOnSuccess);
+      settleSelection(result, submittedMenu);
     });
   };
 
   const choose = (selection: ModelSelection): void => {
-    setPane("model");
-    if (state.current?.provider === selection.provider && state.current.model === selection.model)
+    if (state.current?.provider === selection.provider && state.current.model === selection.model) {
+      closeAfterSelection();
       return;
-    submit(selection, false);
+    }
+    submit(selection);
   };
 
   const chooseEffort = (effort: string | undefined): void => {
@@ -571,7 +569,7 @@ export function ModelSelect({
       model: state.current.model,
       ...(effort === undefined ? {} : { reasoningEffort: effort }),
     };
-    submit(selection, true);
+    submit(selection);
   };
 
   const toggleFavorite = (provider: string, model: string): void => {

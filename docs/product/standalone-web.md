@@ -128,7 +128,7 @@ Composer 的模型/推理等级控件旁提供独立的 Harness 图标按钮。�
 
 新会话可切换 Harness；选择时采用该 Harness 目录的首个可用 Model 及其默认推理等级，随后可单独选择其他 Model。模型菜单和 `/model` 只列当前 Harness 的模型。两个控件共用原来的目录、`session/selectModel` 和确认后的持久投影，不维护另一份选中状态。
 
-Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 Model 的原生思考强度，并以底部 Model 行打开左侧搜索列表；桌面端两卡并列保留上下文，窄屏切换为单卡并提供返回按钮。选中 Model 后菜单保持打开，便于继续选择该 Model 实际声明的思考强度；强度选择成功后关闭。模型收藏只作为当前浏览器的排序偏好写入版本化 localStorage，不改变 Host 目录、会话选择或 Desktop 偏好，也不把没有原生 reasoning metadata 的 Model 补成固定等级。
+Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 Model 的原生思考强度，并以底部 Model 行打开左侧搜索列表；桌面端两卡并列保留上下文，窄屏切换为单卡并提供返回按钮。选择 Model 或思考强度成功后关闭整个浮窗，并将焦点恢复到入口按钮且不显示焦点环；点击当前 Model 或当前强度也直接关闭，不重复提交或重置强度。选择失败时保留菜单并显示错误提示，可继续重试。若请求等待期间用户已离开或重新打开菜单，迟到的成功响应只更新选择，不抢回焦点或关闭新打开的菜单。需要调整新 Model 的思考强度时重新打开入口，仍只展示该 Model 实际声明的等级。模型收藏只作为当前浏览器的排序偏好写入版本化 localStorage，不改变 Host 目录、会话选择或 Desktop 偏好，也不把没有原生 reasoning metadata 的 Model 补成固定等级。
 
 会话有原生历史后固定 Harness；菜单仍展示其他 Harness，但禁用切换并提示新建会话。当前 Harness 内的 Model 选择保持可用。重新连接或刷新按持久投影恢复，不把现有 Native Session 迁到另一个 Harness。
 
