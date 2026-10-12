@@ -90,39 +90,6 @@ function usage(snapshot: AccountCreditsSnapshot = credits, display: "used" | "re
 }
 
 describe("Account limit windows", () => {
-  it.each(["weekly", "monthly"] as const)(
-    "renders every product detail alongside a %s account limit",
-    (periodType) => {
-      const snapshot: AccountCreditsSnapshot = {
-        usedPercent: 25,
-        periodType,
-        productUsage: [
-          {
-            product: "GrokBuild",
-            usagePercent: 30,
-            localizations: { en: { label: "Build" }, "zh-CN": { label: "Build" } },
-          },
-          {
-            product: "GrokChat",
-            usagePercent: 0,
-            localizations: { en: { label: "Chat" }, "zh-CN": { label: "Chat" } },
-          },
-          { product: "Future product", usagePercent: 100 },
-        ],
-      };
-      for (const display of ["used", "remaining"] as const) {
-        const result = usage(snapshot, display);
-        expect(text(result)).toContain("Build");
-        expect(text(result)).toContain("Chat");
-        expect(text(result)).toContain("Future product");
-        expect(
-          elements(result)
-            .filter((el) => el.attributes.get("role") === "meter")
-            .map((el) => el.attributes.get("aria-valuenow")),
-        ).toEqual(display === "used" ? ["25", "30", "0", "100"] : ["75", "70", "100", "0"]);
-      }
-    },
-  );
   it("does not synthesize a 5h window for weekly-only accounts", () => {
     const result = renderAccountUsage(
       document,
