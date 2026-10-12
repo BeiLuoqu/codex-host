@@ -182,6 +182,52 @@ describe("public authenticated owner channel", () => {
     expect(fixture.adapter.sessions).toHaveLength(1);
     current(fixture).succeedTurn();
   });
+  it("queues a busy Web follow-up and starts it after the active Turn", async () => {
+    const { fixture, a } = await setup();
+    const id = await startPiThread(fixture);
+    await startPiTurn(fixture, id);
+    await expect(
+      a.request("turn/start", {
+        threadId: id,
+        delivery: "queue",
+        clientUserMessageId: "queued-web-message",
+        input: [{ type: "text", text: "next from Web" }],
+      }),
+    ).resolves.toMatchObject({ queued: true });
+    expect((await a.snapshot(id)).queue?.items).toEqual([
+      expect.objectContaining({ clientUserMessageId: "queued-web-message" }),
+    ]);
+    current(fixture).succeedTurn();
+    await fixture.collector.waitFor(
+      (value) =>
+        value.method === "turn/started" && JSON.stringify(value).includes("queued-web-message"),
+    );
+    expect((await a.snapshot(id)).queue?.items).toEqual([]);
+    current(fixture).succeedTurn();
+  });
+  it("keeps a late Web Steer as a queued follow-up after the busy window closes", async () => {
+    const { fixture, a } = await setup();
+    const id = await startPiThread(fixture);
+    const completedTurnId = await startPiTurn(fixture, id);
+    current(fixture).succeedTurn();
+    await fixture.collector.waitFor(
+      (value) =>
+        value.method === "turn/completed" && JSON.stringify(value).includes(completedTurnId),
+    );
+    await expect(
+      a.request("turn/steer", {
+        threadId: id,
+        expectedTurnId: completedTurnId,
+        clientUserMessageId: "late-web-steer",
+        input: [{ type: "text", text: "preserve this follow-up" }],
+      }),
+    ).resolves.toHaveProperty("turn");
+    await fixture.collector.waitFor(
+      (value) =>
+        value.method === "turn/started" && JSON.stringify(value).includes("late-web-steer"),
+    );
+    current(fixture).succeedTurn();
+  });
   it.each(["web", "gui"])(
     "arbitrates %s approval against another client's simultaneous response",
     async (winner) => {

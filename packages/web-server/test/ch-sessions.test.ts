@@ -75,6 +75,43 @@ it("shares canonical CH identity and cwd without a Web index/history or physical
   assert.deepEqual(readdirSync(root), ["workspaces.json"]);
 });
 
+it("keeps a late steer as the next queued follow-up when CH is already idle", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ch-late-steer-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const host = new FakeChHost();
+  host.add("idle-thread", root);
+  const sessions = new ChSessions(
+    host,
+    new Workspaces(new DataDir(root), root),
+    new EventHub(root),
+  );
+  t.after(() => sessions.close());
+  const rpc = new RpcRegistry();
+  sessions.register(rpc, new StreamRegistry());
+  const result = await rpc.dispatch("session/prompt", {
+    args: {
+      request: {
+        sessionId: "idle-thread",
+        requestId: "late-steer",
+        content: [{ type: "text", text: "keep this message" }],
+        mode: "steer",
+      },
+    },
+  });
+  assert.ok(result.ok, result.ok ? undefined : result.error.message);
+  assert.equal(
+    host.requests.some((request) => request.method === "turn/steer"),
+    false,
+  );
+  assert.deepEqual(host.requests.find((request) => request.method === "turn/start")?.params, {
+    threadId: "idle-thread",
+    input: [{ type: "text", text: "keep this message" }],
+    delivery: "queue",
+    presentationInput: [{ type: "text", text: "keep this message" }],
+    clientUserMessageId: "late-steer",
+  });
+});
+
 it("shares one native history read across concurrent browser consumers", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "ch-read-sharing-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

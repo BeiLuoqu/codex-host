@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+
+import darkSvg from "../../src/assets/codexhost-otter-dark.svg?raw";
+import lightSvg from "../../src/assets/codexhost-otter-light.svg?raw";
 
 import {
   CODEXHOST_OTTER_DARK_DETAIL_PATH,
@@ -61,21 +63,15 @@ function expectOtter(icon: SVGElement, size: number): void {
 }
 
 describe("CodexHost theme-aware otter UI mark", () => {
-  for (const size of [20, 24]) {
+  for (const size of [20, 22, 24]) {
     it(`renders the original silhouette without a plate at ${size}px`, () => {
       withSvgDocument(() => expectOtter(createRendererSettingsBrandGlyph(size), size));
     });
   }
 
   it("keeps the viewable SVG exports aligned with the inline UI paths", () => {
-    const light = readFileSync(
-      new URL("../../src/assets/codexhost-otter-light.svg", import.meta.url),
-      "utf8",
-    );
-    const dark = readFileSync(
-      new URL("../../src/assets/codexhost-otter-dark.svg", import.meta.url),
-      "utf8",
-    );
+    const light = lightSvg;
+    const dark = darkSvg;
     expect(light).toContain(`d="${CODEXHOST_OTTER_PATH}"`);
     expect(light).toContain('fill="currentColor"');
     expect(light.match(/<path\b/gu)).toHaveLength(1);

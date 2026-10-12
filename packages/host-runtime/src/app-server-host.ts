@@ -5178,17 +5178,32 @@ export class AppServerHost {
   }
 
   async #steerExternalTurn(request: JsonRpcRequest, thread: ExternalThread): Promise<void> {
+    const params = requestObject(request);
+    if (
+      String(request.id).startsWith(this.#clientRequestPrefix) &&
+      (!thread.running || !thread.activeTurnId || this.#externalSteering.hasPending(thread.id))
+    ) {
+      // DSH treats Steer as best-effort. If its live steering window has
+      // closed, preserve the input in the canonical queue instead of failing.
+      const queuedRequest = jsonRpcRequestSchema.parse({
+        id: request.id,
+        method: "turn/start",
+        params: { ...params, delivery: "queue" },
+      });
+      await this.#startExternalTurn(queuedRequest, thread);
+      return;
+    }
     try {
       const started = await this.#externalSteering.run(
         thread,
-        requestObject(request),
+        params,
         (text, assertActive) =>
           this.#beginExternalInputTurn(
             thread,
             text,
             assertActive,
-            typeof requestObject(request).clientUserMessageId === "string"
-              ? (requestObject(request).clientUserMessageId as string)
+            typeof params.clientUserMessageId === "string"
+              ? (params.clientUserMessageId as string)
               : undefined,
             String(request.id).startsWith(this.#clientRequestPrefix),
             requestObject(request)[THREAD_REFERENCE_SOURCE_HOST_PARAM],

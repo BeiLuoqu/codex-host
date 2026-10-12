@@ -536,10 +536,24 @@ export class ChSessions {
           }),
         ),
       });
+      // Older Desktop CDP bridges may rewrite the explicit route. Confirm the
+      // owner before binding the draft or sending any input; a rejected creating
+      // promise fences retries without deleting a possibly allocated Session.
+      const owner = await this.owner(result.thread.id);
+      if (owner.harnessId !== draft.selection.provider)
+        throw new RpcError(
+          "session/harness-mismatch",
+          `CH created a ${owner.harnessId} Thread instead of ${draft.selection.provider}. No message was sent. Update the Desktop bridge or use the Host client channel, then start a new conversation.`,
+          {
+            threadId: result.thread.id,
+            expectedHarnessId: draft.selection.provider,
+            actualHarnessId: owner.harnessId,
+          },
+        );
       draft.canonicalId = result.thread.id;
       this.files?.bind(draft.id, result.thread.id);
       this.rows.set(result.thread.id, result.thread);
-      this.ownership.set(result.thread.id, (await this.owner(result.thread.id)).harnessId);
+      this.ownership.set(result.thread.id, owner.harnessId);
       this.workspaces.detachSession(draft.id);
       if (draft.cwd) {
         this.workspaces.selectReferenceWorkspace(draft.cwd);
@@ -688,17 +702,24 @@ export class ChSessions {
         const expectedTurnId =
           view.ownerSnapshot?.activeTurnId ??
           view.thread.turns.find((turn) => turn.status === "inProgress")?.id;
-        if (!expectedTurnId)
-          throw new RpcError(
-            "session/steer-unavailable",
-            "CH reports no active Turn to steer.",
-          );
-        await this.host.request("turn/steer", {
-          threadId,
-          expectedTurnId,
-          input,
-          ...(request.requestId ? { clientUserMessageId: request.requestId } : {}),
-        });
+        if (expectedTurnId) {
+          await this.host.request("turn/steer", {
+            threadId,
+            expectedTurnId,
+            input,
+            ...(request.requestId ? { clientUserMessageId: request.requestId } : {}),
+          });
+        } else {
+          // DSH steering is best-effort: when the busy window closed before
+          // admission, retain the message as the next canonical follow-up.
+          await this.host.request("turn/start", {
+            threadId,
+            input,
+            delivery: "queue",
+            presentationInput: request.content,
+            ...(request.requestId ? { clientUserMessageId: request.requestId } : {}),
+          });
+        }
       } else {
         await this.host.request("turn/start", {
           threadId,

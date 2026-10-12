@@ -169,6 +169,9 @@ describe("Renderer settings navigation rail trigger", () => {
       const badge = button.children[1];
 
       expect(button.style.width).toBe("36px");
+      expect(button.style.height).toBe("36px");
+      expect(button.children[0]?.attributes.get("width")).toBe("22");
+      expect(button.children[0]?.attributes.get("height")).toBe("22");
       expect(button.style.color).toContain("--color-text-secondary-ghost");
       expect(button.children[0]?.attributes.get("data-codexhost-mark")).toBe("otter-navigation");
       expect(button.children[0]?.attributes.get("viewBox")).toBe("0 0 384 384");

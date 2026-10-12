@@ -46,7 +46,7 @@ npm run start:web -- --port 3181
 
 共享模式的通用新会话和“最近”入口默认明确不选择工作区，不继承当前或最近使用的项目；项目行的新会话仍选择该项目目录。草稿可保持不选、选择已有工作区，或通过现有 Host 目录浏览器创建文件夹后选为工作区；切换选择保留输入正文与待发送附件。显式 standalone 仍沿用其要求工作区的创建流程。
 
-发送前只是内存草稿，未选择工作区时不带 `cwd`、不创建目录或 Native Session。Harness/模型/权限可选择；首次发送通过 CH `thread/start` 创建并绑定 canonical Thread ID，再通过 `turn/start` 提交。无工作区的创建请求携带明确的 `projectlessWorkspace` 命名提示，由唯一 Host 分配新的执行目录，不随机选择已有工作区、不改变其他 Thread 的 cwd。
+发送前只是内存草稿，未选择工作区时不带 `cwd`、不创建目录或 Native Session。Harness/模型/权限可选择；首次发送通过 CH `thread/start` 创建并绑定 canonical Thread ID，再通过 `turn/start` 提交。显式 CDP 入口同样保留 Web 请求中完整的 Harness 路由，不受 Desktop 当前草稿的 Harness/模型/权限选择覆盖。创建后先核对 Host 确认的 Harness 与草稿选择一致，再绑定身份和发送消息；若旧 Desktop 桥改写了路由或归属无法确认，则保留草稿、拒绝发送且不重试创建，不删除可能已分配的 Native Session。仅更新 Web 不会替换运行中的旧 Desktop 桥，需另行更新 Desktop，或使用默认 Host 客户端通道后新建会话。无工作区的创建请求携带明确的 `projectlessWorkspace` 命名提示，由唯一 Host 分配新的执行目录，不随机选择已有工作区、不改变其他 Thread 的 cwd。
 
 默认目录布局对齐本机 Codex 26.1007.21159 的策略：Host 用户的 `~/Documents/Codex/<本地日期>/<提示词命名>/`，取前六个 ASCII 字母/数字词、最多 80 字符，不能生成名称时用 `new-chat`；冲突先用 `-2` 至 `-100`，再尝试随机后缀，独占创建而非复用/覆盖目录。会话目录内创建 `outputs/` 与 `work/`，**实际 cwd 是会话目录本身，不是 `work/`**；子目录创建失败时沿用会话目录作为输出位置。当前使用该默认根目录，不读取或修改 Electron 私有的 `projectlessWorkspaceRoot` 设置。
 
@@ -54,7 +54,7 @@ npm run start:web -- --port 3181
 
 执行 `cwd` 不等于用户选择了项目。Web 通过后台只读 GUI 保存在 `CODEX_HOME/.codex-global-state.json` 的本地项目目录、Thread 项目归属与未选项目标记（旧 Host 沿用 CDP），按实际项目根目录补齐导航条目和项目名称；已关联项目的 worktree 归到所属项目，实际执行 `cwd` 保持不变。未选项目的会话保留，但其自动生成的目录不单独列为项目；历史临时目录也不凭路径名称猜测项目。Web 明确选择并实际提交的工作区仍保留。项目元数据不可读取时报错，不回退到全部 `cwd`；目录查询不创建 GUI 项目、不设置 `projectId`、不执行 `mkdir`。显式新建工作区和首次提交无项目会话的目录分配是上述独立写入流程，不由历史分组查询触发。复用已有 `workspaces.json`，旧版本误生成的导航条目仅在共享视图隐藏，不删除记录、会话或物理目录。已经失效的真实项目目录仍能显示历史入口。现有独立模式的历史文件保持原样，不自动迁入共享来源。
 
-共享入口保留文本及图片路径附件发送、停止、原生模型/权限选择及改名。事件模式下，同一 Thread 的 GUI/Web 消息、普通工具进展、生效配置、审批和提问共用 Host 状态。Web 使用原生选项呈现交互，Host 校验并接受第一份有效响应，再通知其余端关闭；断线时撤下交互，重连只恢复仍待处理的请求，不因取消本地卡片而自动回答 Harness。Web/App 发出的用户输入也通过既有 Host 投影广播给 GUI，原生 `clientId` 用于撤下 Web 的乐观回显。已确认发送不会因随后读取失败变成“发送被拒绝”；连接中断导致结果未知时不自动重发。`turn/start` 的请求 ID 去重仅覆盖当前 Host 进程最近 256 条回执，不承诺跨重启或超窗口 exactly-once。同时发送不会另开会话并行执行：Shared Host 持有 Desktop/Web 共用的跟进队列；成功终态自动推进，停止、失败和 unknown outcome 暂停，用户可编辑、删除或显式继续单条消息。Steer 仍使用 Host 的 cancel → terminal → replacement 契约，不降级为普通排队。
+共享入口保留文本及图片路径附件发送、停止、原生模型/权限选择及改名。事件模式下，同一 Thread 的 GUI/Web 消息、普通工具进展、生效配置、审批和提问共用 Host 状态。Web 使用原生选项呈现交互，Host 校验并接受第一份有效响应，再通知其余端关闭；断线时撤下交互，重连只恢复仍待处理的请求，不因取消本地卡片而自动回答 Harness。Web/App 发出的用户输入也通过既有 Host 投影广播给 GUI，原生 `clientId` 用于撤下 Web 的乐观回显。已确认发送不会因随后读取失败变成“发送被拒绝”；连接中断导致结果未知时不自动重发。`turn/start` 的请求 ID 去重仅覆盖当前 Host 进程最近 256 条回执，不承诺跨重启或超窗口 exactly-once。同时发送不会另开会话并行执行：Shared Host 持有 Desktop/Web 共用的跟进队列；成功终态自动推进，停止、失败和 unknown outcome 暂停，用户可编辑、删除或显式继续单条消息。活跃窗口内的 Steer 仍使用 Host 的 cancel → terminal → replacement 契约；Web 的 Steer 到达时窗口已关闭或已有 Steer 在途，则保留输入到同一 canonical 跟进队列，不丢弃消息。Desktop 原有的 Steer 校验保持不变。
 
 通用 App 可通过 Web 原有认证访问 `/api/ch/v1/{events,rpc,snapshot,respond}`，不需要理解 DSH 渲染日志，也拿不到 Host 私有 token。协议、恢复顺序和部署边界见[客户端通道](../architecture/host-client-channel.md)。本地草稿、滚动位置和当前选中会话不共享。旧 CDP 模式的审批仍在 GUI 处理；共享 Web 的通用文件预览/下载、完整子会话/后台任务投影仍有边界。公开远程 Host 通道、原生 App、真机后台与推送生命周期不在本次接入内。
 
