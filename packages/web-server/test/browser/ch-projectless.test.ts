@@ -82,6 +82,11 @@ for (const mobile of [false, true]) {
       const recent = page.locator('[data-sidebar-group=""]');
       const recentHeader = recent.getByRole("treeitem", { name: "Recents", exact: true });
       await recentHeader.waitFor();
+      assert.equal(
+        await page.locator('[data-row-key^="session:draft-"]').count(),
+        0,
+        "an unsent draft stays in the composer instead of entering the sidebar",
+      );
       if (mobile) {
         const createBounds = await recentHeader
           .getByRole("button", { name: "New session", exact: true })
@@ -123,6 +128,11 @@ for (const mobile of [false, true]) {
       if (mobile) await openSidebar.last().click();
       await recentHeader.getByRole("button", { name: "New session", exact: true }).click();
       await chip.getByText("No workspace", { exact: true }).waitFor();
+      assert.equal(
+        await page.locator('[data-row-key^="session:draft-"]').count(),
+        0,
+        "opening another unsent draft does not add a session row",
+      );
       await page
         .locator('[contenteditable="true"]')
         .pressSequentially("Keep this draft while choosing");

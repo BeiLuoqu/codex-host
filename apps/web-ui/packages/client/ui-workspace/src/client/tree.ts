@@ -1,7 +1,7 @@
 /**
  * Derives the workspace browser tree from caller-projected Workspace and
- * Session order. Unassigned Sessions trail under Ungrouped; only the selected
- * blank Session remains visible.
+ * Session order. Unassigned Sessions trail under Ungrouped; blank Sessions
+ * stay in the composer and do not enter navigation until the first prompt.
  */
 import {
   type SessionListState,
@@ -43,7 +43,7 @@ export interface SessionNode {
   id: SessionId;
   /** Stored title, or empty; the renderer localizes blank and unnamed row labels. */
   title: string;
-  /** The provisional blank session (renderer shows the localized New Session title). */
+  /** Domain blank marker; browser navigation filters these provisional Sessions out. */
   blank: boolean;
   /** A Session-scoped UI consumer is awaiting this user. */
   pendingInteraction?: SessionPendingInteractionStatus;
@@ -235,19 +235,18 @@ export function pinCurrentBlank(
 export type ArchivedFilter = "default" | "show" | "only";
 
 /**
- * Ordinary sessions are visible; among blank sessions, only the current one
- * is visible. Subagent children use their parent header catalog; archived
- * sessions follow the archived filter, while their accounting slots remain
- * either way so unarchiving restores position.
+ * Only Sessions with submitted work enter navigation. Blank drafts remain in
+ * the composer until their first prompt, matching Codex's sidebar behavior.
+ * Subagent children use their parent header catalog; archived sessions follow
+ * the archived filter, while their accounting slots remain either way so
+ * unarchiving restores position.
  */
 function sessionVisible(
   session: SessionSummary,
-  current: SessionId | undefined,
   archived: ReadonlySet<SessionId>,
   archivedFilter: ArchivedFilter,
 ): boolean {
-  if (session.origin === "subagent") return false;
-  if (session.blank && session.id !== current) return false;
+  if (session.origin === "subagent" || session.blank) return false;
   switch (archivedFilter) {
     case "default":
       return !archived.has(session.id);
@@ -272,30 +271,27 @@ export interface SessionRowState {
 }
 
 /**
- * Keep the visible New Session placeholder first, then partition pinned and
- * ordinary rows without changing either partition's caller order.
+ * Partition visible rows into pinned and ordinary sections without changing
+ * either partition's caller order. Blank drafts are filtered before this step.
  */
 function sectionMembers(
   members: readonly SessionSummary[],
   pinned: ReadonlySet<SessionId>,
   archived: ReadonlySet<SessionId>,
 ): SessionSummary[] {
-  const placeholders: SessionSummary[] = [];
   const leading: SessionSummary[] = [];
   const rest: SessionSummary[] = [];
   for (const member of members) {
-    if (member.blank) placeholders.push(member);
-    else if (!archived.has(member.id) && pinned.has(member.id)) leading.push(member);
+    if (!archived.has(member.id) && pinned.has(member.id)) leading.push(member);
     else rest.push(member);
   }
-  return [...placeholders, ...leading, ...rest];
+  return [...leading, ...rest];
 }
 
 /**
- * A blank session is the selected Workspace's provisional New Session row;
- * its canonical title never enters search (blank rows are query-excluded)
- * and the renderer localizes its display label. Unnamed history also yields an
- * empty title for localization and does not match a directory-name title search.
+ * Blank drafts have no navigation title and never enter search. Unnamed
+ * history also yields an empty title for localization and does not match a
+ * directory-name title search.
  */
 function sessionTitle(session: SessionSummary): string {
   return session.blank ? "" : (session.title?.trim() ?? "");
@@ -351,7 +347,6 @@ function groupByWorkspace(
   archivedFilter: ArchivedFilter,
   ungroupedOrder: readonly string[] | undefined,
 ): Group[] {
-  const current = mainSessionId(list);
   const groups: Group[] = [];
   const accounted = new Set<SessionId>();
   for (const workspace of workspaces) {
@@ -360,7 +355,7 @@ function groupByWorkspace(
       const summary = list.byId[id];
       if (summary === undefined) continue; // account may lead the list pull; the row appears when the summary lands
       accounted.add(id);
-      if (!sessionVisible(summary, current, archived, archivedFilter)) continue;
+      if (!sessionVisible(summary, archived, archivedFilter)) continue;
       members.push(summary);
     }
     // The archived-only view lists archives, not the Workspace inventory, so
@@ -381,9 +376,7 @@ function groupByWorkspace(
     .map((id) => list.byId[id])
     .filter(
       (s): s is SessionSummary =>
-        s !== undefined &&
-        !accounted.has(s.id) &&
-        sessionVisible(s, current, archived, archivedFilter),
+        s !== undefined && !accounted.has(s.id) && sessionVisible(s, archived, archivedFilter),
     );
   if (stray.length > 0) {
     groups.push(
@@ -455,9 +448,9 @@ function sessionNode(
  *
  * Every group shows, except that the archived-only filter drops groups
  * without visible members; sessions populate under expanded groups with
- * pinned rows leading in the selected local order. Blank sessions are
- * excluded except for the selected provisional New Session row; archived
- * sessions keep their slots and appear per the archived filter. Content
+ * pinned rows leading in the selected local order. Blank sessions stay out of
+ * the sidebar until the first prompt; archived sessions keep their slots and
+ * appear per the archived filter. Content
  * search lives outside this derivation (see {@link deriveSearchResults}).
  * @param list - sessions list snapshot (`mainView` retention feeds containsCurrent).
  * @param workspaces - real Workspaces in Host group order with caller-projected Session order.
@@ -512,7 +505,7 @@ export function deriveGroups(
 /**
  * Select complete flat-list membership, independently of archive visibility.
  * @param list - sessions list snapshot.
- * @returns known ordinary Session ids, including archives and only the current blank.
+ * @returns known ordinary Session ids, including archives and excluding blank drafts.
  */
 export function sessionMemberIds(list: SessionListState): SessionId[] {
   return visibleSessionIds(list, [], "show");
@@ -523,7 +516,7 @@ export function sessionMemberIds(list: SessionListState): SessionId[] {
  * @param list - sessions list snapshot.
  * @param archivedSessionIds - registry-global archive set.
  * @param archivedFilter - archived-row visibility choice.
- * @returns known visible Session ids in list order, including ordinary forks and only the current blank.
+ * @returns known visible Session ids in list order, including ordinary forks and excluding blank drafts.
  */
 export function visibleSessionIds(
   list: SessionListState,
@@ -531,10 +524,9 @@ export function visibleSessionIds(
   archivedFilter: ArchivedFilter,
 ): SessionId[] {
   const archived = new Set(archivedSessionIds);
-  const current = mainSessionId(list);
   return list.ids.filter((id) => {
     const s = list.byId[id];
-    return s !== undefined && sessionVisible(s, current, archived, archivedFilter);
+    return s !== undefined && sessionVisible(s, archived, archivedFilter);
   });
 }
 
@@ -555,11 +547,9 @@ export function deriveFlat(
 ): SessionNode[] {
   const archived = new Set(rowState.archivedSessionIds);
   const pinned = new Set(rowState.pinnedSessionIds);
-  const current = mainSessionId(list);
   const members = sessionIds.flatMap((id) => {
     const session = list.byId[id];
-    return session !== undefined &&
-      sessionVisible(session, current, archived, rowState.archivedFilter)
+    return session !== undefined && sessionVisible(session, archived, rowState.archivedFilter)
       ? [session]
       : [];
   });
@@ -595,8 +585,6 @@ export function deriveSearchResults(
   const q = query.trim().toLowerCase();
   if (q === "") return { items: [], hasMore: false };
   const archived = new Set(archivedSessionIds);
-  const current = mainSessionId(list);
-
   const workspaceBySession = new Map<SessionId, string>();
   for (const workspace of workspaces) {
     for (const sessionId of workspace.sessionIds) {
@@ -618,7 +606,7 @@ export function deriveSearchResults(
     if (
       summary === undefined ||
       summary.blank ||
-      !sessionVisible(summary, current, archived, archivedFilter)
+      !sessionVisible(summary, archived, archivedFilter)
     )
       continue;
     if (
@@ -647,7 +635,7 @@ export function deriveSearchResults(
     if (
       summary !== undefined &&
       !summary.blank &&
-      sessionVisible(summary, current, archived, archivedFilter)
+      sessionVisible(summary, archived, archivedFilter)
     )
       include(summary);
   }
