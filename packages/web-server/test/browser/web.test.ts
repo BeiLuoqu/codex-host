@@ -1,6 +1,6 @@
 /** Keyless browser acceptance against the real Web composition and a scripted Harness. */
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
 
@@ -51,6 +51,17 @@ for (const viewport of [
       assert.equal(await brandMark.first().getAttribute("viewBox"), "0 0 384 384");
       assert.equal(await brandMark.first().locator("image, mask").count(), 0);
       assert.equal(await brandMark.first().locator("path").count(), 2);
+      const brandAsset = readFileSync(
+        resolve(
+          serverRoot,
+          "../../apps/web-ui/packages/client/ui-brand-official/src/assets/codexhost-otter.svg",
+        ),
+        "utf8",
+      );
+      for (const path of await brandMark.first().locator("path").all()) {
+        const geometry = await path.getAttribute("d");
+        assert.ok(geometry && brandAsset.includes(`d="${geometry}"`));
+      }
       assert.equal(await brandMark.first().locator("path").first().getAttribute("fill"), "#082e59");
       assert.equal(await brandMark.first().locator("circle").isVisible(), false);
       await page.getByRole("button", { name: "Settings", exact: true }).click();
