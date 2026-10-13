@@ -25,6 +25,7 @@ interface DetailRow {
   readonly label: string;
   readonly value: string;
   readonly note?: string;
+  readonly remaining?: number;
 }
 
 interface DetailGroup {
@@ -79,17 +80,27 @@ function credits(value: number, t: Translate): string {
   return `${amount} ${t("usage.unit.credits")}`;
 }
 
-function resetTime(value: string | number | undefined): string | null {
+function resetTime(value: string | number | undefined, t: Translate): string | null {
   if (value === undefined) return null;
   const date = new Date(typeof value === "number" ? value * 1_000 : value);
-  return Number.isNaN(date.getTime())
-    ? null
-    : date.toLocaleString(undefined, {
-        month: "short",
+  if (Number.isNaN(date.getTime())) return null;
+  const now = new Date();
+  const today =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  const locale = t("usage.dateLocale");
+  const time = today
+    ? t("usage.reset.today", {
+        time: date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" }),
+      })
+    : date.toLocaleString(locale, {
+        month: locale === "zh-CN" ? "long" : "short",
         day: "numeric",
         hour: "numeric",
         minute: "2-digit",
       });
+  return t("usage.reset.at", { time });
 }
 
 function quotaValue(used: number | undefined, limit: number | undefined, unit?: string): string {
@@ -97,13 +108,8 @@ function quotaValue(used: number | undefined, limit: number | undefined, unit?: 
   return `${decimal(used, 2)} / ${decimal(limit, 2)}${unit ? ` ${unit}` : ""}`;
 }
 
-function summaryParts(
-  usage: HostThreadUsage | null,
-  account: HostAccountCredits | undefined,
-  t: Translate,
-): string[] {
-  if (usage === null)
-    return account ? [`${t("usage.quota")}: ${percent(account.usedPercent)}`] : [];
+function summaryParts(usage: HostThreadUsage | null, t: Translate): string[] {
+  if (usage === null) return [];
   const result = [
     usage.cacheHitRatePercent === undefined
       ? null
@@ -120,15 +126,10 @@ function summaryParts(
     return [`${tokenCount(usage.totalTokens)} ${t("usage.unit.tokens")}`];
   const context = contextPercent(usage);
   if (context !== undefined) return [`${t("usage.context")}: ${percent(context)}`];
-  if (account) return [`${t("usage.quota")}: ${percent(account.usedPercent)}`];
   return [];
 }
 
-function usageGroups(
-  usage: HostThreadUsage | null,
-  account: HostAccountCredits | undefined,
-  t: Translate,
-): DetailGroup[] {
+function usageGroups(usage: HostThreadUsage | null, t: Translate): DetailGroup[] {
   const groups: DetailGroup[] = [];
   if (usage !== null) {
     const session: DetailRow[] = [];
@@ -187,56 +188,92 @@ function usageGroups(
     if (usage.totalTokens !== undefined)
       tokens.push({ label: t("usage.tokens.total"), value: tokenCount(usage.totalTokens) });
     if (tokens.length) groups.push({ label: t("usage.group.tokens"), rows: tokens });
+  }
+  return groups;
+}
 
+function remainingPercent(used: number): number {
+  return Math.min(100, Math.max(0, 100 - used));
+}
+
+function quotaColor(remaining: number): string {
+  return remaining <= 10 ? "#c45c4a" : remaining <= 30 ? "#c9a227" : "#3d9a64";
+}
+
+function quotaGroups(
+  usage: HostThreadUsage | null,
+  account: HostAccountCredits | undefined,
+  t: Translate,
+): DetailGroup[] {
+  const groups: DetailGroup[] = [];
+  // Match Desktop: account credits is one complete quota view. Thread plan
+  // fields are a fallback, not extra windows to append to that same account.
+  if (!account && usage) {
     const plan: DetailRow[] = [];
     for (const [label, used, reset] of [
       [t("usage.plan.fiveHour"), usage.planFiveHourUsedPercent, usage.planFiveHourResetsAtUnix],
       [t("usage.plan.sevenDay"), usage.planSevenDayUsedPercent, usage.planSevenDayResetsAtUnix],
     ] as const) {
       if (used === undefined) continue;
-      const at = resetTime(reset);
+      const at = resetTime(reset, t);
       plan.push({
         label,
-        value: percent(used),
-        ...(at ? { note: `${t("usage.resets")}: ${at}` } : {}),
+        value: percent(remainingPercent(used)),
+        remaining: remainingPercent(used),
+        ...(at ? { note: at } : {}),
       });
     }
     if (plan.length) groups.push({ label: t("usage.group.plan"), rows: plan });
   }
 
   if (account) {
+    const windowLabel = (
+      period: HostAccountCredits["periodType"] | undefined,
+      fallback: string,
+      scope: unknown,
+    ) =>
+      !scope && period === "five_hour"
+        ? t("usage.plan.fiveHour")
+        : !scope && period === "seven_day"
+          ? t("usage.plan.sevenDay")
+          : fallback;
     const accountRows: DetailRow[] = [];
     const primary = quotaValue(account.used, account.limit, account.unit);
     accountRows.push({
-      label: account.label ?? t("usage.quota"),
-      value: primary
-        ? `${percent(account.usedPercent)} · ${primary}`
-        : percent(account.usedPercent),
-      ...(resetTime(account.resetsAt)
-        ? { note: `${t("usage.resets")}: ${resetTime(account.resetsAt)}` }
-        : {}),
+      label: windowLabel(
+        account.periodType,
+        account.label ?? t("usage.group.quota"),
+        account.scope,
+      ),
+      value: percent(remainingPercent(account.usedPercent)),
+      remaining: remainingPercent(account.usedPercent),
+      note: [primary ? `${t("usage.quota")}: ${primary}` : null, resetTime(account.resetsAt, t)]
+        .filter(Boolean)
+        .join(" · "),
     });
     if (account.resetCredits) {
-      const expires = resetTime(account.resetCredits.nextExpiresAt);
+      const expires = resetTime(account.resetCredits.nextExpiresAt, t);
       accountRows.push({
         label: t("usage.resetCredits"),
         value: String(account.resetCredits.availableCount),
-        ...(expires ? { note: `${t("usage.resets")}: ${expires}` } : {}),
+        ...(expires ? { note: expires } : {}),
       });
     }
     for (const product of account.productUsage ?? []) {
       const productValue = quotaValue(product.used, product.limit, product.unit);
       accountRows.push({
-        label: product.product,
-        value: productValue
-          ? `${percent(product.usagePercent)} · ${productValue}`
-          : percent(product.usagePercent),
-        ...(resetTime(product.resetsAt)
-          ? { note: `${t("usage.resets")}: ${resetTime(product.resetsAt)}` }
-          : {}),
+        label: windowLabel(product.periodType, product.product, product.scope),
+        value: percent(remainingPercent(product.usagePercent)),
+        remaining: remainingPercent(product.usagePercent),
+        note: [
+          productValue ? `${t("usage.quota")}: ${productValue}` : null,
+          resetTime(product.resetsAt, t),
+        ]
+          .filter(Boolean)
+          .join(" · "),
       });
     }
-    groups.push({ label: t("usage.group.quota"), rows: accountRows });
+    if (accountRows.length) groups.push({ label: t("usage.group.quota"), rows: accountRows });
   }
   return groups;
 }
@@ -289,14 +326,116 @@ function DetailGroups({ groups }: { groups: readonly DetailGroup[] }): ReactNode
   ));
 }
 
-/** Compact CH metrics plus a hover/focus/click-pinned detail dialog. */
+/** Independent metrics and remaining-quota controls, backed by the same projection. */
 export function HostUsageDock({ useProjection, t }: HostUsageDockProps) {
   const projection = useProjection("codexhostUsage");
   const usage = projection?.usage ?? null;
   const account = projection?.accountCredits;
-  const summary = useMemo(() => summaryParts(usage, account, t), [usage, account, t]);
-  const groups = useMemo(() => usageGroups(usage, account, t), [usage, account, t]);
+  const summary = useMemo(() => summaryParts(usage, t), [usage, t]);
+  const groups = useMemo(() => usageGroups(usage, t), [usage, t]);
+  const quotas = useMemo(() => quotaGroups(usage, account, t), [usage, account, t]);
+  const primary = quotas.flatMap((group) => group.rows).find((row) => row.remaining !== undefined);
   const hasContext = usage !== null && contextPercent(usage) !== undefined;
+  const summaryText = summary.join(" · ");
+  return (
+    <>
+      {primary && (
+        <UsagePopover
+          stat="codexhost-quota"
+          panelStyle={{ "--quota-color": quotaColor(primary.remaining ?? 100) } as CSSProperties}
+          label={`${t("usage.quota.remaining")}: ${primary.value}`}
+          title={t("usage.quota.details")}
+          trigger={
+            <>
+              <svg
+                className={css.quotaRing}
+                style={{ stroke: quotaColor(primary.remaining ?? 100) }}
+                viewBox="0 0 20 20"
+                aria-hidden="true"
+              >
+                <circle className={css.ringTrack} cx="10" cy="10" r="7" />
+                <circle
+                  cx="10"
+                  cy="10"
+                  r="7"
+                  pathLength="100"
+                  strokeDasharray={`${primary.remaining} 100`}
+                  transform="rotate(-90 10 10)"
+                />
+              </svg>
+              <span>{primary.value}</span>
+            </>
+          }
+        >
+          {quotas.map((group) => (
+            <section className={css.quotaGroup} key={group.label} aria-label={group.label}>
+              {group.rows.map((row, index) => (
+                <div
+                  className={css.quotaRow}
+                  key={`${row.label}:${index}`}
+                  style={{ "--quota-color": quotaColor(row.remaining ?? 100) } as CSSProperties}
+                >
+                  <div className={css.quotaHeading}>
+                    <div className={css.quotaDescription}>
+                      <span>{row.label}</span>
+                      {row.note && <p>{row.note}</p>}
+                    </div>
+                    <strong>
+                      {row.remaining !== undefined && (
+                        <span className={css.remainingLabel}>{t("usage.quota.remaining")} </span>
+                      )}
+                      <span className={css.remainingValue}>{row.value}</span>
+                    </strong>
+                  </div>
+                  {row.remaining !== undefined && (
+                    <div
+                      className={css.progressTrack}
+                      role="progressbar"
+                      aria-label={`${row.label}: ${t("usage.quota.remaining")}`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={row.remaining}
+                    >
+                      <span className={css.quotaFill} style={{ width: `${row.remaining}%` }} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </section>
+          ))}
+        </UsagePopover>
+      )}
+      {summary.length > 0 && (groups.length > 0 || hasContext) && (
+        <UsagePopover
+          stat="codexhost-usage"
+          label={`${t("usage.title")}: ${summaryText}`}
+          title={t("usage.details")}
+          trigger={<span className={css.label}>{summaryText}</span>}
+        >
+          <header>{t("usage.title")}</header>
+          <ContextSummary usage={usage} t={t} />
+          <DetailGroups groups={groups} />
+        </UsagePopover>
+      )}
+    </>
+  );
+}
+
+function UsagePopover({
+  stat,
+  label,
+  title,
+  trigger,
+  children,
+  panelStyle,
+}: {
+  stat: string;
+  label: string;
+  title: string;
+  trigger: ReactNode;
+  children: ReactNode;
+  panelStyle?: CSSProperties;
+}) {
   const [open, setOpen] = useState(false);
   const pinned = useRef(false);
   const closeTimer = useRef<number | null>(null);
@@ -355,18 +494,11 @@ export function HostUsageDock({ useProjection, t }: HostUsageDockProps) {
     },
     [],
   );
-  useEffect(() => {
-    if (summary.length === 0) close();
-  }, [close, summary.length]);
-
-  if (summary.length === 0 || (groups.length === 0 && !hasContext)) return null;
-  const summaryText = summary.join(" · ");
-  const aria = `${t("usage.title")}: ${summaryText}`;
   return (
     <span
       ref={rootRef}
       className={css.anchor}
-      data-composer-stat="codexhost-usage"
+      data-composer-stat={stat}
       onPointerEnter={() => {
         cancelClose();
         setOpen(true);
@@ -376,7 +508,7 @@ export function HostUsageDock({ useProjection, t }: HostUsageDockProps) {
       <button
         type="button"
         className={css.pill}
-        aria-label={aria}
+        aria-label={label}
         aria-haspopup="dialog"
         aria-expanded={open}
         onFocus={() => {
@@ -392,22 +524,20 @@ export function HostUsageDock({ useProjection, t }: HostUsageDockProps) {
           }
         }}
       >
-        <span className={css.label}>{summaryText}</span>
+        {trigger}
       </button>
       {open &&
         createPortal(
           <div
             ref={panelRef}
-            className={css.panel}
-            style={position ?? MEASURE_STYLE}
+            className={`${css.panel} ${stat === "codexhost-quota" ? css.quotaPanel : ""}`}
+            style={{ ...panelStyle, ...(position ?? MEASURE_STYLE) }}
             role="dialog"
-            aria-label={t("usage.details")}
+            aria-label={title}
             onPointerEnter={cancelClose}
             onPointerLeave={scheduleClose}
           >
-            <header>{t("usage.title")}</header>
-            <ContextSummary usage={usage} t={t} />
-            <DetailGroups groups={groups} />
+            {children}
           </div>,
           document.body,
         )}

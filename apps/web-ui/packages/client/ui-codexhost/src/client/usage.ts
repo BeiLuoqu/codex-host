@@ -27,6 +27,8 @@ export interface HostThreadUsage {
 
 export interface HostAccountProductUsage {
   readonly product: string;
+  readonly periodType?: HostAccountCredits["periodType"];
+  readonly scope?: { readonly id: string; readonly label: string };
   readonly used?: number;
   readonly limit?: number;
   readonly unit?: string;
@@ -39,6 +41,7 @@ export interface HostAccountCredits {
   readonly limit?: number;
   readonly unit?: string;
   readonly label?: string;
+  readonly scope?: { readonly id: string; readonly label: string };
   readonly usedPercent: number;
   readonly resetsAt?: string;
   readonly periodType: "weekly" | "monthly" | "five_hour" | "seven_day" | "unknown";
