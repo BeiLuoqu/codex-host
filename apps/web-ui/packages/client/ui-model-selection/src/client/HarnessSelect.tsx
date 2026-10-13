@@ -120,7 +120,12 @@ export function HarnessSelect({
             icon: <HarnessIcon key={failure.id} id={failure.id} />,
             disabled: true,
           })),
-        ]}
+        ].toSorted((a, b) => {
+          const ranks = state.harnessOrder ?? [];
+          const left = ranks.indexOf(a.id);
+          const right = ranks.indexOf(b.id);
+          return (left < 0 ? Infinity : left) - (right < 0 ? Infinity : right);
+        })}
         onSelect={(id) => {
           void choose(id);
         }}

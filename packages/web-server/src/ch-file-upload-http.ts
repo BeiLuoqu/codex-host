@@ -4,7 +4,7 @@ import type { ChSessions } from "./ch-sessions.ts";
 import { RpcError } from "./transport.ts";
 
 export async function serveFileUpload(
-  sessions: ChSessions | undefined,
+  sessions: Pick<ChSessions, "uploadFile"> | undefined,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {

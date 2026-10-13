@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -362,6 +362,48 @@ it("drops restored measurements for removed turns and recovers native TTFT indep
       lastTurnTiming: { turnId: "later", timeToFirstOutputMs: 0, at: 3000 },
     });
     expect((await bridge.read("s"))?.timeToFirstOutputMs).toBe(0);
+  } finally {
+    await bridge.close();
+  }
+});
+
+it("publishes native measurements in memory but writes only when the Turn ends", async () => {
+  const { bridge, observe } = setup("scope");
+  try {
+    observe({ sessionId: "s", turn: { id: "t", phase: "started" } }, 0);
+    observe({ sessionId: "s", turn: { id: "t", phase: "output" } }, 10);
+    for (let n = 0; n < 10; n++)
+      observe(
+        {
+          sessionId: "s",
+          requestTiming: {
+            turnId: "t",
+            requestId: `r${n}`,
+            outputTokens: 10,
+            startedAtMs: 100 + n * 100,
+            completedAtMs: 150 + n * 100,
+          },
+        },
+        150 + n * 100,
+      );
+    await expect(readdir(path.join(directory, "usage-measurements-v1"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    observe({ sessionId: "s", turn: { id: "t", phase: "completed" } }, 2000);
+    let files: string[] = [];
+    await vi.waitFor(async () => {
+      files = await readdir(path.join(directory, "usage-measurements-v1"));
+      expect(files.filter((file) => file.endsWith(".json"))).toHaveLength(1);
+    });
+    const file = files.find((file) => file.endsWith(".json"));
+    if (!file) throw new Error("Missing snapshot");
+    const saved = JSON.parse(
+      await readFile(path.join(directory, "usage-measurements-v1", file), "utf8"),
+    );
+    expect(saved.values).toMatchObject({
+      outputTokensPerSecond: { value: 200 },
+      timeToFirstOutputMs: { value: 10 },
+    });
   } finally {
     await bridge.close();
   }

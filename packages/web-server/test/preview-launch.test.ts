@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { it } from "node:test";
 import { promisify } from "node:util";
 
-import { previewLaunch } from "../src/preview-launch.ts";
+import { PREVIEW_EXCLUDED_HARNESSES, previewLaunch } from "../src/preview-launch.ts";
 
 const exec = promisify(execFile);
 
@@ -18,6 +18,7 @@ it("removes inherited Host routing and Node injection without changing the paren
     ANTHROPIC_API_KEY: "test-credential",
     CODEXHOST_RUNTIME_TOKEN: "host-token",
     CODEXHOST_CODEX_COMMAND: "/unsafe/codex",
+    CODEX_CLI_PATH: "/unsafe/shim",
     CODEXHOST_LAUNCHER_EXECUTABLE: "/unsafe/launcher",
     CODEXHOST_IMPORT_RECENT: "10",
     CODEXHOST_WEB_DATA: "/desktop/data",
@@ -58,12 +59,23 @@ it("accepts explicit Harness ids without relaxing isolation", () => {
   assert.equal(launch.args.includes("--import-recent"), false);
 });
 
-it("rejects Pi, Codex, empty ids and unsafe selection syntax before spawning", () => {
+it("allows explicit Codex selection and CLI/home configuration without inheriting Desktop routing", () => {
+  const launch = previewLaunch(
+    "/packed",
+    { harness: "codex,claude-code", "codex-command": "/native/codex", "codex-home": "/web/home" },
+    { CODEXHOST_CODEX_COMMAND: "/unsafe/codex", CODEX_CLI_PATH: "/unsafe/shim" },
+  );
+  assert.equal(launch.args[launch.args.indexOf("--harness") + 1], "codex,claude-code");
+  assert.equal(launch.args[launch.args.indexOf("--codex-command") + 1], "/native/codex");
+  assert.equal(launch.args[launch.args.indexOf("--codex-home") + 1], "/web/home");
+  assert.deepEqual(launch.env, {});
+  assert.equal(PREVIEW_EXCLUDED_HARNESSES.includes("codex"), true);
+});
+
+it("rejects Pi, empty ids and unsafe selection syntax before spawning", () => {
   for (const harness of [
     "pi",
-    "codex",
     "claude-code,pi",
-    "claude-code, codex",
     "",
     "claude-code,",
     "../other",

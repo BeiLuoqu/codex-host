@@ -198,6 +198,8 @@ export function apply(ctx: ClientContext): void {
               },
               select: (selection: ModelSelection) =>
                 available ? directory.select(selection) : Promise.resolve(undefined),
+              setFavorite: (provider, modelId, enabled) =>
+                models.setFavorite(provider, modelId, enabled),
             };
           },
         },

@@ -1173,3 +1173,43 @@ describe("mapping-store package", () => {
     await store.close();
   });
 });
+
+it("stores latest measurements only in existing metadata without changing identity revision or activity", async () => {
+  const directory = await temporaryStoreDirectory();
+  const store = new MappingStore({ directory });
+  await store.initialize();
+  await createReady(store);
+  await store.updateMetadata(threadId, { preview: "keep preview", projectId: "project" });
+  const before = await store.getThread(threadId);
+  const core = await readFile(path.join(directory, "threads", `${threadId}.json`), "utf8");
+  const values = {
+    outputTokensPerSecond: { value: 100, turnId: "turn-1", at: 100 },
+    timeToFirstOutputMs: { value: 50, turnId: "turn-1", at: 90 },
+  };
+  const saved = await store.saveUsageMeasurements(threadId, nativeRef, values);
+  expect(saved).toMatchObject({
+    revision: before?.revision,
+    updatedAt: before?.updatedAt,
+    preview: "keep preview",
+    usageMeasurements: { values },
+  });
+  expect(await readFile(path.join(directory, "threads", `${threadId}.json`), "utf8")).toBe(core);
+  expect(
+    JSON.parse(await readFile(path.join(directory, "thread-metadata", `${threadId}.json`), "utf8")),
+  ).toMatchObject({ projectId: "project", usageMeasurements: { values } });
+  await store.saveUsageMeasurements(threadId, nativeRef, values);
+  await store.close();
+  const reopened = new MappingStore({ directory });
+  await reopened.initialize();
+  expect((await reopened.getThread(threadId))?.usageMeasurements?.values).toEqual(values);
+  const wrong = nativeSessionRefSchema.parse({ ...nativeRef, nativeSessionId: "other" });
+  expect(
+    (await reopened.saveUsageMeasurements(threadId, wrong, {})).usageMeasurements?.values,
+  ).toEqual(values);
+  await reopened.reconcileTurnMappings(threadId, []);
+  expect(
+    (await reopened.saveUsageMeasurements(threadId, nativeRef, values)).usageMeasurements,
+  ).toBeUndefined();
+  expect((await reopened.getThread(threadId))?.preview).toBe("keep preview");
+  await reopened.close();
+});

@@ -14,7 +14,20 @@ import {
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
 import { ExternalThreadPrewarms } from "./external-thread-prewarms.js";
-import { HarnessLaunchSettingsStore } from "@codexhost/harness-plugin-files";
+import {
+  HarnessLaunchSettingsStore,
+  HarnessPreferencesStore,
+  HarnessPreferenceConflict,
+} from "@codexhost/harness-plugin-files";
+import {
+  HARNESS_PREFERENCES_GET_METHOD,
+  HARNESS_PREFERENCES_PATCH_METHOD,
+  HARNESS_PREFERENCES_CHANGED_METHOD,
+  harnessPreferenceGetSchema,
+  harnessPreferencePatchSchema,
+  DEFAULT_IDLE_RELEASE_SETTINGS,
+  type HarnessPreferenceSnapshot,
+} from "@codexhost/shared-contracts";
 import type { SharedThreadBridge } from "./shared-thread-bridge.js";
 import { HARNESS_INSTALLATION_METHOD } from "@codexhost/shared-contracts";
 import { handleHarnessInstallation, HarnessInstallationError } from "./harness-installation.js";
@@ -45,6 +58,8 @@ import {
 } from "./model-price-overrides-file.js";
 import {
   HARNESS_DISPLAY_GET_METHOD,
+  HARNESS_DISPLAY_CHANGED_METHOD,
+  HARNESS_DISPLAY_CAPABILITIES_METHOD,
   HARNESS_DISPLAY_SET_METHOD,
   harnessDisplayGetSchema,
   harnessDisplaySetSchema,
@@ -657,6 +672,9 @@ export class AppServerHost {
   #usageOnlyAdapters: HarnessUsageStatisticsAdapter[] = [];
   #plugins: HarnessPluginRegistry | undefined;
   readonly #launchSettings: HarnessLaunchSettingsStore;
+  readonly #displaySettings: HarnessDisplaySettingsStore;
+  readonly #preferences: HarnessPreferencesStore;
+  #appliedPreferenceRevision = -1;
   readonly #accountInspections = new HarnessAccountInspectionCache();
   #externalRuntime: ExternalThreadRuntime;
   readonly #executionHosts = new WeakMap<ExternalThread, string>();
@@ -757,6 +775,12 @@ export class AppServerHost {
       return this.#takeConsoleReply(value);
     });
     const environment = this.#options.environment ?? process.env;
+    this.#displaySettings = new HarnessDisplaySettingsStore(options.environment ?? process.env);
+    this.#preferences = new HarnessPreferencesStore(
+      path.resolve(
+        environment.CODEXHOST_DATA_DIR ?? path.join(environment.HOME ?? os.homedir(), ".codexhost"),
+      ),
+    );
     this.#launchSettings = new HarnessLaunchSettingsStore(
       this.#options.pluginContext?.environment ?? environment,
     );
@@ -990,6 +1014,7 @@ export class AppServerHost {
     if (!this.#options.pluginRoots || this.#pluginLoadAbort.signal.aborted) return;
     const plugins = await loadHarnessPlugins({
       roots: this.#options.pluginRoots,
+      scope: "external",
       sessionPlugins: this.#options.sharedThreads?.options.delegateCreates !== true,
       onUsageAdaptersLoaded: (adapters) => {
         if (!this.#pluginLoadAbort.signal.aborted) this.#usageOnlyAdapters = [...adapters.values()];
@@ -1016,6 +1041,8 @@ export class AppServerHost {
   }
 
   async #closeAdapters(): Promise<void> {
+    this.#displaySettings.close();
+    await this.#preferences.close();
     await this.#observedSessionUsage.close();
     const results = await Promise.allSettled([
       this.#plugins?.close(),
@@ -1028,9 +1055,45 @@ export class AppServerHost {
     }
   }
 
+  #applyHarnessPreferences(snapshot: HarnessPreferenceSnapshot): void {
+    if (snapshot.scope !== "external" || snapshot.revision < this.#appliedPreferenceRevision)
+      return;
+    this.#externalRuntime.idleRelease.configure(
+      snapshot.values.idleRelease ?? DEFAULT_IDLE_RELEASE_SETTINGS,
+    );
+    this.#appliedPreferenceRevision = snapshot.revision;
+  }
+
   async run(): Promise<number> {
     try {
       await this.#repository.initialize();
+      await this.#displaySettings
+        .subscribe(() => {
+          this.clientEvents.displaySettingsChanged();
+          void this.#writer
+            .json({ method: HARNESS_DISPLAY_CHANGED_METHOD, params: {} })
+            .catch((error) => this.#diagnose(error));
+        })
+        .catch((error) => {
+          this.#displaySettings.close();
+          this.#diagnose(error);
+        });
+      if (this.#options.sharedThreads?.options.delegateCreates !== true) {
+        const apply = async () => {
+          const snapshot = await this.#preferences.get();
+          this.#applyHarnessPreferences(snapshot);
+        };
+        await apply().catch((error) => this.#diagnose(error));
+        await this.#preferences
+          .subscribe((revision) => {
+            void apply().catch((error) => this.#diagnose(error));
+            this.clientEvents.preferencesChanged(revision);
+            void this.#writer
+              .json({ method: HARNESS_PREFERENCES_CHANGED_METHOD, params: { revision } })
+              .catch((error) => this.#diagnose(error));
+          })
+          .catch((error) => this.#diagnose(error));
+      }
     } catch (error) {
       this.#diagnose(`Host initialization failed: ${errorMessage(error)}`);
       this.#pluginLoadAbort.abort();
@@ -1635,6 +1698,38 @@ export class AppServerHost {
       return;
     }
     if (
+      request.method === HARNESS_PREFERENCES_GET_METHOD ||
+      request.method === HARNESS_PREFERENCES_PATCH_METHOD
+    ) {
+      try {
+        const result =
+          request.method === HARNESS_PREFERENCES_GET_METHOD
+            ? await this.#preferences.get(
+                harnessPreferenceGetSchema.parse(request.params ?? {}).scope,
+              )
+            : await this.#preferences.patch(
+                harnessPreferencePatchSchema.parse(request.params ?? {}),
+              );
+        this.#applyHarnessPreferences(result);
+        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
+      } catch (error) {
+        await this.#writer.json(
+          rpcError(
+            request,
+            error instanceof HarnessPreferenceConflict ? -32091 : -32602,
+            errorMessage(error),
+          ),
+        );
+      }
+      return;
+    }
+    if (request.method === HARNESS_DISPLAY_CAPABILITIES_METHOD) {
+      await this.#writer.json(
+        rpcEnvelope(request, { result: { events: this.#displaySettings.eventsAvailable } }),
+      );
+      return;
+    }
+    if (
       request.method === HARNESS_DISPLAY_GET_METHOD ||
       request.method === HARNESS_DISPLAY_SET_METHOD
     ) {
@@ -1648,7 +1743,7 @@ export class AppServerHost {
         return;
       }
       try {
-        const store = new HarnessDisplaySettingsStore(this.#options.environment ?? process.env);
+        const store = this.#displaySettings;
         const result =
           request.method === HARNESS_DISPLAY_SET_METHOD
             ? await store.set(harnessDisplaySetSchema.parse(parsed.data))
@@ -1708,8 +1803,16 @@ export class AppServerHost {
       if (!parsed.success) {
         await this.#writer.json(rpcError(request, -32602, "Invalid idle release settings"));
       } else {
-        const settings = this.#externalRuntime.idleRelease.configure(parsed.data);
-        await this.#writer.json(rpcEnvelope(request, { result: settings }));
+        try {
+          const saved = await this.#preferences.patch({
+            scope: "external",
+            operations: [{ kind: "idleRelease", value: parsed.data }],
+          });
+          this.#applyHarnessPreferences(saved);
+          await this.#writer.json(rpcEnvelope(request, { result: parsed.data }));
+        } catch (error) {
+          await this.#writer.json(rpcError(request, -32000, errorMessage(error)));
+        }
       }
       return;
     }

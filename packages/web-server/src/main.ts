@@ -22,6 +22,9 @@ import { PushNotifier } from "./push.ts";
 import { CLIENT_GLOBALS, CLIENT_PLUGINS } from "./plugins.ts";
 import { Sessions } from "./sessions.ts";
 import { ChSessions } from "./ch-sessions.ts";
+import { MixedSessions } from "./mixed-sessions.ts";
+import { WebHarnessDisplaySettings } from "./harness-display-settings.ts";
+import { WebHarnessPreferences } from "./harness-preferences.ts";
 import { createChHostClient } from "./ch-host-client.ts";
 import { serveChClientGateway } from "./ch-client-gateway.ts";
 import { harnessIconStyles } from "./harness-icon-styles.ts";
@@ -53,6 +56,8 @@ const { values } = parseArgs({
     "ch-host-runtime": { type: "string" },
     "ch-data": { type: "string" },
     "ch-codex-home": { type: "string" },
+    "codex-command": { type: "string" },
+    "codex-home": { type: "string" },
     "ch-plugins": { type: "string" },
     port: { type: "string", default: process.env.CODEXHOST_WEB_PORT ?? "3180" },
     host: { type: "string", default: process.env.CODEXHOST_WEB_HOST ?? "127.0.0.1" },
@@ -60,7 +65,7 @@ const { values } = parseArgs({
       type: "string",
       default: process.env.CODEXHOST_WEB_DATA ?? join(homedir(), ".codexhost-web"),
     },
-    adapters: { type: "string", default: process.env.CODEXHOST_ADAPTERS ?? defaultAdapterRoots() },
+    adapters: { type: "string", default: process.env.CODEXHOST_ADAPTERS },
     harness: { type: "string", default: process.env.CODEXHOST_HARNESSES },
     workspace: {
       type: "string",
@@ -85,10 +90,51 @@ const auth =
 const rpc = new RpcRegistry();
 const streams = new StreamRegistry();
 const events = new EventHub(homedir());
-const harnesses = new HarnessRegistry(
-  (values.adapters as string).split(",").map((path) => resolve(path)),
-  values.harness === undefined ? undefined : new Set(values.harness.split(",")),
+const displayDirectory = resolve(
+  values["ch-data"] ??
+    (values["ch-control-directory"]
+      ? dirname(resolve(values["ch-control-directory"]))
+      : join(homedir(), ".codexhost")),
 );
+const displayEntries = () => displaySettings.entries();
+const adapterRoots = (values.adapters ?? defaultAdapterRoots())
+  .split(",")
+  .map((path) => resolve(path));
+const enabledHarnesses =
+  values.harness === undefined ? undefined : new Set(values.harness.split(","));
+if (
+  values["session-source"] === "standalone" &&
+  enabledHarnesses?.has("codex") &&
+  enabledHarnesses.size !== 1
+)
+  throw new Error(
+    "Standalone Codex must be selected alone; use the shared Web mode to combine session sources.",
+  );
+const harnesses = new HarnessRegistry(adapterRoots, enabledHarnesses, {
+  displayEntries,
+  preferences: () => preferences,
+});
+const codexHarnesses = enabledHarnesses?.has("codex")
+  ? new HarnessRegistry(
+      values.adapters === undefined && !PACKED
+        ? [join(REPO_ROOT, "packages/adapters")]
+        : adapterRoots,
+      new Set(["codex"]),
+      {
+        scope: "web-codex",
+        displayEntries,
+        preferences: () => preferences,
+        environment: {
+          ...process.env,
+          CODEXHOST_CODEX_HOME: resolve(values["codex-home"] ?? join(data.root, "codex-home")),
+          CODEXHOST_CODEX_COMMAND: values["codex-command"],
+          ...(values["ch-codex-home"]
+            ? { CODEXHOST_GUI_CODEX_HOME: resolve(values["ch-codex-home"]) }
+            : {}),
+        },
+      },
+    )
+  : undefined;
 const workspaces = new Workspaces(
   data,
   resolve(values.workspace as string),
@@ -136,9 +182,49 @@ const chHost =
         ...(values["ch-control-directory"] ? { directory: values["ch-control-directory"] } : {}),
       })
     : undefined;
+const displaySettings: WebHarnessDisplaySettings = new WebHarnessDisplaySettings(
+  chHost,
+  displayDirectory,
+  events,
+);
+const preferences: WebHarnessPreferences = new WebHarnessPreferences(
+  chHost,
+  data,
+  events,
+  codexHarnesses ? resolve(values["codex-home"] ?? join(data.root, "codex-home")) : undefined,
+);
 const sessions = chHost
-  ? new ChSessions(chHost, workspaces, events, new WebImages(data), new WebFiles(data))
-  : new Sessions(data, harnesses, workspaces, events);
+  ? (() => {
+      const shared = new ChSessions(
+        chHost,
+        workspaces,
+        events,
+        new WebImages(data),
+        new WebFiles(data),
+        displayEntries,
+        preferences,
+      );
+      return codexHarnesses
+        ? new MixedSessions(
+            shared,
+            new Sessions(
+              new DataDir(join(data.root, "codex-sessions")),
+              codexHarnesses,
+              workspaces,
+              events,
+            ),
+            codexHarnesses,
+            workspaces,
+            events,
+          )
+        : shared;
+    })()
+  : new Sessions(
+      codexHarnesses ? new DataDir(join(data.root, "codex-sessions")) : data,
+      codexHarnesses ?? harnesses,
+      workspaces,
+      events,
+    );
 const settings = new Settings(data, events);
 const push = new PushNotifier(data);
 sessions.notifier = (notification) => {
@@ -170,6 +256,15 @@ workspaces.register(rpc, streams);
 sessions.register(rpc, streams);
 sessions.registerCommands(rpc);
 sessions.registerImport(rpc);
+await preferences
+  .initialize(
+    data.readJson<{
+      defaultSelection?: { provider: string; model: string; reasoningEffort?: string };
+    }>("preferences.json", {}).defaultSelection,
+  )
+  .catch((error) => console.error("[preferences] Legacy defaults could not be migrated", error));
+preferences.register(rpc);
+displaySettings.register(rpc);
 settings.register(rpc);
 push.register(rpc);
 registerMisc(rpc, { events });
@@ -279,7 +374,9 @@ const server = createServer((request, response) => {
       }
       if (pathname === "/api/session/uploadFileBinary") {
         await serveFileUpload(
-          sessions instanceof ChSessions ? sessions : undefined,
+          sessions instanceof ChSessions || sessions instanceof MixedSessions
+            ? sessions
+            : undefined,
           request,
           response,
         );
@@ -306,10 +403,10 @@ const server = createServer((request, response) => {
     }
     if (pathname === "/harness-icons/presentation.json") {
       const plugins =
-        sessions instanceof ChSessions
+        sessions instanceof ChSessions || sessions instanceof MixedSessions
           ? await sessions.catalog.list()
-          : harnesses.ids().flatMap((id) => {
-              const manifest = harnesses.manifest(id);
+          : (codexHarnesses ?? harnesses).ids().flatMap((id) => {
+              const manifest = (codexHarnesses ?? harnesses).manifest(id);
               return manifest ? [manifest] : [];
             });
       send(response, {
@@ -320,11 +417,11 @@ const server = createServer((request, response) => {
     }
     if (pathname.startsWith("/harness-icons/")) {
       const id = decodeURIComponent(pathname.slice("/harness-icons/".length));
-      if (sessions instanceof ChSessions) {
+      if (sessions instanceof ChSessions || sessions instanceof MixedSessions) {
         send(response, await sessions.catalog.icon(id));
         return;
       }
-      const icon = harnesses.iconPath(id);
+      const icon = (codexHarnesses ?? harnesses).iconPath(id);
       send(
         response,
         icon === undefined || !existsSync(icon)
@@ -402,7 +499,11 @@ server.listen(Number(values.port), values.host, () => {
   }
   // Shared mode asks the canonical owner; even inspection must not construct a
   // second set of Adapters inside the Web gateway.
-  void (sessions instanceof ChSessions ? sessions.catalog.models() : harnesses.modelCatalog())
+  void (
+    sessions instanceof ChSessions || sessions instanceof MixedSessions
+      ? sessions.catalog.models()
+      : (codexHarnesses ?? harnesses).modelCatalog()
+  )
     .then((catalog) => {
       console.log(
         `  ready: ${catalog.groups.map((group) => `${group.name} (${String(group.models.length)} models)`).join(", ") || "none"}`,
@@ -420,7 +521,10 @@ server.listen(Number(values.port), values.host, () => {
 async function shutdown(): Promise<void> {
   server.close();
   await sessions.close();
+  await preferences?.close();
+  displaySettings.close();
   await harnesses.close();
+  if (!(sessions instanceof MixedSessions)) await codexHarnesses?.close();
   process.exit(0);
 }
 process.on("SIGINT", () => void shutdown());

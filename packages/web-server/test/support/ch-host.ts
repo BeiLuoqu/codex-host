@@ -93,6 +93,14 @@ export class FakeChHost implements ChHostClient {
     let value: unknown;
     const row = this.threads.get(String(params.threadId));
     switch (method) {
+      case "codexhost/harness/display-settings/capabilities":
+        value = { events: false };
+        break;
+      case "codexhost/harness/display-settings/get":
+      case "codexhost/harness/display-settings/set":
+        throw Object.assign(new Error("Legacy fixture does not support display RPCs"), {
+          code: -32601,
+        });
       case "thread/list":
         value = { data: params.archived ? [] : [...this.threads.values()], nextCursor: null };
         break;

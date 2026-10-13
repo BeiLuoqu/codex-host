@@ -1,6 +1,6 @@
 # 独立 Web 应用
 
-Web 与 Codex Desktop 在同一仓库开发，浏览器通过 `packages/web-server` 的独立 Node 服务访问。默认 `codexhost` 会话来源按需启动或连接独立的本地 CH 后台，复用 CH 的 Thread 目录、创建、读取和操作；Web 网关不直接读写 Mapping Store、不启动第二份 Adapter，也不登记 Desktop 进程所有权。显式 `--session-source standalone` 保留独立 Harness 插件模式。Web/PWA 共用响应式界面；尚无 iOS/Android 原生封装。
+Web 与 Codex Desktop 在同一仓库开发，浏览器通过 `packages/web-server` 的独立 Node 服务访问。默认 `codexhost` 会话来源按需启动或连接独立的本地 CH 后台，复用 CH 的 Thread 目录、创建、读取和操作；Web 网关不直接读写 Mapping Store、不为外部 Threads 启动第二份 Adapter，也不登记 Desktop 进程所有权。显式启用 Codex 时，另装配隔离的 Web Codex 来源，与 CH 外部会话合并展示。显式 `--session-source standalone` 保留独立 Harness 插件模式。Web/PWA 共用响应式界面；尚无 iOS/Android 原生封装。
 
 ## 代码与构建
 
@@ -20,7 +20,35 @@ npm run start:web -- --port 3181
 
 `build:web` 编译当前工作树的 CH 包并调用已有插件构建器，构建原生 Launcher，随后编译前端和打包。插件输入为 `packages/host-runtime/dist/plugins`，不是已安装的 CH.app 或另一个仓库。用量统计专用插件不作为聊天 Harness；Web 另行打包同仓库的 Codex Adapter。
 
-发行目录为 `packages/web-server/dist/codexhost-web`，包含 Node 网关、Web 界面、同一 Host bundle、当前平台的原生 Launcher 和自包含插件；会话与用量插件在后台显式启用，Codex Adapter 仅供 standalone。整体目录可以移动到仓库外运行，无需源码目录或仓库的 node_modules，但原生 Launcher 不能跨 OS/CPU 使用。默认共享模式也不要求 Desktop 运行：Web、Desktop 均可独立使用，同时开启时共享后台，晚开启的一端读取最新事实；关闭任意界面不停止另一端或后台任务。需要本机受支持的 Node，Harness CLI 和其认证仍由用户安装、配置。
+发行目录为 `packages/web-server/dist/codexhost-web`，包含 Node 网关、Web 界面、同一 Host bundle、当前平台的原生 Launcher 和自包含插件；会话与用量插件在后台显式启用，Codex Adapter 仅由显式启用的 Web 执行作用域加载，不进入共享 Host 的 external 注册表。整体目录可以移动到仓库外运行，无需源码目录或仓库的 node_modules，但原生 Launcher 不能跨 OS/CPU 使用。默认共享模式也不要求 Desktop 运行：Web、Desktop 均可独立使用，同时开启时共享后台，晚开启的一端读取最新事实；关闭任意界面不停止另一端或后台任务。需要本机受支持的 Node，Harness CLI 和其认证仍由用户安装、配置。
+
+## GUI / Web 共享偏好
+
+共享模式下，空闲释放策略、模型收藏、新会话默认 Harness / Model / Thinking / Permission Mode 由共享 Host 持久化到 `$CODEXHOST_DATA_DIR/harness-preferences-v1.json`（默认 `~/.codexhost/harness-preferences-v1.json`）。Host 是唯一写入者；Renderer 与 Web 通过 `codexhost/harness/preferences/get|patch` 读取快照或提交修改，不直接写文件。写入串行合并、原子替换，只有成功保存后的值才作为确认状态；写入失败保留上次有效值。新会话默认配置仅用于之后创建的草稿，按实时 Harness 目录校验，不改动已存在会话。草稿创建或主动切换 Harness 时固定有效权限（包括原生默认权限）；提交和上传时将这份配置直接传给目标来源，不重新读取或保存全局默认值。并发上传的来源准备按草稿串行执行。
+
+变更通过 Desktop 通知和带 cursor 的 Host client channel 广播，Web 转成浏览器事件。重连读取最新快照，不用旧浏览器缓存覆盖文件。正常 GUI/Web 连接不持续轮询偏好：Host 保留文件变更监听，GUI 在恢复焦点或切回可见时读取一次快照；仅没有事件通道的旧 CDP 连接保留 3 秒读取兜底。旧 localStorage 仅作为初始化来源，已存在的文件字段优先，初始化后不再向这些 key 写入。GUI 首次偏好快照晚于 Composer 挂载时，只补初始化未编辑、未提交且未主动配置的草稿；用户已有操作不会被迟到快照覆盖；初始化资格绑定逻辑草稿身份，保留原 DOM 或跨容器重挂载不会重置它。GUI 收藏保存期间暂时禁用对应 Harness 的收藏按钮，保存确认或失败后恢复，并以确认快照回显。收藏锁按连接代次隔离；重连核对最新快照后可继续操作，旧请求结束不会解锁新连接的请求。Web 旧 `preferences.json` 的默认选择同样仅初始化缺失值。草稿文本与队列保持各自原有行为，本次不持久化队列。
+
+`external` 作用域供两端外部 Harness 共享；允许保存“默认选择 Codex”的导航偏好，但拒绝在此保存 Codex 模型、权限或收藏。Web Codex 的配置与收藏使用规范化独立 home 的散列作用域；不同 home 互不影响。GUI 原生 Codex 模型、权限、会话执行继续由官方路径管理，共享偏好不加载或调用 Codex 执行插件。
+
+显式 `--session-source standalone` 的收藏和新会话配置保存在 Web 自身数据目录，不与共享 Host 合并；共享空闲释放设置仅在连接 CH 时提供，适用于 CH 管理的外部会话。Web Codex 的既有资源回收策略不受该设置控制。旧 Host 不支持新接口时，普通会话仍可使用，收藏保存和共享设置不可用。
+
+## Web Codex 加载隔离与路由
+
+默认不启用 Codex 执行插件。构建后通过独立的原生 CLI 路径显式启用：
+
+```sh
+npm run start:web -- --harness codex --codex-command /absolute/path/to/codex --port 3181
+```
+
+共享模式中 CH 外部会话目录继续由后台提供，Web 额外加载 Codex，不把该插件加入 Desktop 预装清单或共享 `enabled.json`。插件 Manifest 的安装身份允许 `codex`，但 GUI/CH 的 external 路由、目录和会话导入契约继续拒绝这个身份。Loader/Registry 默认 `external`，在 import、工厂和 warmup 前过滤 Codex；只有 Web 显式装配的 `web-codex` scope 可以加载它。`codex-usage` 仍是独立用量插件。
+
+Web Codex 的原生 home 默认是 `<web-data>/codex-home`，可用 `--codex-home` 指定独立目录；CLI 路径必须是绝对原生入口。插件拒绝已知代理/shim 和与 GUI home 重叠的路径，子进程清理 Desktop 路由及 Node 注入环境。需要自行在该明确的 `CODEX_HOME` 下配置原生 CLI/登录；不复制 GUI 的凭据、配置或历史。原生引用绑定 canonical home，换 home 后不能继续使用旧引用。只允许单个 Web 进程独占该 home 和 Web 数据；尚未提供跨进程执行租约，不要让另一个 Web 或 CLI 并发恢复其中的会话。
+
+列表、模型目录、搜索与 control baseline 合并两来源；所有会话操作按已绑定的来源分发，不按当前模型选择猜测。草稿只保存在内存，切换 Harness 保留浏览器输入；首次提交才建立所选来源，之后禁止跨来源切换。来源创建/提交在途或结果未知时不重试、不回落另一个来源。混合入口按 Session 与 requestId 保留最多 256 个进程内提交回执；相同输入复用结果，不同输入拒绝，不承诺跨重启或回执淘汰后的 exactly-once。CH 上传占位草稿切到 Codex 时只清理未提交占位，不修改原生 Thread。Codex 的 Web 元数据与展示日志位于 `<web-data>/codex-sessions`，不写 CH Mapping Store；外部 Thread 的身份、历史和操作继续归 CH。
+
+当前 Codex 来源要求发送前选择工作区，仅支持文本输入，附件入口关闭并在服务端拒绝；fork/回退仍按未支持能力处理。独立会话的显式停止先清除本地待发送队列，再取消活动轮，避免取消完成时自动启动下一条；CH 队列继续遵循后台自己的暂停规则。本地 Codex 置顶/归档属于 Web 展示记录，不写 GUI 原生分区；CH 原生置顶与已绑定 Codex 的本地置顶合并展示。此接入不共享或接管 GUI 原生 Codex Threads，也不声明所有原生工具、平台和高级能力已经完成验收。
+
+显式 `--session-source standalone --harness codex` 可单独使用隔离 Codex；standalone 中不能同时选择 Codex 与其他 Harness，需使用默认共享模式合并来源。
 
 ## 共享 CH 会话来源
 
@@ -134,9 +162,13 @@ Desktop 离线时，独立后台可读取保存的置顶 ID，但尚不提供置
 
 Composer 的模型/推理等级控件旁提供独立的 Harness 图标按钮。菜单沿用 Desktop 的“图标、Harness 名称、当前勾选”方式；图标来自插件资源，不从 Model Provider 名称推测。就绪插件可选，检查失败的条目标记为不可用。
 
+Harness 菜单与 GUI 共用默认顺序，Codex 固定在首位；排序继续由 Host 管理同一 CH 数据目录的 `harness-display-settings-v1.json`，保留已保存的 Main/More 顺序并扁平展示。不可用项同样按该顺序排列，排序不改变可用性、默认模型或路由。Host 保存成功后发送 `codexhost/harness/display-settings/changed`，client channel 对应 `display-settings-changed`；各入口在订阅后读取确认快照，已连接 GUI、Web 与 Console 自动同步，无需刷新。Console 通过自己的 HTTP 事件流转发 Host 通知，不访问浏览器本地文件。Web 目录从 Host 确认快照读取排序，`codexhost/display-settings/get|set|capabilities` 转发对应公共接口，`codexhost/display-settings-changed` 刷新浏览器目录及已打开的菜单；旧 Host 缺少排序读取方法时，保持同一文件的只读兼容入口。Host 监听排序文件的原子替换以覆盖独立 Host 进程之间的写入。
+
+排序事件能力由独立的 `codexhost/harness/display-settings/capabilities` 请求确认，不在旧严格排序响应中增加字段。支持事件时没有 3 秒排序读取；明确缺少事件能力或通知传输的旧入口保留 3 秒兼容读取，不能通过通知超时推断能力。重连、恢复焦点或可见时补读；通知发生在初读或在途读取期间会合并，并在读取完成后再核对。写入失败保留确认排序，退役连接和旧请求的迟到响应不能覆盖当前视图。订阅和恢复监听随入口销毁清理。这条展示设置链路不加载 Codex 执行插件、不修改官方请求或 Session 所有权。
+
 新会话可切换 Harness；选择时采用该 Harness 目录的首个可用 Model 及其默认推理等级，随后可单独选择其他 Model。模型菜单和 `/model` 只列当前 Harness 的模型。两个控件共用原来的目录、`session/selectModel` 和确认后的持久投影，不维护另一份选中状态。
 
-Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 Model 的原生思考强度，并以底部 Model 行打开左侧搜索列表；桌面端两卡并列保留上下文，窄屏切换为单卡并提供返回按钮。选择 Model 或思考强度成功后关闭整个浮窗，并将焦点恢复到入口按钮且不显示焦点环；点击当前 Model 或当前强度也直接关闭，不重复提交或重置强度。选择失败时保留菜单并显示错误提示，可继续重试。若请求等待期间用户已离开或重新打开菜单，迟到的成功响应只更新选择，不抢回焦点或关闭新打开的菜单。需要调整新 Model 的思考强度时重新打开入口，仍只展示该 Model 实际声明的等级。模型收藏只作为当前浏览器的排序偏好写入版本化 localStorage，不改变 Host 目录、会话选择或 Desktop 偏好，也不把没有原生 reasoning metadata 的 Model 补成固定等级。
+Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 Model 的原生思考强度，并以底部 Model 行打开左侧搜索列表；桌面端两卡并列保留上下文，窄屏切换为单卡并提供返回按钮。选择 Model 或思考强度成功后关闭整个浮窗，并将焦点恢复到入口按钮且不显示焦点环；点击当前 Model 或当前强度也直接关闭，不重复提交或重置强度。选择失败时保留菜单并显示错误提示，可继续重试。若请求等待期间用户已离开或重新打开菜单，迟到的成功响应只更新选择，不抢回焦点或关闭新打开的菜单。需要调整新 Model 的思考强度时重新打开入口，仍只展示该 Model 实际声明的等级。模型收藏由本地 Host 保存并与 Desktop 共享，用于收藏排序，不改变当前会话模型，也不把没有原生 reasoning metadata 的 Model 补成固定等级。
 
 会话有原生历史后固定 Harness；菜单仍展示其他 Harness，但禁用切换并提示新建会话。当前 Harness 内的 Model 选择保持可用。重新连接或刷新按持久投影恢复，不把现有 Native Session 迁到另一个 Harness。
 
@@ -148,9 +180,9 @@ Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 
 
 ## 并发运行与预览
 
-`start:web` 固定监听 localhost 并保留访问令牌认证，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。独立模式通过 `--session-source standalone` 显式选择；其预览默认只启用 Claude Code。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost-web-preview`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认仅 Claude Code；`npm run start:web -- --harness all` 启用本发行包除 Codex、Pi 和用量统计专用插件外的所有会话插件。显式选择 Codex/Pi、缺失插件或用量统计插件会在启动前报错。
+`start:web` 固定监听 localhost 并保留访问令牌认证，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。独立模式通过 `--session-source standalone` 显式选择；其预览默认只启用 Claude Code。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost-web-preview`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认仅 Claude Code；`npm run start:web -- --harness all` 启用本发行包除 Codex、Pi 和用量统计专用插件外的所有会话插件。显式选择 Pi、缺失插件或用量统计插件会在启动前报错；Codex 通过上述显式配置启用。
 
-启用插件不等于机器已安装、认证对应 CLI，也不等于所有能力已完成 Web 验收。模型菜单只列检查就绪的 Harness；未安装的不会列为可用，检查失败由目录接口报告。Codex、Pi 的独立启动入口仍未验证，隔离预览始终拒绝启用；其他插件所需的可选 Host 上下文以及完整界面能力也需逐项验收。不要从 CH 承载的 Agent 会话直接启动继承原环境的 `server.mjs`，也不要把 Desktop 的环境变量恢复到预览进程。
+启用插件不等于机器已安装、认证对应 CLI，也不等于所有能力已完成 Web 验收。模型菜单只列检查就绪的 Harness；未安装的不会列为可用，检查失败由目录接口报告。Pi 的独立启动入口仍未验证，隔离预览拒绝启用；Codex 的加载/路由及隔离由假原生协议和浏览器回归覆盖，真实模型与高级能力仍需专项验收；其他插件所需的可选 Host 上下文以及完整界面能力也需逐项验收。不要从 CH 承载的 Agent 会话直接启动继承原环境的 `server.mjs`，也不要把 Desktop 的环境变量恢复到预览进程。
 
 共享来源由唯一后台恢复/写入 Native Session；两个界面同时打开不是两个执行所有者。显式 standalone 则独立管理会话，不能同时恢复并写入共享后台正在使用的 Native Session；数据目录隔离不等于原生文件、CLI 账号或额度隔离。不同任务也不应同时修改同一工作目录。
 

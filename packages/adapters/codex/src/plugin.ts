@@ -7,6 +7,7 @@
 
 import { execFileSync } from "node:child_process";
 
+import { nativeCodexLaunch } from "./native-launch.ts";
 import { CodexAppServer } from "./rpc.ts";
 import {
   CODEX_COMMANDS,
@@ -18,7 +19,7 @@ import {
 } from "./session.ts";
 import type { CodexItem } from "./items.ts";
 
-export const CODEX_COMMAND_ENV = "CODEXHOST_CODEX_COMMAND";
+export { CODEX_COMMAND_ENV, CODEX_HOME_ENV } from "./native-launch.ts";
 
 type Result<T> =
   | { ok: true; value: T }
@@ -55,11 +56,52 @@ class CodexAdapter {
   readonly commandCatalog = { commands: [...CODEX_COMMANDS], source: "static" as const };
   private control: Promise<CodexAppServer> | undefined;
   private readonly command: string;
+  private readonly home: string;
   private readonly environment: NodeJS.ProcessEnv;
 
   constructor(context: PluginContext) {
-    this.environment = { ...process.env, ...context.environment };
-    this.command = this.environment[CODEX_COMMAND_ENV] ?? "codex";
+    const launch = nativeCodexLaunch({ ...process.env, ...context.environment });
+    this.environment = launch.environment;
+    this.command = launch.command;
+    this.home = launch.home;
+  }
+
+  /** A native Thread ID is meaningful only inside the home that issued it. */
+  private threadId(nativeRef: unknown): Result<string> {
+    const ref =
+      nativeRef !== null && typeof nativeRef === "object"
+        ? (nativeRef as Record<string, unknown>)
+        : undefined;
+    if (
+      ref?.harnessId !== HARNESS_ID ||
+      typeof ref.nativeSessionId !== "string" ||
+      !ref.nativeSessionId.trim()
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "invalidRequest",
+          message: "A Codex native session reference is required",
+          retryable: false,
+        },
+      };
+    }
+    const locator =
+      ref.locator !== null && typeof ref.locator === "object"
+        ? (ref.locator as Record<string, unknown>)
+        : undefined;
+    if (locator?.codexHome !== this.home) {
+      return {
+        ok: false,
+        error: {
+          code: "sessionScopeMismatch",
+          message:
+            "This Codex session reference is not bound to the configured Web home. Import a session from this home explicitly.",
+          retryable: false,
+        },
+      };
+    }
+    return { ok: true, value: ref.nativeSessionId };
   }
 
   /** Shared process for read-only calls (models, thread listing). */
@@ -165,15 +207,15 @@ class CodexAdapter {
         },
       };
     }
+    const threadId = input.kind === "resume" ? this.threadId(input.nativeRef) : undefined;
+    if (threadId && !threadId.ok) return threadId;
     try {
-      const nativeRef = input.nativeRef as { nativeSessionId?: string } | undefined;
       const session = await CodexSession.open({
         command: this.command,
+        codexHome: this.home,
         environment: this.environment,
         cwd: input.cwd,
-        ...(input.kind === "resume" && nativeRef?.nativeSessionId !== undefined
-          ? { threadId: nativeRef.nativeSessionId }
-          : {}),
+        ...(threadId?.ok ? { threadId: threadId.value } : {}),
         ...(typeof (input.model as { id?: unknown } | undefined)?.id === "string"
           ? { model: (input.model as { id: string }).id }
           : {}),
@@ -267,21 +309,18 @@ class CodexAdapter {
         };
       return {
         ok: true,
-        value: { candidate, nativeRef: { harnessId: HARNESS_ID, nativeSessionId } },
+        value: {
+          candidate,
+          nativeRef: { harnessId: HARNESS_ID, nativeSessionId, locator: { codexHome: this.home } },
+        },
       };
     },
   };
 
-  /** Read a thread's history without taking the writer role (works while Codex Desktop holds it). */
-  async readHistory(nativeRef: {
-    nativeSessionId?: string;
-  }): Promise<Result<{ turns: unknown[] }>> {
-    const threadId = nativeRef.nativeSessionId;
-    if (threadId === undefined)
-      return {
-        ok: false,
-        error: { code: "invalidRequest", message: "Missing Codex thread id", retryable: false },
-      };
+  /** Read a thread from the isolated Web home without loading it for execution. */
+  async readHistory(nativeRef: unknown): Promise<Result<{ turns: unknown[] }>> {
+    const threadId = this.threadId(nativeRef);
+    if (!threadId.ok) return threadId;
     try {
       const server = await this.controlServer();
       const response = await server.request<{
@@ -295,10 +334,10 @@ class CodexAdapter {
             completedAt: number | null;
           }>;
         };
-      }>("thread/read", { threadId, includeTurns: true });
+      }>("thread/read", { threadId: threadId.value, includeTurns: true });
       return {
         ok: true,
-        value: { turns: response.thread.turns.map((turn) => snapshotTurn(threadId, turn)) },
+        value: { turns: response.thread.turns.map((turn) => snapshotTurn(threadId.value, turn)) },
       };
     } catch (error) {
       return {

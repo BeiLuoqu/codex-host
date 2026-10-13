@@ -8,6 +8,8 @@ import { PREVIEW_EXCLUDED_HARNESSES, previewLaunch } from "../src/preview-launch
 
 const { values } = parseArgs({
   options: {
+    "codex-command": { type: "string" },
+    "codex-home": { type: "string" },
     "session-source": { type: "string" },
     "ch-cdp": { type: "string" },
     "ch-control-directory": { type: "string" },

@@ -64,21 +64,8 @@ import { orderModelProviders } from "./provider-order.ts";
 /** The primary Thinking card stays mounted while its Model sibling is open. */
 type Pane = "root" | "model";
 
-const FAVORITES_STORAGE_KEY = "codexhost:model-favorites:v1";
-
 function modelKey(provider: string, model: string): string {
   return JSON.stringify([provider, model]);
-}
-
-function readFavorites(): Set<string> {
-  try {
-    const value = JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) ?? "[]");
-    return new Set(
-      Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [],
-    );
-  } catch {
-    return new Set();
-  }
 }
 
 function StarIcon({ filled }: { filled: boolean }) {
@@ -117,6 +104,7 @@ export function ModelSelect({
   directory,
   load,
   select,
+  setFavorite,
   t,
 }: ModelSelectInjected & { locked: boolean } & PropsLocale<"model">) {
   const state = useSyncExternalStore(
@@ -128,7 +116,16 @@ export function ModelSelect({
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const [selectionFocus, setSelectionFocus] = useState(false);
-  const [favorites, setFavorites] = useState(readFavorites);
+  const favorites = useMemo(
+    () =>
+      new Set(
+        Object.entries(state.modelFavorites ?? {}).flatMap(([provider, ids]) =>
+          ids.map((id) => modelKey(provider, id)),
+        ),
+      ),
+    [state.modelFavorites],
+  );
+  const [favoritePending, setFavoritePending] = useState(false);
   const [modelSide, setModelSide] = useState<"left" | "right" | "replace">("left");
   // The in-menu error strip serves catalog loads (its Retry re-runs the
   // load); a rejected SELECTION announces through the transient toast
@@ -574,18 +571,15 @@ export function ModelSelect({
 
   const toggleFavorite = (provider: string, model: string): void => {
     const key = modelKey(provider, model);
-    setFavorites((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      try {
-        localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify([...next]));
-      } catch {
-        // Favorites are a browser-local convenience; selection remains usable
-        // when private browsing or storage policy rejects persistence.
-      }
-      return next;
-    });
+    if (!setFavorite || favoritePending || state.preferencesAvailable === false) return;
+    setFavoritePending(true);
+    void setFavorite(provider, model, !favorites.has(key))
+      .catch((error) =>
+        report(
+          t("error.action", { message: error instanceof Error ? error.message : String(error) }),
+        ),
+      )
+      .finally(() => setFavoritePending(false));
   };
 
   const waiting = state.current === null && state.status === "loading";
@@ -831,7 +825,9 @@ export function ModelSelect({
                               model: model.name,
                             })}
                             aria-pressed={favorite}
-                            disabled={busy}
+                            disabled={
+                              busy || favoritePending || state.preferencesAvailable === false
+                            }
                             onClick={() => {
                               toggleFavorite(group.id, model.id);
                             }}

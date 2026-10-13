@@ -52,7 +52,7 @@ export async function discoverHostClientChannel(
 export class HostClientChannel {
   private descriptor: ClientChannelDescriptor;
   private cursor: ClientChannelCursor | undefined;
-  private history: Array<Extract<ClientChannelEvent, { type: "changed" }>> = [];
+  private history: Array<Exclude<ClientChannelEvent, { type: "hello" }>> = [];
   private controller: AbortController | undefined;
   private retry: ReturnType<typeof setTimeout> | undefined;
   private listeners = new Set<(update: HostClientUpdate) => void>();
@@ -188,6 +188,7 @@ export class HostClientChannel {
   private async post<T>(route: string, body: unknown): Promise<T> {
     if (this.stopped || !this.online)
       throw new Error("CH is disconnected; reconnect before submitting an operation");
+    const generation = this.generation;
     let response: Response;
     let value: { result?: T; error?: { code?: number; message?: string } };
     try {
@@ -213,6 +214,10 @@ export class HostClientChannel {
         { code: -32093 },
       );
     }
+    if (generation !== this.generation || !this.online || this.stopped)
+      throw Object.assign(new Error("Obsolete Host reply; resynchronize after reconnecting"), {
+        code: -32094,
+      });
     if (value.error || !response.ok)
       throw Object.assign(new Error(value.error?.message ?? "Host request failed"), {
         code: value.error?.code ?? -32603,

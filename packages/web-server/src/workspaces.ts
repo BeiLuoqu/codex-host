@@ -32,6 +32,7 @@ export class Workspaces {
   private referenceGroups: Map<string, string | undefined> | undefined;
   private referenceProjectless: ReadonlySet<string> = new Set();
   private referencePins: string[] | undefined;
+  private localSessionIds: ReadonlySet<string> = new Set();
 
   constructor(
     private readonly data: DataDir,
@@ -128,7 +129,27 @@ export class Workspaces {
     const next = [...new Set(ids)];
     if (JSON.stringify(next) === JSON.stringify(this.referencePins)) return;
     this.referencePins = next;
-    this.broadcast({ type: "pinned", pinnedSessionIds: next });
+    this.broadcast({ type: "pinned", pinnedSessionIds: this.pinnedSessionIds() });
+  }
+
+  /** Mixed-source navigation includes only pins for Sessions owned by this Web runtime. */
+  setLocalSessionIds(ids: ReadonlySet<string>): void {
+    const before = this.pinnedSessionIds();
+    this.localSessionIds = new Set(ids);
+    const after = this.pinnedSessionIds();
+    if (JSON.stringify(before) !== JSON.stringify(after))
+      this.broadcast({ type: "pinned", pinnedSessionIds: after });
+  }
+
+  /** Authoritative visible pin list used by both the stream and mixed-source RPC replies. */
+  pinnedSessionIds(): string[] {
+    if (this.referencePins === undefined) return this.state.pinnedSessionIds;
+    return [
+      ...new Set([
+        ...this.referencePins,
+        ...this.state.pinnedSessionIds.filter((id) => this.localSessionIds.has(id)),
+      ]),
+    ];
   }
 
   get(workspaceId: string): WorkspaceView | undefined {
@@ -314,8 +335,9 @@ export class Workspaces {
         if (add) current.push(sessionId);
         this.state[key] = current;
         this.save();
-        this.broadcast({ type: frame, [key]: current });
-        return { [key]: current };
+        const visible = key === "pinnedSessionIds" ? this.pinnedSessionIds() : current;
+        this.broadcast({ type: frame, [key]: visible });
+        return { [key]: visible };
       };
     rpc.register("workspace/archiveSession", setMembership("archivedSessionIds", "archived", true));
     rpc.register(
@@ -332,7 +354,7 @@ export class Workspaces {
         value: {
           ...this.state,
           items: this.list(),
-          pinnedSessionIds: this.referencePins ?? this.state.pinnedSessionIds,
+          pinnedSessionIds: this.pinnedSessionIds(),
           ...(this.referenceOnlyDefault ? { canStartProjectless: true } : {}),
         },
       });

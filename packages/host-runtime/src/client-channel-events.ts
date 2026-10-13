@@ -6,7 +6,7 @@ import type { ClientChannelCursor, ClientChannelEvent } from "@codexhost/shared-
 export class ClientChannelEvents {
   readonly epoch = randomUUID();
   private sequence = 0;
-  private history: Array<Extract<ClientChannelEvent, { type: "changed" }>> = [];
+  private history: Array<Exclude<ClientChannelEvent, { type: "hello" }>> = [];
   private listeners = new Set<(event: ClientChannelEvent) => void>();
   constructor(private readonly capacity = 512) {}
   get cursor(): ClientChannelCursor {
@@ -19,6 +19,22 @@ export class ClientChannelEvents {
       threadId,
       method,
     };
+    this.publish(event);
+  }
+  displaySettingsChanged(): void {
+    this.publish({
+      type: "display-settings-changed",
+      cursor: { epoch: this.epoch, sequence: ++this.sequence },
+    });
+  }
+  preferencesChanged(revision: number): void {
+    this.publish({
+      type: "preferences-changed",
+      cursor: { epoch: this.epoch, sequence: ++this.sequence },
+      revision,
+    });
+  }
+  private publish(event: Exclude<ClientChannelEvent, { type: "hello" }>) {
     this.history.push(event);
     if (this.history.length > this.capacity) this.history.shift();
     for (const listener of this.listeners) {

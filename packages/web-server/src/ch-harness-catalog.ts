@@ -4,6 +4,7 @@ import {
   harnessPluginListResultSchema,
   type HarnessPluginDescriptor,
   type HarnessInspection,
+  type HarnessDisplayEntries,
 } from "@codexhost/shared-contracts";
 import type { ChHostClient } from "./ch-host-client.ts";
 import { groupOf, type Inspection } from "./harnesses.ts";
@@ -13,11 +14,17 @@ export interface ModelSelection {
   reasoningEffort?: string;
 }
 import { RpcError } from "./transport.ts";
+import { withHarnessDisplayOrder } from "./harness-display-order.ts";
+import type { WebHarnessPreferences } from "./harness-preferences.ts";
 
 export class ChHarnessCatalog {
   private plugins?: HarnessPluginDescriptor[];
   private inspections = new Map<string, Promise<HarnessInspection>>();
-  constructor(private readonly host: ChHostClient) {}
+  constructor(
+    private readonly host: ChHostClient,
+    readonly displayEntries: () => Promise<HarnessDisplayEntries> = async () => [],
+    readonly preferences?: WebHarnessPreferences,
+  ) {}
   async list(): Promise<HarnessPluginDescriptor[]> {
     this.plugins ??= harnessPluginListResultSchema
       .parse(await this.host.request("codexhost/harness/plugins/list", {}))
@@ -64,16 +71,20 @@ export class ChHarnessCatalog {
         first.inspection.catalog.models[0]?.ref.id ??
         "",
     };
-    return {
-      default: selection,
-      groups,
-      routableProviders: groups.map((group) => group.id),
-      failures: values.flatMap(({ plugin, inspection }) =>
-        inspection.status !== "ready" && inspection.status !== "notInstalled"
-          ? [{ id: plugin.id, name: plugin.name, message: inspection.error.message }]
-          : [],
-      ),
-    };
+    const catalog = withHarnessDisplayOrder(
+      {
+        default: selection,
+        groups,
+        routableProviders: groups.map((group) => group.id),
+        failures: values.flatMap(({ plugin, inspection }) =>
+          inspection.status !== "ready" && inspection.status !== "notInstalled"
+            ? [{ id: plugin.id, name: plugin.name, message: inspection.error.message }]
+            : [],
+        ),
+      },
+      await this.displayEntries(),
+    );
+    return this.preferences ? this.preferences.decorate(catalog) : catalog;
   }
   async name(id: string): Promise<string> {
     return (await this.list()).find((plugin) => plugin.id === id)?.name ?? id;

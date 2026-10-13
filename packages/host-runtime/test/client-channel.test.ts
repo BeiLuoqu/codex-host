@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -54,6 +54,108 @@ function current(fixture: ReturnType<typeof createFixture>) {
 }
 
 describe("public authenticated owner channel", () => {
+  it("shares confirmed display order across Desktop, Web and Console without Harness execution", async () => {
+    const { fixture, a, b, events } = await setup();
+    const get = "codexhost/harness/display-settings/get";
+    const set = "codexhost/harness/display-settings/set";
+    expect(await a.request("codexhost/harness/display-settings/capabilities", {})).toEqual({
+      events: true,
+    });
+    const first = [{ agent: "pi", section: "more" }];
+    writeRequest(fixture.desktopInput, { id: 710, method: set, params: { entries: first } });
+    await fixture.collector.waitFor((message) => message.id === 710);
+    await vi.waitFor(() =>
+      expect(events.some((event) => event.type === "display-settings-changed")).toBe(true),
+    );
+    expect(await a.request(get, {})).toEqual({ entries: first });
+    expect(await fixture.host.handleConsoleRequest(get, {})).toEqual({
+      result: { entries: first },
+    });
+    const second = [{ agent: "grok", section: "main" }];
+    await b.request(set, { entries: second });
+    expect(
+      await fixture.collector.waitFor(
+        (message) => message.method === "codexhost/harness/display-settings/changed",
+      ),
+    ).toMatchObject({ params: {} });
+    expect(await fixture.host.handleConsoleRequest(get, {})).toEqual({
+      result: { entries: second },
+    });
+    await fixture.host.handleConsoleRequest(set, { entries: [] });
+    expect(await a.request(get, {})).toEqual({ entries: [] });
+    await vi.waitFor(() =>
+      expect(events.filter((event) => event.type === "display-settings-changed")).toHaveLength(3),
+    );
+    const before = events.filter((event) => event.type === "display-settings-changed").length;
+    await expect(a.request(set, { entries: [{ agent: "", section: "main" }] })).rejects.toThrow();
+    expect(events.filter((event) => event.type === "display-settings-changed")).toHaveLength(
+      before,
+    );
+    expect(await b.request(get, {})).toEqual({ entries: [] });
+    expect(
+      JSON.parse(
+        readFileSync(
+          path.join(fixture.mappingStoreDirectory, "harness-display-settings-v1.json"),
+          "utf8",
+        ),
+      ),
+    ).toEqual([]);
+    expect(fixture.adapter.sessions).toHaveLength(0);
+  });
+  it("shares durable preferences between Desktop and Web without creating Harness sessions", async () => {
+    const { fixture, a, b, events } = await setup();
+    const patchMethod = "codexhost/harness/preferences/patch";
+    const getMethod = "codexhost/harness/preferences/get";
+    writeRequest(fixture.desktopInput, {
+      id: 700,
+      method: patchMethod,
+      params: {
+        scope: "external",
+        operations: [
+          { kind: "idleRelease", value: { enabled: true, timeoutMinutes: 20 } },
+          {
+            kind: "newThread",
+            lastHarness: "pi",
+            harnessId: "pi",
+            configuration: { model: { id: "native" } },
+          },
+        ],
+      },
+    });
+    await fixture.collector.waitFor((message) => message.id === 700);
+    await vi.waitFor(() =>
+      expect(events.some((event) => event.type === "preferences-changed")).toBe(true),
+    );
+    expect(await a.request(getMethod, {})).toMatchObject({
+      values: {
+        idleRelease: { enabled: true, timeoutMinutes: 20 },
+        newThread: { lastHarness: "pi" },
+      },
+    });
+    await b.request(patchMethod, {
+      operations: [{ kind: "favorite", harnessId: "pi", modelId: "native", enabled: true }],
+    });
+    writeRequest(fixture.desktopInput, { id: 701, method: getMethod, params: {} });
+    expect(await fixture.collector.waitFor((message) => message.id === 701)).toMatchObject({
+      result: { values: { favorites: { pi: ["native"] } } },
+    });
+    expect(
+      JSON.parse(
+        readFileSync(
+          path.join(fixture.mappingStoreDirectory, "harness-preferences-v1.json"),
+          "utf8",
+        ),
+      ).scopes.external.favorites.pi,
+    ).toEqual(["native"]);
+    await expect(
+      a.request(patchMethod, {
+        operations: [
+          { kind: "newThread", harnessId: "codex", configuration: { model: { id: "gpt" } } },
+        ],
+      }),
+    ).rejects.toThrow();
+    expect(fixture.adapter.sessions).toHaveLength(0);
+  });
   it("rejects unauthenticated/browser-origin traffic and official Thread execution", async () => {
     const { server, a, fixture } = await setup();
     const url = `http://127.0.0.1:${server.descriptor.port}/v1/rpc`;

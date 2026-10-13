@@ -2,11 +2,13 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-/** Harnesses whose native CLI routing is not yet verified alongside Desktop. */
+/** Never auto-enable these with `--harness all`; Codex needs explicit native CLI setup. */
 export const PREVIEW_EXCLUDED_HARNESSES: readonly string[] = ["codex", "pi"];
 
 /** Optional preview paths, port and comma-separated Harness ids. */
 export interface PreviewOptions {
+  "codex-command"?: string;
+  "codex-home"?: string;
   port?: string;
   data?: string;
   workspace?: string;
@@ -40,14 +42,20 @@ export function previewLaunch(
     ...new Set((options.harness ?? "claude-code").split(",").map((id) => id.trim())),
   ];
   for (const id of harnesses) {
-    if (!/^[a-z0-9][a-z0-9-]*$/u.test(id) || PREVIEW_EXCLUDED_HARNESSES.includes(id)) {
+    if (
+      !/^[a-z0-9][a-z0-9-]*$/u.test(id) ||
+      (id !== "codex" && PREVIEW_EXCLUDED_HARNESSES.includes(id))
+    ) {
       throw new Error(`Harness ${id || "(empty)"} is not allowed in the isolated preview`);
     }
   }
   const env = Object.fromEntries(
     Object.entries(environment).filter(([key]) => {
       const name = key.toUpperCase();
-      return !name.startsWith("CODEXHOST_") && name !== "NODE_OPTIONS" && name !== "NODE_PATH";
+      return (
+        !name.startsWith("CODEXHOST_") &&
+        !["CODEX_CLI_PATH", "NODE_OPTIONS", "NODE_PATH"].includes(name)
+      );
     }),
   );
   return {
@@ -56,6 +64,9 @@ export function previewLaunch(
       resolve(distribution, "server.mjs"),
       "--session-source",
       options["session-source"] ?? "codexhost",
+      ...(["codex-command", "codex-home"] as const).flatMap((key) =>
+        options[key] ? [`--${key}`, options[key] as string] : [],
+      ),
       ...(options["ch-cdp"] ? ["--ch-cdp", options["ch-cdp"]] : []),
       ...(options["ch-control-directory"]
         ? ["--ch-control-directory", options["ch-control-directory"]]

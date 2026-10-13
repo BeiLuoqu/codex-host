@@ -198,6 +198,7 @@ export async function runSharedHostService(
           console = await startConsoleControlServer({
             environment: env,
             target: {
+              clientEvents: host.clientEvents,
               handleConsoleRequest: (method, params) =>
                 ([...desktops].at(-1) ?? host).handleConsoleRequest(method, params),
             },

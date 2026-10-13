@@ -1,5 +1,9 @@
 /** Copy for the CodexHost import panel. */
 export const en = {
+  "preferences.idle.title": "Release idle external Harness sessions",
+  "preferences.idle.description":
+    "Shared with Desktop. Running tasks and pending interactions are kept active.",
+  "preferences.idle.minutes": "Idle timeout (minutes)",
   panel: "Import sessions",
   "connection.live": "Live",
   "connection.liveHint": "Connected to the shared CH owner",
@@ -71,6 +75,9 @@ export const en = {
 export type ImportLocaleKey = keyof typeof en;
 
 export const zh: Record<ImportLocaleKey, string> = {
+  "preferences.idle.title": "释放空闲的外部 Harness 会话",
+  "preferences.idle.description": "与桌面端共享。运行中的任务和待处理交互保持活动。",
+  "preferences.idle.minutes": "空闲超时（分钟）",
   panel: "导入会话",
   "connection.live": "实时同步",
   "connection.liveHint": "已连接同一个 CH 会话所有者",

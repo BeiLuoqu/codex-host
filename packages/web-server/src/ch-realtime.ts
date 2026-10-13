@@ -49,7 +49,7 @@ export class ChRealtime {
       this.callbacks.reset(event.cursor.epoch);
       for (const id of this.watched.keys()) this.schedule(id);
       this.schedule("");
-    } else {
+    } else if (event.type === "changed") {
       if (this.watched.has(event.threadId)) this.schedule(event.threadId);
       if (event.method.startsWith("thread/") || event.method === "turn/completed")
         this.schedule("");

@@ -44,6 +44,9 @@ it(
     writeFileSync(
       join(plugin, "manifest.json"),
       JSON.stringify({
+        manifestVersion: 1,
+        adapterApiVersion: 1,
+        version: "0.0.0",
         id: "fake",
         name: "Fake Harness",
         entry: "./plugin.mjs",
@@ -58,12 +61,25 @@ it(
     const output = join(root, "output");
     await exec(
       process.execPath,
-      ["--import", "tsx", "scripts/pack.ts", output, "--adapters", input, "--harness", "fake"],
+      [
+        "--import",
+        "tsx",
+        "scripts/pack.ts",
+        output,
+        "--adapters",
+        input,
+        "--harness",
+        "fake,codex",
+      ],
       { cwd: serverRoot },
     );
     const moved = join(root, "relocated");
     renameSync(output, moved);
     rmSync(input, { recursive: true });
+    assert.deepEqual(JSON.parse(readFileSync(join(moved, "adapters/enabled.json"), "utf8")), {
+      version: 1,
+      enabled: ["fake"],
+    });
     const url = await startServer(t, root, [join(moved, "server.mjs")], ["--harness", "fake"]);
     assert.match(
       readFileSync(join(moved, "README.md"), "utf8"),
@@ -164,7 +180,24 @@ it(
     assert.equal(all.env.CODEXHOST_RUNTIME_TOKEN, undefined);
     assert.equal(all.args.includes("--no-auth"), false);
     assert.equal(all.args.includes("--import-recent"), false);
-    for (const id of ["pi", "codex"]) {
+    const { stdout: codexStdout } = await exec(
+      process.execPath,
+      [
+        join(preview, "preview.mjs"),
+        "--harness",
+        "codex",
+        "--codex-command",
+        "/native/codex",
+        "--codex-home",
+        join(preview, "codex-home"),
+      ],
+      { cwd: root, env: previewEnv },
+    );
+    const codex = JSON.parse(codexStdout) as { args: string[]; env: NodeJS.ProcessEnv };
+    assert.equal(codex.args[codex.args.indexOf("--harness") + 1], "codex");
+    assert.equal(codex.args[codex.args.indexOf("--codex-command") + 1], "/native/codex");
+    assert.equal(codex.args[codex.args.indexOf("--codex-home") + 1], join(preview, "codex-home"));
+    for (const id of ["pi"]) {
       await assert.rejects(
         exec(process.execPath, [join(preview, "preview.mjs"), "--harness", id], {
           cwd: root,

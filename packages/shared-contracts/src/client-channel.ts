@@ -6,6 +6,11 @@ import { harnessPermissionModeIdSchema } from "./harness-permission-modes.js";
  * NOT appendable transcript deltas. Clients reconcile absolute snapshots. */
 export const CLIENT_CHANNEL_VERSION = 1;
 export const CLIENT_CHANNEL_METHODS = [
+  "codexhost/harness/display-settings/get",
+  "codexhost/harness/display-settings/set",
+  "codexhost/harness/display-settings/capabilities",
+  "codexhost/harness/preferences/get",
+  "codexhost/harness/preferences/patch",
   "thread/list",
   "thread/read",
   "thread/turns/list",
@@ -61,6 +66,12 @@ export const clientChannelCursorSchema = z.object({
 });
 export type ClientChannelCursor = z.infer<typeof clientChannelCursorSchema>;
 export const clientChannelEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("display-settings-changed"), cursor: clientChannelCursorSchema }),
+  z.object({
+    type: z.literal("preferences-changed"),
+    cursor: clientChannelCursorSchema,
+    revision: z.number().int().nonnegative(),
+  }),
   z.object({
     type: z.literal("hello"),
     version: z.literal(1),

@@ -50,6 +50,11 @@ export interface ChProjectSnapshot {
 
 const exec = promisify(execFile);
 const METHODS = new Set([
+  "codexhost/harness/display-settings/get",
+  "codexhost/harness/display-settings/set",
+  "codexhost/harness/display-settings/capabilities",
+  "codexhost/harness/preferences/get",
+  "codexhost/harness/preferences/patch",
   "thread/list",
   "thread/read",
   "thread/turns/list",
@@ -152,11 +157,20 @@ export class DesktopChHostClient implements ChHostClient {
       throw new RpcError("host/method-unavailable", `Unsupported CH method: ${method}`);
     const client = await this.connect();
     // JSON literals only, never interpolate a path, model ID or user message as executable code.
-    const expression = `(async () => { const route = window.__codexhostHostRoutingV1?.forHost('local'); if (!route) return {ok:false,error:'Local Host unavailable'}; try { return {ok:true,value:await route.manager.sendRequest(${JSON.stringify(method)},${JSON.stringify(params)})}; } catch(error) { return {ok:false,error:String(error?.message ?? error)}; } })()`;
+    const expression = `(async () => { const route = window.__codexhostHostRoutingV1?.forHost('local'); if (!route) return {ok:false,error:'Local Host unavailable'}; try { return {ok:true,value:await route.manager.sendRequest(${JSON.stringify(method)},${JSON.stringify(params)})}; } catch(error) { return {ok:false,error:String(error?.message ?? error),code:error?.code}; } })()`;
     try {
-      const reply = await client.evaluate<{ ok: boolean; value?: T; error?: string }>(expression);
+      const reply = await client.evaluate<{
+        ok: boolean;
+        value?: T;
+        error?: string;
+        code?: number;
+      }>(expression);
       if (!reply.ok)
-        throw new RpcError("host/rejected", reply.error ?? "CH rejected the operation.");
+        throw new RpcError(
+          "host/rejected",
+          reply.error ?? "CH rejected the operation.",
+          reply.code === undefined ? {} : { hostCode: reply.code },
+        );
       return reply.value as T;
     } catch (error) {
       if (!(error instanceof RpcError)) {
@@ -215,7 +229,7 @@ export class DesktopChHostClient implements ChHostClient {
           if (value.threadIds.includes(change.threadId) !== change.pinned) throw new Error('Desktop pin state changed; refresh before retrying');
         }
         return {ok:true,value:value.threadIds};
-      } catch(error) { return {ok:false,error:String(error?.message ?? error)}; }
+      } catch(error) { return {ok:false,error:String(error?.message ?? error),code:error?.code}; }
     })()`;
     try {
       const reply = await client.evaluate<{ ok: boolean; value?: unknown; error?: string }>(
@@ -292,6 +306,9 @@ export async function createChHostClient(
         throw new RpcError(
           "host/rejected",
           error instanceof Error ? error.message : "Host request failed",
+          (error as { code?: unknown }).code === undefined
+            ? {}
+            : { hostCode: (error as { code?: unknown }).code },
         );
       }
     },

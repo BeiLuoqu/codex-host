@@ -1,3 +1,4 @@
+import type { DraftConfiguration } from "./draft-configuration.ts";
 /**
  * The `session/*` Remote surface backed by codexhost Harness Sessions.
  *
@@ -147,6 +148,15 @@ export class Sessions {
     this.data.writeJson(INDEX_FILE, this.index);
   }
 
+  /** Bound local identities, including drafts and discovered child sessions. */
+  owns(sessionId: string): boolean {
+    return Object.hasOwn(this.index, sessionId);
+  }
+
+  ids(): ReadonlySet<string> {
+    return new Set(Object.keys(this.index));
+  }
+
   private saveMeta(meta: SessionMeta): void {
     meta.updatedAt = Date.now();
     this.index[meta.sessionId] = meta;
@@ -218,10 +228,14 @@ export class Sessions {
 
   // ---- lifecycle ---------------------------------------------------------------------------
 
-  create(request: { workspaceId?: string; cwd?: string; sessionId?: string }): {
-    sessionId: string;
-    agentPreset: string;
-  } {
+  async create(
+    request: {
+      workspaceId?: string;
+      cwd?: string;
+      sessionId?: string;
+    },
+    configuration?: DraftConfiguration,
+  ): Promise<{ sessionId: string; agentPreset: string }> {
     const sessionId = request.sessionId ?? `session-${randomUUID()}`;
     if (this.index[sessionId] !== undefined) return { sessionId, agentPreset: "standard" };
     const workspace =
@@ -231,11 +245,58 @@ export class Sessions {
       throw new RpcError("workspace/invalid-path", "A new session needs a workspace", { path: "" });
     const now = Date.now();
     const meta: SessionMeta = { sessionId, cwd, createdAt: now, updatedAt: now, blank: true };
+    if (configuration) {
+      meta.selection = { ...configuration.selection };
+      if (configuration.permissionModeId) meta.permissionModeId = configuration.permissionModeId;
+    } else if (this.harnesses.preferences) {
+      const catalog = await this.harnesses.modelCatalog();
+      if (this.index[sessionId]) return { sessionId, agentPreset: "standard" };
+      if (this.shuttingDown) throw new RpcError("session/closed", "Web sessions are closing.");
+      if (catalog.groups.some((group) => group.id === catalog.default.provider)) {
+        meta.selection = catalog.default;
+        const config = await this.harnesses.preferences
+          .configuration(catalog.default.provider)
+          .catch(() => undefined);
+        const inspection = config?.permissionModeId
+          ? await this.harnesses.inspect(catalog.default.provider)
+          : undefined;
+        if (
+          config?.permissionModeId &&
+          inspection?.status === "ready" &&
+          inspection.permissionModes?.modes.some((mode) => mode.id === config.permissionModeId)
+        )
+          meta.permissionModeId = config.permissionModeId;
+      }
+    }
+    if (this.index[sessionId]) return { sessionId, agentPreset: "standard" };
+    if (this.shuttingDown) throw new RpcError("session/closed", "Web sessions are closing.");
     this.saveMeta(meta);
     this.workspaces.attachSession(sessionId, workspace?.workspaceId, cwd);
     const runtime = this.runtime(sessionId);
     this.events.emit("api-session/added", this.summary(runtime.meta));
     return { sessionId, agentPreset: "standard" };
+  }
+
+  /** Materialize an already configured Web draft without updating global preferences. */
+  async prepareDraft(
+    request: { sessionId: string; cwd?: string },
+    configuration: DraftConfiguration,
+  ): Promise<void> {
+    await this.create(request, configuration);
+    const runtime = this.runtime(request.sessionId);
+    if (
+      runtime.meta.harnessId ||
+      runtime.opening ||
+      runtime.running ||
+      this.shuttingDown ||
+      runtime.meta.cwd !== request.cwd
+    )
+      throw new RpcError("session/busy", "Draft is already in use.");
+    runtime.meta.selection = { ...configuration.selection };
+    delete runtime.meta.permissionModeId;
+    if (configuration.permissionModeId)
+      runtime.meta.permissionModeId = configuration.permissionModeId;
+    this.saveMeta(runtime.meta);
   }
 
   /** Close the Harness Session once it has been idle for {@link IDLE_RELEASE_MS}. */
@@ -900,15 +961,43 @@ export class Sessions {
       this.harnesses.preferredSelection = selection;
       if (meta.harnessId === undefined && previousProvider !== selection.provider) {
         // Identical mode IDs from different Harnesses need not have identical semantics.
+        const config = await this.harnesses.preferences
+          ?.configuration(selection.provider)
+          .catch(() => undefined);
+        const inspection = config?.permissionModeId
+          ? await this.harnesses.inspect(selection.provider)
+          : undefined;
+        if (meta.selection !== selection || meta.harnessId !== undefined)
+          throw new RpcError("session/busy", "Draft selection changed.");
         delete meta.permissionModeId;
+        if (
+          config?.permissionModeId &&
+          inspection?.status === "ready" &&
+          inspection.permissionModes?.modes.some((mode) => mode.id === config.permissionModeId)
+        )
+          meta.permissionModeId = config.permissionModeId;
         this.saveMeta(meta);
       }
       runtime.log.setProjection("harnessIdentity", this.harnessIdentity(meta));
       await this.refreshNativePermissions(runtime);
-      this.data.writeJson("preferences.json", {
-        ...this.data.readJson<Record<string, unknown>>("preferences.json", {}),
-        defaultSelection: selection,
-      });
+      if (this.harnesses.preferences && meta.harnessId === undefined)
+        await this.harnesses.preferences
+          .remember(selection.provider, {
+            model: { id: selection.model },
+            thinkingOptionId: selection.reasoningEffort,
+            permissionModeId: meta.permissionModeId,
+          })
+          .catch(() =>
+            this.events.emit(
+              "codexhost/preferences-error",
+              "New session defaults could not be saved.",
+            ),
+          );
+      if (!this.harnesses.preferences)
+        this.data.writeJson("preferences.json", {
+          ...this.data.readJson<Record<string, unknown>>("preferences.json", {}),
+          defaultSelection: selection,
+        });
       runtime.log.append("model/selection", selection);
       runtime.log.setProjection("modelSelection", {
         lastUsed: meta.lastUsed ?? null,
@@ -973,6 +1062,10 @@ export class Sessions {
     rpc.register("session/cancel", async (args) => {
       const { sessionId } = requestOf<{ sessionId: string }>(args);
       const runtime = this.runtime(sessionId);
+      // Explicit stop discards pending submissions before cancellation can
+      // synchronously finish the current Turn and advance the local queue.
+      runtime.queue = [];
+      this.publishQueue(runtime);
       await runtime.starting;
       if (runtime.harness !== undefined && runtime.turnId !== undefined) {
         const result = await runtime.harness.execute({
@@ -1745,6 +1838,21 @@ export class Sessions {
         if (!result.ok) return { commandId, result: { kind: "error", text: result.error.message } };
       }
       runtime.meta.permissionModeId = mode.value;
+      if (!runtime.meta.harnessId && runtime.meta.selection) {
+        const selection = runtime.meta.selection;
+        await this.harnesses.preferences
+          ?.remember(selection.provider, {
+            model: { id: selection.model },
+            thinkingOptionId: selection.reasoningEffort,
+            permissionModeId: mode.value,
+          })
+          .catch(() =>
+            this.events.emit(
+              "codexhost/preferences-error",
+              "New session defaults could not be saved.",
+            ),
+          );
+      }
       this.saveMeta(runtime.meta);
       runtime.log.setProjection("permissions", { currentValue: mode.value });
       await this.refreshNativePermissions(runtime);

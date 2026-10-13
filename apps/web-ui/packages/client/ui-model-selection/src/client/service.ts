@@ -19,6 +19,7 @@ import type { SessionBinding } from "@deepseek-ai/dsh-api-session-controller/cli
 import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import { WeakMapWithValues } from "@deepseek-ai/dsh-util-values";
 import { ModelCatalogDirectory } from "./catalog.ts";
+import { preferenceCall } from "./preferences-api.ts";
 import { ModelDirectory } from "./directory.ts";
 
 declare module "@deepseek-ai/cordis" {
@@ -46,6 +47,22 @@ export class ModelDirectoryResolver extends Service {
   constructor(ctx: Context) {
     super(ctx, "modelDirectories");
     this.catalog = new ModelCatalogDirectory(ctx);
+    void this.migrateLegacyFavorites().catch(() => {});
+    ctx.remote.$on("codexhost/preferences-changed", () => this.catalog.refresh());
+    ctx.remote.$on("codexhost/display-settings-changed", () => this.catalog.refresh());
+    ctx.effect(() => {
+      const focus = () => this.catalog.refresh();
+      const visible = () => {
+        if (document.visibilityState === "visible") this.catalog.refresh();
+      };
+      window.addEventListener("focus", focus);
+      document.addEventListener("visibilitychange", visible);
+      return () => {
+        window.removeEventListener("focus", focus);
+        document.removeEventListener("visibilitychange", visible);
+        this.catalog.dispose();
+      };
+    }, "ui-model-selection: catalog lifecycle");
     void this.catalog.load().catch(() => {
       /* selectors expose the shared error */
     });
@@ -65,6 +82,39 @@ export class ModelDirectoryResolver extends Service {
     ctx.remote.$on("credentials/reference-updated", () => {
       this.catalog.refresh();
     });
+  }
+  private async migrateLegacyFavorites() {
+    const grouped = new Map<string, string[]>();
+    try {
+      const old: unknown = JSON.parse(localStorage.getItem("codexhost:model-favorites:v1") ?? "[]");
+      if (Array.isArray(old))
+        for (const key of old) {
+          try {
+            const pair: unknown = JSON.parse(String(key));
+            if (
+              Array.isArray(pair) &&
+              pair.length === 2 &&
+              pair.every((value) => typeof value === "string")
+            )
+              grouped.set(pair[0], [...(grouped.get(pair[0]) ?? []), pair[1]]);
+          } catch {
+            /* Invalid old rows are skipped. */
+          }
+        }
+    } catch {
+      /* No browser storage is also a valid starting point. */
+    }
+    await preferenceCall("migrate", {
+      favorites: [...grouped].map(([provider, modelIds]) => ({ provider, modelIds })),
+    });
+    this.catalog.refresh();
+  }
+  async setFavorite(provider: string, modelId: string, enabled: boolean) {
+    await preferenceCall("patch", {
+      operation: { kind: "favorite", harnessId: provider, modelId, enabled },
+    });
+    this.catalog.refresh();
+    await this.catalog.load();
   }
 
   /**

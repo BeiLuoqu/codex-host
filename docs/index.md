@@ -101,7 +101,7 @@
 
 | 文档 | 内容与阅读时机 |
 | --- | --- |
-| [`product/standalone-web.md`](product/standalone-web.md) | 同仓库 Web/PWA 的独立后台与共享 CH 会话、原生项目归组、历史分页、独立模式、源码构建、启动隔离及验收限制；开发 Web 或与 Desktop 并行运行时阅读。 |
+| [`product/standalone-web.md`](product/standalone-web.md) | 同仓库 Web/PWA 的共享 CH 会话、GUI/Web 共享偏好与隔离 Codex 来源、原生项目归组、历史分页、源码构建、启动隔离及验收限制；开发 Web 或与 Desktop 并行运行时阅读。 |
 
 ## 账号与 Desktop 产品接入
 
@@ -145,6 +145,7 @@
 
 | 文档 | 内容与阅读时机 |
 | --- | --- |
+| [OpenSpec：状态刷新与轮询优化](../openspec/changes/reduce-redundant-state-polling/proposal.md) | 轻量提案：按排序、Web 目录、共享连接、远程设置页和 Console 顺序减少重复轮询；规划刷新策略时阅读。 |
 | [`proposals/external-harness-idle-unload-proposal.md`](proposals/external-harness-idle-unload-proposal.md) | 外部 Harness 空闲释放与恢复方案、实现进展及验证边界；评估闲置资源回收时阅读。 |
 | [`proposals/Reasoning 实时预览与持久 Transcript 的后续方案.md`](proposals/Reasoning%20实时预览与持久%20Transcript%20的后续方案.md) | Reasoning 实时预览与持久留痕方案；规划 Reasoning 展示时阅读。 |
 | [`proposals/外部 Harness 回合文件变更汇总问题与后续方案.md`](proposals/外部%20Harness%20回合文件变更汇总问题与后续方案.md) | Turn 文件变更重复汇总问题、语义分层和候选方案；设计净 diff 时阅读。 |

@@ -147,6 +147,7 @@ interface PendingRequest {
 
 export interface CodexSessionOptions {
   command: string;
+  codexHome: string;
   environment: NodeJS.ProcessEnv;
   cwd: string;
   threadId?: string;
@@ -245,7 +246,11 @@ export class CodexSession {
 
   private state(): Record<string, unknown> {
     return {
-      nativeRef: { harnessId: HARNESS_ID, nativeSessionId: this.threadId },
+      nativeRef: {
+        harnessId: HARNESS_ID,
+        nativeSessionId: this.threadId,
+        locator: { codexHome: this.options.codexHome },
+      },
       ...(this.model === undefined
         ? {}
         : { effectiveModel: { id: this.model }, resolvedModelLabel: this.model }),

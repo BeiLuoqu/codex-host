@@ -20,6 +20,7 @@ import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";
 import type {} from "@deepseek-ai/dsh-api-remotes/client";
 import { ensureServiceWorker } from "./notifications.ts";
 import { NotificationsRow } from "./NotificationsRow.tsx";
+import { IdleReleaseRow } from "./IdleReleaseRow.tsx";
 import { ImportPage, type ImportPageFace } from "./ImportPage.tsx";
 import { en, zh, type ImportLocaleKey } from "./locales.ts";
 
@@ -83,6 +84,26 @@ export function apply(ctx: ClientContext): void {
         locale: NS,
       },
       NotificationsRow,
+    ),
+  );
+  const subscribePreferences = (listener: () => void) => {
+    const remove = ctx.remote.$on("codexhost/preferences-changed", listener);
+    const reconnect = ctx.on("connection/reset", listener);
+    return () => {
+      remove();
+      reconnect();
+    };
+  };
+  ctx.slots.inject("settings.general.item", () =>
+    ctx.slots.register(
+      {
+        name: "settings.general.item",
+        id: "codexhost.idle-release",
+        order: 6,
+        locale: NS,
+        inject: () => ({ subscribe: subscribePreferences }),
+      },
+      IdleReleaseRow,
     ),
   );
 

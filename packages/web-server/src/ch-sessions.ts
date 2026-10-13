@@ -1,3 +1,4 @@
+import { draftPermissionMode, type DraftConfiguration } from "./draft-configuration.ts";
 /** CH-backed Web facade: canonical Threads are owned/persisted by CH, Web holds only rendering buffers. */
 import { randomUUID } from "node:crypto";
 import {
@@ -5,6 +6,7 @@ import {
   harnessPluginRouteSchema,
   threadInspectionSchema,
   threadUsageInspectionSchema,
+  type HarnessDisplayEntries,
 } from "@codexhost/shared-contracts";
 import type { ChHostClient } from "./ch-host-client.ts";
 import { ChHarnessCatalog, type ModelSelection } from "./ch-harness-catalog.ts";
@@ -23,6 +25,7 @@ import { ChFileInputs } from "./ch-file-inputs.ts";
 import { type WebFiles, WEB_FILE_INPUT } from "./web-files.ts";
 import { ChRealtime } from "./ch-realtime.ts";
 import { ChInteractions } from "./ch-interactions.ts";
+import type { WebHarnessPreferences } from "./harness-preferences.ts";
 import { requestOf } from "./store.ts";
 import {
   type EventHub,
@@ -79,8 +82,10 @@ export class ChSessions {
     private readonly events: EventHub,
     private readonly images?: WebImages,
     private readonly files?: WebFiles,
+    displayEntries?: () => Promise<HarnessDisplayEntries>,
+    private readonly preferences?: WebHarnessPreferences,
   ) {
-    this.catalog = new ChHarnessCatalog(host);
+    this.catalog = new ChHarnessCatalog(host, displayEntries, preferences);
     this.attachments = images ? new ChAttachments(images, files) : undefined;
     this.fileInputs =
       files && images
@@ -503,7 +508,10 @@ export class ChSessions {
       },
     };
   }
-  private async create(args: Record<string, unknown>) {
+  private async create(
+    args: Record<string, unknown>,
+    configuration?: DraftConfiguration,
+  ): Promise<{ sessionId: string; agentPreset: string }> {
     const request = requestOf<{ cwd?: string; workspaceId?: string; sessionId?: string }>(args);
     const cwd =
       request.cwd ??
@@ -516,14 +524,40 @@ export class ChSessions {
       return { sessionId: id, agentPreset: "standard" };
     if (existing || this.rows.has(id))
       throw new RpcError("session/busy", "This Session already exists; start a new draft.");
-    const selection = (await this.catalog.models()).default;
-    const draft = { id, ...(cwd ? { cwd } : {}), selection, createdAt: Date.now() };
+    const selection = configuration?.selection ?? (await this.catalog.models()).default;
+    const draft: Draft = { id, ...(cwd ? { cwd } : {}), selection, createdAt: Date.now() };
+    if (configuration) {
+      if (configuration.permissionModeId) draft.permissionModeId = configuration.permissionModeId;
+    } else {
+      const config = await this.preferences
+        ?.configuration(selection.provider)
+        .catch(() => undefined);
+      const inspection = await this.catalog.inspect(selection.provider, cwd);
+      const permissionModeId = draftPermissionMode(inspection, config?.permissionModeId);
+      if (permissionModeId) draft.permissionModeId = permissionModeId;
+    }
+    if (this.closed) throw new RpcError("session/closed", "Web sessions are closing.");
+    if (this.drafts.has(id)) return this.create(args, configuration);
     this.drafts.set(id, draft);
     if (cwd) this.workspaces.attachReferencedSession(id, cwd);
     this.workspaces.addDraftReference(id, cwd);
     this.events.emit("api-session/added", await this.draftSummary(draft));
     return { sessionId: id, agentPreset: "standard" };
   }
+  /** Materialize a source-neutral draft without reading or writing global defaults. */
+  async prepareDraft(
+    request: { sessionId: string; cwd?: string },
+    configuration: DraftConfiguration,
+  ): Promise<void> {
+    await this.create({ request }, configuration);
+    const draft = this.drafts.get(request.sessionId);
+    if (!draft || draft.creating || draft.canonicalId || draft.cwd !== request.cwd || this.closed)
+      throw new RpcError("session/busy", "Draft is already in use.");
+    draft.selection = { ...configuration.selection };
+    delete draft.permissionModeId;
+    if (configuration.permissionModeId) draft.permissionModeId = configuration.permissionModeId;
+  }
+
   private async commit(draft: Draft, prompt: string): Promise<string> {
     if (draft.canonicalId) return draft.canonicalId;
     draft.creating ??= (async () => {
@@ -581,6 +615,25 @@ export class ChSessions {
     if (!this.fileInputs)
       throw new RpcError("session/attachment-invalid", "File uploads are unavailable.");
     return this.fileInputs.upload(id, chunks, name);
+  }
+
+  /** Draft input support for the Web composition; it does not create a Thread. */
+  draftInputCapabilities(): Record<string, unknown> {
+    return this.images
+      ? {
+          attachmentInput: this.files ? WEB_FILE_INPUT : WEB_IMAGE_INPUT,
+          imageLimits: WEB_IMAGE_LIMITS,
+        }
+      : {};
+  }
+
+  /** Release a Web upload placeholder only; a native or in-flight Thread is never discarded. */
+  discardUnsubmittedDraft(id: string): void {
+    const draft = this.drafts.get(id);
+    if (!draft) return;
+    if (draft.canonicalId || draft.creating)
+      throw new RpcError("session/busy", "A submitted Thread cannot change Session source.");
+    this.drafts.delete(id);
   }
 
   register(rpc: RpcRegistry, streams: StreamRegistry): void {
@@ -647,8 +700,37 @@ export class ChSessions {
       const draft = this.drafts.get(request.sessionId);
       if (draft && !draft.canonicalId) {
         if (draft.creating) throw new RpcError("session/busy", "Draft creation is in progress.");
-        if (draft.selection.provider !== request.provider) delete draft.permissionModeId;
+        const before = draft.selection;
+        if (before.provider !== request.provider) {
+          const config = await this.preferences
+            ?.configuration(request.provider)
+            .catch(() => undefined);
+          const inspection = config?.permissionModeId
+            ? await this.catalog.inspect(request.provider, draft.cwd)
+            : undefined;
+          if (draft.creating || draft.selection !== before)
+            throw new RpcError("session/busy", "Draft selection changed.");
+          delete draft.permissionModeId;
+          if (
+            config?.permissionModeId &&
+            inspection?.status === "ready" &&
+            inspection.permissionModes?.modes.some((mode) => mode.id === config.permissionModeId)
+          )
+            draft.permissionModeId = config.permissionModeId;
+        }
         draft.selection = request;
+        await this.preferences
+          ?.remember(request.provider, {
+            model: { id: request.model },
+            thinkingOptionId: request.reasoningEffort,
+            permissionModeId: draft.permissionModeId,
+          })
+          .catch(() =>
+            this.events.emit(
+              "codexhost/preferences-error",
+              "New session defaults could not be saved.",
+            ),
+          );
         this.events.emit("api-session/added", await this.draftSummary(draft));
         for (const sink of this.controls) {
           const s = await this.draftSummary(draft);
@@ -1003,7 +1085,21 @@ export class ChSessions {
           "Mode not advertised by this Harness.",
         );
       if (draft && !draft.canonicalId) {
+        if (draft.creating || draft.selection.provider !== harnessId)
+          throw new RpcError("session/busy", "Draft selection changed.");
         draft.permissionModeId = modeId;
+        await this.preferences
+          ?.remember(harnessId, {
+            model: { id: draft.selection.model },
+            thinkingOptionId: draft.selection.reasoningEffort,
+            permissionModeId: modeId,
+          })
+          .catch(() =>
+            this.events.emit(
+              "codexhost/preferences-error",
+              "New session defaults could not be saved.",
+            ),
+          );
         for (const sink of this.controls)
           sink.push({
             type: "projection",

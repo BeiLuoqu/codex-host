@@ -6,12 +6,23 @@
  * one model-provider group whose models and reasoning efforts come from `inspect()`.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { HarnessPluginContext, HarnessPluginModule } from "@codexhost/harness-adapter/plugin";
-import type { HarnessCommandCatalog, HarnessPluginManifest } from "@codexhost/shared-contracts";
+import {
+  HARNESS_PLUGIN_API_VERSION,
+  harnessPluginManifestSchema,
+  isHarnessPluginInScope,
+  type HarnessPluginScope,
+  type HarnessCommandCatalog,
+  type HarnessPluginManifest,
+  type HarnessDisplayEntries,
+} from "@codexhost/shared-contracts";
+import { pluginResourcePath } from "@codexhost/harness-plugin-files";
+import { withHarnessDisplayOrder } from "./harness-display-order.ts";
+import type { WebHarnessPreferences } from "./harness-preferences.ts";
 
 export type HarnessManifest = Pick<
   HarnessPluginManifest,
@@ -139,17 +150,35 @@ export class HarnessRegistry {
    * @param adapterRoots - directories containing one Adapter plugin per child directory.
    * @param enabled - optional allow-list of Harness ids.
    */
-  constructor(adapterRoots: readonly string[], enabled?: ReadonlySet<string>) {
+  constructor(
+    adapterRoots: readonly string[],
+    enabled?: ReadonlySet<string>,
+    private readonly options: {
+      scope?: HarnessPluginScope;
+      environment?: NodeJS.ProcessEnv;
+      displayEntries?: () => Promise<HarnessDisplayEntries>;
+      preferences?: () => WebHarnessPreferences | undefined;
+    } = {},
+  ) {
     for (const root of adapterRoots) {
       if (!existsSync(root)) continue;
       for (const name of readdirSync(root).sort()) {
-        const dir = resolve(root, name);
+        const dir = realpathSync(resolve(root, name));
         const manifestPath = join(dir, "manifest.json");
         if (!existsSync(manifestPath)) continue;
-        const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as HarnessManifest;
+        const manifest = harnessPluginManifestSchema.parse(
+          JSON.parse(readFileSync(manifestPath, "utf8")),
+        );
         if (manifest.kind === "usage") continue;
+        if (!isHarnessPluginInScope(manifest.id, options.scope ?? "external")) continue;
+        // Codex execution is opt-in even when its files are in a shared bundle.
+        if (manifest.id === "codex" && !enabled?.has("codex")) continue;
         if (enabled !== undefined && !enabled.has(manifest.id)) continue;
+        if (manifest.adapterApiVersion !== HARNESS_PLUGIN_API_VERSION)
+          throw new Error(`Incompatible Harness plugin API: ${manifest.id}`);
         if (!existsSync(join(dir, manifest.entry))) continue;
+        if (this.entries.has(manifest.id))
+          throw new Error(`Duplicate Harness plugin: ${manifest.id}`);
         this.entries.set(manifest.id, { manifest, dir });
       }
     }
@@ -157,6 +186,9 @@ export class HarnessRegistry {
 
   ids(): string[] {
     return [...this.entries.keys()];
+  }
+  get preferences(): WebHarnessPreferences | undefined {
+    return this.options.preferences?.();
   }
 
   manifest(harnessId: string): HarnessManifest | undefined {
@@ -173,14 +205,24 @@ export class HarnessRegistry {
     if (entry === undefined) return Promise.reject(new Error(`Unknown Harness ${harnessId}`));
     entry.adapter ??= (async () => {
       const module = (await import(
-        pathToFileURL(join(entry.dir, entry.manifest.entry)).href
+        pathToFileURL(await pluginResourcePath(entry.dir, entry.manifest.entry)).href
       )) as HarnessPluginModule;
       const context: HarnessPluginContext = {
-        environment: { ...process.env },
+        environment: Object.freeze({ ...(this.options.environment ?? process.env) }),
         platform: process.platform,
         managedRemoteHost: false,
       };
-      return (await module.createHarnessAdapter(context)) as Adapter;
+      const adapter = await module.createHarnessAdapter(context);
+      if (
+        adapter.harnessId !== harnessId ||
+        typeof adapter.open !== "function" ||
+        typeof adapter.inspect !== "function" ||
+        typeof adapter.close !== "function"
+      ) {
+        await adapter.close?.();
+        throw new Error(`Invalid Harness plugin: ${harnessId}`);
+      }
+      return adapter as Adapter;
     })();
     entry.adapter.catch(() => {
       entry.adapter = undefined;
@@ -229,6 +271,9 @@ export class HarnessRegistry {
     routableProviders: string[];
     groups: ModelGroup[];
     failures: Array<{ id: string; name: string; message: string }>;
+    harnessOrder?: string[];
+    modelFavorites?: Record<string, string[]>;
+    preferencesAvailable?: boolean;
   }> {
     const ids = this.ids();
     const inspections = await Promise.all(
@@ -264,6 +309,7 @@ export class HarnessRegistry {
         ? (firstInspection.catalog.defaultModel?.id ?? first?.models[0]?.id)
         : undefined;
     const preferred = this.preferredSelection;
+    const displayEntries = (await this.options.displayEntries?.()) ?? [];
     if (
       preferred !== undefined &&
       groups.some(
@@ -272,19 +318,27 @@ export class HarnessRegistry {
           group.models.some((model) => model.id === preferred.model),
       )
     ) {
-      return {
-        default: preferred,
+      const catalog = withHarnessDisplayOrder(
+        {
+          default: preferred,
+          routableProviders: groups.map((group) => group.id),
+          groups,
+          failures,
+        },
+        displayEntries,
+      );
+      return this.preferences ? this.preferences.decorate(catalog) : catalog;
+    }
+    const catalog = withHarnessDisplayOrder(
+      {
+        default: { provider: first?.id ?? "none", model: defaultModel ?? "none" },
         routableProviders: groups.map((group) => group.id),
         groups,
         failures,
-      };
-    }
-    return {
-      default: { provider: first?.id ?? "none", model: defaultModel ?? "none" },
-      routableProviders: groups.map((group) => group.id),
-      groups,
-      failures,
-    };
+      },
+      displayEntries,
+    );
+    return this.preferences ? this.preferences.decorate(catalog) : catalog;
   }
 
   async close(): Promise<void> {
