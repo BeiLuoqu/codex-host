@@ -1,6 +1,46 @@
-import type { ThreadUsageInspection } from "@codexhost/shared-contracts";
+import type { ThreadUsageInspection, ThreadUsageSnapshot } from "@codexhost/shared-contracts";
 
 import type { SessionLog } from "./session-log.ts";
+
+type InputUsage = Pick<
+  ThreadUsageSnapshot,
+  "inputTokens" | "cachedInputTokens" | "cacheWriteInputTokens" | "outputTokens" | "totalTokens"
+>;
+
+/** Unknown cache buckets cannot establish uncached input or a cumulative cache ratio. */
+export function projectUncachedInputTokens(usage: InputUsage | null): number | null {
+  if (usage?.cachedInputTokens === undefined || usage.cacheWriteInputTokens === undefined)
+    return null;
+  const cached = usage.cachedInputTokens + usage.cacheWriteInputTokens;
+  if (usage.totalTokens !== undefined && usage.outputTokens !== undefined) {
+    // Also supports older CH Pi snapshots whose inputTokens excluded cache, without guessing
+    // the convention from the relative sizes of the input and cache buckets.
+    const fromTotal = usage.totalTokens - usage.outputTokens - cached;
+    return fromTotal >= 0 ? fromTotal : null;
+  }
+
+  if (usage.inputTokens === undefined || usage.inputTokens < cached) return null;
+  return usage.inputTokens - cached;
+}
+
+/** DSH's generic meter requires four known disjoint buckets; empty hides that meter. */
+export function projectTokenUsage(usage: InputUsage | null) {
+  const uncached = projectUncachedInputTokens(usage);
+  if (
+    uncached === null ||
+    usage?.outputTokens === undefined ||
+    usage.cachedInputTokens === undefined ||
+    usage.cacheWriteInputTokens === undefined
+  ) {
+    return { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  }
+  return {
+    uncachedInputTokens: uncached,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cachedInputTokens,
+    cacheWriteTokens: usage.cacheWriteInputTokens,
+  };
+}
 
 /** Project one validated Host snapshot into the generic DSH meters and CH detail surface. */
 export function applyUsageProjections(log: SessionLog, value: ThreadUsageInspection): void {
@@ -12,17 +52,9 @@ export function applyUsageProjections(log: SessionLog, value: ThreadUsageInspect
       : null,
   );
 
-  const input = usage?.inputTokens ?? 0;
-  const cacheRead = usage?.cachedInputTokens ?? 0;
-  const cacheWrite = usage?.cacheWriteInputTokens ?? 0;
-  log.setProjection("tokenUsage", {
-    // Host input includes both cache buckets. Clamp malformed cross-field native
-    // totals rather than presenting a negative uncached count.
-    uncachedInputTokens: Math.max(input - cacheRead - cacheWrite, 0),
-    outputTokens: usage?.outputTokens ?? 0,
-    cacheReadTokens: cacheRead,
-    cacheWriteTokens: cacheWrite,
-  });
+  // Keep the authoritative Host cache rates above even when its cumulative token split is
+  // unavailable (e.g. Claude Code). Missing counts must not become a fabricated 0% below.
+  log.setProjection("tokenUsage", projectTokenUsage(usage));
 
   log.setProjection(
     "contextPressure",

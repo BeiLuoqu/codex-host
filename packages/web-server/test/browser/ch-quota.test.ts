@@ -169,6 +169,14 @@ for (const mode of [
       await details.waitFor({ state: "hidden" });
       await capture("closed");
     }
+    if (mode !== "account-only") {
+      await page.getByRole("button", { name: "26% of context used", exact: true }).click();
+      const contextDialog = page.getByRole("dialog", { name: "of context used", exact: true });
+      await contextDialog.waitFor();
+      assert.equal(await contextDialog.locator("dl").count(), 0);
+      assert.match(await contextDialog.innerText(), /264K/);
+      await capture("context");
+    }
     assert.deepEqual(errors, []);
   });
 }

@@ -31,6 +31,7 @@ import {
   type StreamRegistry,
   type StreamSink,
 } from "./transport.ts";
+import { projectTokenUsage } from "./usage-projection.ts";
 import type { Workspaces } from "./workspaces.ts";
 
 interface ModelSelection {
@@ -414,19 +415,12 @@ export class Sessions {
           cachedInputTokens?: number;
           cacheWriteInputTokens?: number;
           outputTokens?: number;
+          totalTokens?: number;
           contextWindowTokens?: number;
           contextUsedTokens?: number;
         } | null;
         if (usage === null) return;
-        runtime.log.setProjection("tokenUsage", {
-          uncachedInputTokens: Math.max(
-            (usage.inputTokens ?? 0) - (usage.cachedInputTokens ?? 0),
-            0,
-          ),
-          outputTokens: usage.outputTokens ?? 0,
-          cacheReadTokens: usage.cachedInputTokens ?? 0,
-          cacheWriteTokens: usage.cacheWriteInputTokens ?? 0,
-        });
+        runtime.log.setProjection("tokenUsage", projectTokenUsage(usage));
         if (usage.contextWindowTokens !== undefined) {
           runtime.log.setProjection("contextPressure", {
             contextWindow: usage.contextWindowTokens,

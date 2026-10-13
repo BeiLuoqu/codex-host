@@ -63,7 +63,6 @@ export function defaultProjections(): Record<string, unknown> {
       cacheWriteTokens: 0,
     },
     contextPressure: {},
-    contextBreakdown: { systemTokens: 0, toolsTokens: 0, messageTokens: 0 },
     agentPreset: "standard",
     subagentCatalog: [],
     subagentTiming: { settledMs: 0 },
@@ -126,6 +125,9 @@ export class SessionLog {
       ...defaultProjections(),
       ...data.readJson<Record<string, unknown>>(this.projectionFile, {}),
     };
+    // Web session sources report total context pressure, not its composition.
+    // Discard the zero-filled placeholder persisted by older Web versions too.
+    delete this.projections.contextBreakdown;
     this.attemptCounter = this.events.filter((event) => event.type === "assistant/message").length;
   }
 
