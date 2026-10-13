@@ -93,6 +93,34 @@ it("does not drain history on refresh and fills new-Turn gaps beyond five Turns"
   assert.deepEqual(view.thread.turns, row.turns.slice(10));
 });
 
+it("refreshes title fallbacks on both full reads and unchanged idle history", async () => {
+  const { host, row, view } = fixture(0);
+  row.name = "";
+  await view.refresh();
+  assert.equal(view.log.projections.title, "project");
+  const reads = () => host.requests.filter((r) => r.method === "thread/turns/list").length;
+  assert.equal(reads(), 1);
+
+  row.name = " \n ";
+  row.preview = " First prompt ";
+  await view.refresh();
+  assert.equal(view.log.projections.title, "First prompt");
+  row.name = " Stored title ";
+  await view.refresh();
+  assert.equal(view.log.projections.title, "Stored title");
+  row.name = "";
+  row.preview = "";
+  row.cwd = "";
+  await view.refresh();
+  assert.equal(view.log.projections.title, row.id);
+  assert.equal(reads(), 1, "title-only updates reuse unchanged idle history");
+
+  row.preview = " Full refresh title ";
+  await view.refresh(true);
+  assert.equal(view.log.projections.title, "Full refresh title");
+  assert.equal(reads(), 2);
+});
+
 it("coalesces older pages and retries errors without advancing the cursor", async () => {
   const { host, view } = fixture(12);
   await view.refresh();

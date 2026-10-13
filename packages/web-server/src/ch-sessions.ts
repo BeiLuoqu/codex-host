@@ -13,6 +13,7 @@ import type { ChThread } from "./ch-thread-view.ts";
 import type { Inspection } from "./harnesses.ts";
 import { nativePermissionView } from "./session-presentation.ts";
 import { projectGroupRoot } from "./ch-project-groups.ts";
+import { threadListTitle } from "./ch-thread-title.ts";
 import { ChThreadHistory } from "./ch-thread-history.ts";
 import { forkChThread, forkUnavailable } from "./ch-thread-fork.ts";
 import { ChPinnedThreads } from "./ch-pinned-threads.ts";
@@ -227,7 +228,7 @@ export class ChSessions {
    */
   private catalogKey(row: ChThread): string {
     return JSON.stringify([
-      row.name ?? row.preview ?? null,
+      threadListTitle(row),
       row.cwd,
       row.updatedAt,
       row.status.type,
@@ -249,6 +250,11 @@ export class ChSessions {
               .map((row) => this.summary(row)),
           );
     this.publishedCatalog = next;
+    // Previously opened Threads retain sequenced browser projections even after
+    // unfollow. Cached catalog hints cannot replace them. Push the authoritative
+    // title through the existing control stream without rereading any history.
+    for (const [id, row] of this.rows)
+      this.views.get(id)?.log.setProjection("title", threadListTitle(row));
     for (const row of changed) this.events.emit("api-session/added", row);
     if (before)
       for (const id of before.keys())
@@ -441,7 +447,7 @@ export class ChSessions {
             imageLimits: WEB_IMAGE_LIMITS,
           }
         : {}),
-      title: row.name ?? row.preview ?? null,
+      title: threadListTitle(row),
       harnessIdentity: { id: harnessId, name: await this.catalog.name(harnessId) },
       sessionListMetadata: { blank: false, lastPromptAt: row.updatedAt * 1000 },
     };
@@ -822,9 +828,9 @@ export class ChSessions {
       const needle = requestOf<{ query: string }>(args).query.toLowerCase();
       return {
         items: [...this.rows.values()]
-          .filter((row) => (row.name ?? row.preview ?? "").toLowerCase().includes(needle))
-          .slice(0, 20)
-          .map((row) => ({ sessionId: row.id, snippet: row.name ?? row.preview ?? "" })),
+          .map((row) => ({ sessionId: row.id, snippet: threadListTitle(row) }))
+          .filter((item) => item.snippet.toLowerCase().includes(needle))
+          .slice(0, 20),
         hasMore: false,
       };
     });

@@ -2,6 +2,7 @@
 import type { ChHostClient } from "./ch-host-client.ts";
 import type { ClientThreadSnapshot } from "@codexhost/shared-contracts";
 import { ChThreadView, type ChThread, type ChTurn } from "./ch-thread-view.ts";
+import { threadListTitle } from "./ch-thread-title.ts";
 import type { ProjectionListener } from "./session-log.ts";
 import { RpcError } from "./transport.ts";
 
@@ -102,7 +103,7 @@ export class ChThreadHistory extends ChThreadView {
         this.thread.status.type !== "active"
       ) {
         Object.assign(this.thread, { ...thread, turns: this.thread.turns });
-        this.log.setProjection("title", thread.name ?? thread.preview ?? null);
+        this.log.setProjection("title", threadListTitle(thread));
         return;
       }
       const recent = snapshot ? snapshot.turnsPage : await this.page(null);

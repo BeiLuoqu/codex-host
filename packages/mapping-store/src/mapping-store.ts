@@ -167,8 +167,8 @@ function threadMetadataOf(record: StoredThreadRecordV1): StoredThreadMetadataV1 
 
 /** The record as written to the Thread file, which older releases must still accept. */
 function withoutThreadMetadata(record: StoredThreadRecordV1): StoredThreadRecordV1 {
-  const { projectId, projectlessWorkspace, daybreakEnabled, gitInfo, ...core } = record;
-  void [projectId, projectlessWorkspace, daybreakEnabled, gitInfo];
+  const { preview, projectId, projectlessWorkspace, daybreakEnabled, gitInfo, ...core } = record;
+  void [preview, projectId, projectlessWorkspace, daybreakEnabled, gitInfo];
   return core;
 }
 
@@ -188,6 +188,10 @@ function applyThreadMetadataPatch(
   patch: ThreadMetadataPatch,
 ): StoredThreadRecordV1 {
   const next = { ...current };
+  if (patch.preview !== undefined) {
+    if (patch.preview === null) delete next.preview;
+    else next.preview = patch.preview;
+  }
   if (patch.projectId !== undefined) {
     if (patch.projectId === null) delete next.projectId;
     else next.projectId = patch.projectId;
@@ -862,13 +866,18 @@ export class MappingStore {
     patch: ThreadMetadataPatch,
     options: { ifProjectId?: string } = {},
   ): Promise<StoredThreadRecordV1> {
-    return this.#update(hostThreadId, (current) => {
-      if (options.ifProjectId !== undefined && current.projectId !== options.ifProjectId) {
-        return null;
-      }
-      const next = applyThreadMetadataPatch(current, patch);
-      return sameJson(next, current) ? null : next;
-    });
+    return this.#update(
+      hostThreadId,
+      (current) => {
+        if (options.ifProjectId !== undefined && current.projectId !== options.ifProjectId) {
+          return null;
+        }
+        const next = applyThreadMetadataPatch(current, patch);
+        return sameJson(next, current) ? null : next;
+      },
+      // Backfilling a display hint is not new conversation activity.
+      Object.keys(patch).every((key) => key === "preview"),
+    );
   }
 
   /** Section placements of stored External Threads, in insertion order. */
@@ -1006,6 +1015,7 @@ export class MappingStore {
   async #update(
     hostThreadId: HostThreadId,
     change: (current: StoredThreadRecordV1) => StoredThreadRecordV1 | null,
+    preserveUpdatedAt = false,
   ): Promise<StoredThreadRecordV1> {
     this.#requireInitialized();
     let result: StoredThreadRecordV1 | null = null;
@@ -1021,7 +1031,7 @@ export class MappingStore {
       const next = storedThreadRecordV1Schema.parse({
         ...changed,
         revision: current.revision + 1,
-        updatedAt: this.#now().toISOString(),
+        updatedAt: preserveUpdatedAt ? current.updatedAt : this.#now().toISOString(),
       }) as StoredThreadRecordV1;
       this.#validateGlobal(next, hostThreadId);
       await this.#replaceFile(this.#recordPath(hostThreadId), next, true);

@@ -9,6 +9,53 @@ import { DataDir } from "../src/store.ts";
 import { EventHub, RpcRegistry, StreamRegistry } from "../src/transport.ts";
 import { FakeChHost } from "./support/ch-host.ts";
 
+it("deduplicates displayed titles while publishing fallback and cwd changes", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ch-catalog-titles-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const host = new FakeChHost();
+  const row = host.add("thread", join(root, "project"), "");
+  host.add("same-project", row.cwd, "");
+  const events = new EventHub(root);
+  const emitted: Array<{ sessionId: string; projections: { values: { title: string } } }> = [];
+  events.emit = (event, ...args) => {
+    if (event === "api-session/added") emitted.push(args[0] as (typeof emitted)[number]);
+  };
+  const sessions = new ChSessions(host, new Workspaces(new DataDir(root), root), events);
+  t.after(() => sessions.close());
+  const rpc = new RpcRegistry();
+  sessions.register(rpc, new StreamRegistry());
+  const refresh = async (expected: string[]) => {
+    assert.ok((await rpc.dispatch("session/list", { args: {} })).ok);
+    assert.deepEqual(
+      emitted.map((item) => item.projections.values.title),
+      expected,
+    );
+    assert.ok(emitted.every((item) => item.sessionId === row.id));
+    emitted.length = 0;
+  };
+  await refresh([]);
+  row.name = " \n ";
+  row.preview = " ";
+  await refresh([]);
+  row.preview = " First prompt ";
+  await refresh(["First prompt"]);
+  row.name = "First prompt";
+  await refresh([]); // changing the title source alone is not a visible change
+  row.name = " Stored title ";
+  await refresh(["Stored title"]);
+  row.name = "Stored title";
+  row.preview = "Hidden prompt";
+  await refresh([]);
+  row.name = "";
+  row.preview = "";
+  await refresh(["project"]);
+  row.cwd = join(root, "other", "project");
+  await refresh(["project"]); // cwd is still part of the key even with the same basename
+  row.cwd = "";
+  await refresh([row.id]);
+  await refresh([]);
+});
+
 it("broadcasts catalog deltas, not every unchanged Thread on every polling tick", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const root = mkdtempSync(join(tmpdir(), "ch-catalog-deltas-"));

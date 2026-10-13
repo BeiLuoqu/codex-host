@@ -730,6 +730,24 @@ export class ExternalThreadRuntime {
     }
   }
 
+  /** Persist first accepted input before replying, never on the output/token path. */
+  async capturePreview(thread: ExternalThread, turn: JsonObject): Promise<void> {
+    if (
+      thread.record.preview !== undefined ||
+      thread.record.turnMappings.length !== 0 ||
+      thread.turns.length !== 0
+    )
+      return;
+    try {
+      thread.record = await this.#repository.updatePreview(thread.record, [turn]);
+      thread.thread.preview = thread.record.preview ?? "";
+    } catch (error) {
+      // A display hint must not turn accepted native work into a rejected send.
+      // A later native history read can backfill it.
+      this.#diagnose(error);
+    }
+  }
+
   async persistTerminalIdentity(
     thread: ExternalThread,
     event: TurnCompletedEvent,

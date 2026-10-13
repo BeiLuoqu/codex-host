@@ -745,6 +745,43 @@ describe("mapping-store package", () => {
     await second.close();
   });
 
+  it("persists preview separately without renaming or changing recency", async () => {
+    const directory = await temporaryStoreDirectory();
+    let now = new Date("2026-01-01T00:00:00.000Z");
+    const store = new MappingStore({ directory, now: () => now });
+    await store.initialize();
+    await createReady(store);
+    const before = await store.setTitle(threadId, "User title");
+    now = new Date("2026-02-01T00:00:00.000Z");
+    const saved = await store.updateMetadata(threadId, { preview: "First prompt" });
+    expect(saved).toMatchObject({
+      preview: "First prompt",
+      title: before.title,
+      updatedAt: before.updatedAt,
+    });
+    expect(await store.updateMetadata(threadId, { preview: "First prompt" })).toEqual(saved);
+    const core = JSON.parse(
+      await readFile(path.join(directory, "threads", `${threadId}.json`), "utf8"),
+    );
+    expect(storedThreadCoreV1Schema.safeParse(core).success).toBe(true);
+    expect(core).not.toHaveProperty("preview");
+    await store.close();
+    const reopened = new MappingStore({ directory });
+    await reopened.initialize();
+    try {
+      expect(await reopened.getThread(threadId)).toMatchObject({
+        title: "User title",
+        preview: "First prompt",
+      });
+      await reopened.updateMetadata(threadId, { preview: "" });
+      expect(await reopened.getThread(threadId)).toHaveProperty("preview", "");
+      await reopened.updateMetadata(threadId, { preview: null });
+      expect(await reopened.getThread(threadId)).not.toHaveProperty("preview");
+    } finally {
+      await reopened.close();
+    }
+  });
+
   it("keeps Thread record files readable by releases without Desktop metadata", async () => {
     const directory = await temporaryStoreDirectory();
     const first = new MappingStore({ directory });

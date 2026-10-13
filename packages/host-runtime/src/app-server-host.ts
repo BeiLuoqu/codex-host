@@ -5361,6 +5361,7 @@ export class AppServerHost {
         input: [{ type: "text", text: rewriteDelegationMentionText(text) }],
       });
       if (!result.ok) throw new ExternalSteerError(-32073, result.error.message);
+      await this.#externalRuntime.capturePreview(thread, projection.projector.snapshotTurn());
       return { turnId, turn: projection.projector.pendingTurn(), gate };
     } catch (error) {
       restoreExecutionHost();

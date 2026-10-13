@@ -75,6 +75,45 @@ it("shares canonical CH identity and cwd without a Web index/history or physical
   assert.deepEqual(readdirSync(root), ["workspaces.json"]);
 });
 
+it("searches the displayed title at every fallback level", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ch-title-search-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const host = new FakeChHost();
+  host.add("named", join(root, "project"), " Named title ");
+  host.add("preview", join(root, "project"), "").preview = " First prompt ";
+  host.add("whitespace", join(root, "project"), " \n ").preview = " Another prompt ";
+  host.add("directory", join(root, "fallback-directory"), "");
+  host.add("id-fallback", "", "", false);
+  const sessions = new ChSessions(
+    host,
+    new Workspaces(new DataDir(root), root),
+    new EventHub(root),
+  );
+  t.after(() => sessions.close());
+  const rpc = new RpcRegistry();
+  sessions.register(rpc, new StreamRegistry());
+  const list = await rpc.dispatch("session/list", { args: {} });
+  assert.ok(list.ok);
+  const { items } = list.value as {
+    items: Array<{ sessionId: string; projections: { values: { title: string } } }>;
+  };
+  assert.deepEqual(
+    items.map((item) => item.projections.values.title).sort(),
+    ["Named title", "First prompt", "Another prompt", "fallback-directory", "id-fallback"].sort(),
+  );
+  for (const item of items) {
+    const title = item.projections.values.title;
+    const result = await rpc.dispatch("session/search", {
+      args: { request: { query: title.toUpperCase() } },
+    });
+    assert.ok(result.ok);
+    assert.deepEqual(result.value, {
+      items: [{ sessionId: item.sessionId, snippet: title }],
+      hasMore: false,
+    });
+  }
+});
+
 it("keeps a late steer as the next queued follow-up when CH is already idle", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "ch-late-steer-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

@@ -77,10 +77,12 @@ const storedThreadCoreV1Shape = {
 };
 
 /**
- * Desktop organization metadata. It lives in a separate per-Thread file so that the
+ * Thread presentation/organization metadata. It lives in a separate per-Thread file so that the
  * strict Thread record keeps its pre-metadata shape and an older release can still load it.
  */
 const storedThreadMetadataFieldsShape = {
+  /** Bounded first user message, independent of the official title. Empty means textless. */
+  preview: z.string().max(4_096).optional(),
   projectId: nonBlankTextSchema.max(1_024).optional(),
   projectlessWorkspace: z
     .object({
@@ -94,6 +96,7 @@ const storedThreadMetadataFieldsShape = {
 };
 
 export const THREAD_METADATA_FIELDS = [
+  "preview",
   "projectId",
   "projectlessWorkspace",
   "daybreakEnabled",
@@ -247,6 +250,7 @@ export interface FindRecentDelegationInput {
  * unchanged; `null` clears the stored value.
  */
 export interface ThreadMetadataPatch {
+  preview?: string | null;
   projectId?: string | null;
   projectlessWorkspace?: StoredThreadRecordV1["projectlessWorkspace"] | null;
   daybreakEnabled?: boolean;

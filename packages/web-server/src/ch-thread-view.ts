@@ -1,6 +1,7 @@
 /** In-memory projection of the CH protocol onto the existing Web UI wire format. */
 import { REASONING_TRANSCRIPT_COMMAND } from "@codexhost/shared-contracts";
 import { SessionLog, type ProjectionListener } from "./session-log.ts";
+import { threadListTitle } from "./ch-thread-title.ts";
 import { RpcError } from "./transport.ts";
 import {
   TurnProjector,
@@ -213,7 +214,7 @@ export class ChThreadView {
   update(thread: ChThread): void {
     this.ensureCurrent();
     Object.assign(this.thread, thread);
-    this.log.setProjection("title", thread.name ?? thread.preview ?? null);
+    this.log.setProjection("title", threadListTitle(thread));
     this.log.setProjection("sessionListMetadata", {
       blank: thread.turns.length === 0,
       lastPromptAt: thread.updatedAt * 1000,
