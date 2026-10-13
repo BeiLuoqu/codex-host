@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -1197,7 +1197,11 @@ it("stores latest measurements only in existing metadata without changing identi
   expect(
     JSON.parse(await readFile(path.join(directory, "thread-metadata", `${threadId}.json`), "utf8")),
   ).toMatchObject({ projectId: "project", usageMeasurements: { values } });
+  const metadataPath = path.join(directory, "thread-metadata", `${threadId}.json`);
+  const stamp = await stat(metadataPath, { bigint: true });
   await store.saveUsageMeasurements(threadId, nativeRef, values);
+  expect((await stat(metadataPath, { bigint: true })).mtimeNs).toBe(stamp.mtimeNs);
+  expect((await stat(metadataPath, { bigint: true })).ino).toBe(stamp.ino);
   await store.close();
   const reopened = new MappingStore({ directory });
   await reopened.initialize();
@@ -1211,5 +1215,27 @@ it("stores latest measurements only in existing metadata without changing identi
     (await reopened.saveUsageMeasurements(threadId, nativeRef, values)).usageMeasurements,
   ).toBeUndefined();
   expect((await reopened.getThread(threadId))?.preview).toBe("keep preview");
+  await reopened.close();
+});
+
+it("does not discard organization metadata when optional usage cache is invalid", async () => {
+  const directory = await temporaryStoreDirectory();
+  const first = new MappingStore({ directory });
+  await first.initialize();
+  await createReady(first);
+  await first.updateMetadata(threadId, { preview: "keep", projectId: "project" });
+  await first.close();
+  const file = path.join(directory, "thread-metadata", `${threadId}.json`);
+  const metadata = JSON.parse(await readFile(file, "utf8"));
+  metadata.usageMeasurements = {
+    nativeSessionRef: nativeRef,
+    values: { timeToFirstOutputMs: { value: -1, turnId: "turn-1", at: 1 } },
+  };
+  await writeFile(file, JSON.stringify(metadata));
+  const reopened = new MappingStore({ directory });
+  await reopened.initialize();
+  const record = await reopened.getThread(threadId);
+  expect(record).toMatchObject({ preview: "keep", projectId: "project" });
+  expect(record?.usageMeasurements).toBeUndefined();
   await reopened.close();
 });

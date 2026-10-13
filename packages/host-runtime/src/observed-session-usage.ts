@@ -114,6 +114,8 @@ export class ObservedSessionUsage {
         if (turn?.phase === "completed") {
           state.meter.turnCompleted(turn.id);
           if (state.activeTurnId === turn.id) state.activeTurnId = null;
+          if (provider.measurementScope)
+            void this.measurements?.flush(provider.measurementScope, observation.sessionId);
         }
         const firstOutput = turn?.phase === "output" && state.meter.outputObserved(turn.id, now);
         if (firstOutput && turn && provider.measurementScope) {

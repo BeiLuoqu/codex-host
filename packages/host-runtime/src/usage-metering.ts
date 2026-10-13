@@ -1,3 +1,4 @@
+import type { UsageMeasurementsSnapshot } from "@codexhost/shared-contracts";
 import {
   hostDerivedUsageFields,
   parseHostUsage,
@@ -188,6 +189,45 @@ export class UsageMeter {
     }
   }
 
+  measurementSnapshot(native: HostUsage | null = null, turnId?: string): UsageMeasurementsSnapshot {
+    const snapshot: UsageMeasurementsSnapshot = {};
+    if (this.#outputTokensPerSecond !== undefined && this.#lastOutputTurnId)
+      snapshot.outputTokensPerSecond = {
+        value: this.#outputTokensPerSecond,
+        turnId: this.#lastOutputTurnId,
+        at: this.#lastOutputAtMs,
+      };
+    if (this.#timeToFirstOutputMs !== undefined && this.#lastLatencyTurnId)
+      snapshot.timeToFirstOutputMs = {
+        value: this.#timeToFirstOutputMs,
+        turnId: this.#lastLatencyTurnId,
+        at: this.#lastLatencyAtMs,
+      };
+    if (
+      !this.#metered &&
+      turnId &&
+      typeof native?.outputTokensPerSecond === "number" &&
+      Number.isFinite(native.outputTokensPerSecond) &&
+      native.outputTokensPerSecond >= 0
+    ) {
+      const same =
+        snapshot.outputTokensPerSecond?.turnId === turnId &&
+        snapshot.outputTokensPerSecond.value === native.outputTokensPerSecond;
+      if (!same) {
+        this.#outputTokensPerSecond = native.outputTokensPerSecond;
+        this.#lastOutputTurnId = turnId;
+        this.#lastOutputAtMs = Date.now();
+        this.#lastOutputLive = true;
+        snapshot.outputTokensPerSecond = {
+          value: native.outputTokensPerSecond,
+          turnId,
+          at: this.#lastOutputAtMs,
+        };
+      }
+    }
+    return snapshot;
+  }
+
   measurements(): { outputTokensPerSecond?: number; timeToFirstOutputMs?: number } {
     return {
       ...(this.#outputTokensPerSecond === undefined
@@ -280,7 +320,10 @@ export class UsageMeter {
       usage.costSource = "native";
     }
     if (this.#timingUnavailable) delete usage.outputTokensPerSecond;
-    if (this.#outputTokensPerSecond !== undefined)
+    if (
+      this.#outputTokensPerSecond !== undefined &&
+      (this.#metered || native?.outputTokensPerSecond === undefined)
+    )
       usage.outputTokensPerSecond = this.#outputTokensPerSecond;
     if (this.#timeToFirstOutputMs !== undefined) {
       usage.timeToFirstOutputMs = this.#timeToFirstOutputMs;

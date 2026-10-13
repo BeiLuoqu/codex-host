@@ -1,3 +1,4 @@
+import type { UsageMeasurementsSnapshot } from "@codexhost/shared-contracts";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -59,6 +60,11 @@ export interface ExternalThreadStore {
   supersededNativeSessionIds?(harnessId: HarnessId): string[];
   replaceReadySessionAfterLastTurn(
     input: ReplaceReadySessionAfterLastTurnInput,
+  ): Promise<StoredThreadRecordV1>;
+  saveUsageMeasurements?(
+    hostThreadId: HostThreadId,
+    expectedNativeSessionRef: NativeSessionRef,
+    values: UsageMeasurementsSnapshot,
   ): Promise<StoredThreadRecordV1>;
   upsertTurnMappings(
     hostThreadId: HostThreadId,
@@ -245,6 +251,14 @@ export class ExternalThreadRepository {
 
   removeThread(hostThreadId: HostThreadId): Promise<void> {
     return this.store.removeThread(hostThreadId);
+  }
+
+  async saveUsageMeasurements(
+    record: StoredThreadRecordV1,
+    values: UsageMeasurementsSnapshot,
+  ): Promise<StoredThreadRecordV1> {
+    if (!record.nativeSessionRef || !this.store.saveUsageMeasurements) return record;
+    return this.store.saveUsageMeasurements(record.hostThreadId, record.nativeSessionRef, values);
   }
 
   async persistTurn(

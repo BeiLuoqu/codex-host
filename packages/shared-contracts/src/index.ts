@@ -378,3 +378,5 @@ export {
   type CodexSshConnection,
   type CodexSshDraft,
 } from "./remote-connections.js";
+
+export { usageMeasurementsSchema, type UsageMeasurementsSnapshot } from "./thread-usage.js";

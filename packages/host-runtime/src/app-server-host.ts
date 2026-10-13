@@ -1149,6 +1149,9 @@ export class AppServerHost {
       const threads = this.#externalRuntime.values();
       await Promise.allSettled(threads.map(({ session }) => session.close()));
       await Promise.allSettled(threads.map(({ outputTask }) => outputTask));
+      await Promise.allSettled(
+        threads.map((thread) => this.#externalRuntime.persistUsageMeasurements(thread)),
+      );
       await this.#closeAdapters();
       await this.#externalRuntime.drain();
       for (const pending of [...this.#pendingDesktopApprovals.values()]) {

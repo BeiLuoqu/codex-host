@@ -1,3 +1,7 @@
+import {
+  usageMeasurementsSchema,
+  type UsageMeasurementsSnapshot,
+} from "@codexhost/shared-contracts";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -779,6 +783,52 @@ export class MappingStore {
         turnMappings: input.turnMappings,
       };
     });
+  }
+
+  /** Optional telemetry updates only the existing metadata file, never activity or identity. */
+  async saveUsageMeasurements(
+    hostThreadId: HostThreadId,
+    expectedNativeSessionRef: NativeSessionRef,
+    values: UsageMeasurementsSnapshot,
+  ): Promise<StoredThreadRecordV1> {
+    this.#requireInitialized();
+    const parsed = usageMeasurementsSchema.parse(values);
+    let result: StoredThreadRecordV1 | undefined;
+    await this.#enqueue(async () => {
+      const current = this.#records.get(hostThreadId);
+      if (!current)
+        throw new MappingStoreError("THREAD_NOT_FOUND", "External Thread was not found");
+      result = current;
+      if (
+        current.state !== "ready" ||
+        !sameJson(current.nativeSessionRef, expectedNativeSessionRef)
+      )
+        return;
+      const retained = new Set<string>(current.turnMappings.map((mapping) => mapping.hostTurnId));
+      const prior = current.usageMeasurements;
+      const merged: UsageMeasurementsSnapshot = {};
+      if (prior && sameJson(prior.nativeSessionRef, expectedNativeSessionRef)) {
+        for (const field of ["outputTokensPerSecond", "timeToFirstOutputMs"] as const) {
+          const value = prior.values[field];
+          if (value && retained.has(value.turnId)) merged[field] = value;
+        }
+      }
+      for (const field of ["outputTokensPerSecond", "timeToFirstOutputMs"] as const) {
+        const value = parsed[field];
+        if (value && retained.has(value.turnId) && (!merged[field] || value.at >= merged[field].at))
+          merged[field] = value;
+      }
+      const next = { ...current };
+      if (Object.keys(merged).length)
+        next.usageMeasurements = { nativeSessionRef: expectedNativeSessionRef, values: merged };
+      else delete next.usageMeasurements;
+      if (sameJson(current.usageMeasurements, next.usageMeasurements)) return;
+      await this.#writeMetadataFile(hostThreadId, threadMetadataOf(next));
+      this.#records.set(hostThreadId, next);
+      result = next;
+    });
+    if (!result) throw new MappingStoreError("IO_ERROR", "Measurement update produced no record");
+    return cloneRecord(result);
   }
 
   async upsertTurnMappings(

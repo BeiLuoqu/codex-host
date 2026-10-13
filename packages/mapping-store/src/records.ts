@@ -1,3 +1,4 @@
+import { usageMeasurementsSchema } from "@codexhost/shared-contracts";
 import {
   harnessIdSchema,
   hostThreadIdSchema,
@@ -81,6 +82,11 @@ const storedThreadCoreV1Shape = {
  * strict Thread record keeps its pre-metadata shape and an older release can still load it.
  */
 const storedThreadMetadataFieldsShape = {
+  usageMeasurements: z
+    .object({ nativeSessionRef: nativeSessionRefSchema, values: usageMeasurementsSchema })
+    .strict()
+    .optional()
+    .catch(undefined),
   /** Bounded first user message, independent of the official title. Empty means textless. */
   preview: z.string().max(4_096).optional(),
   projectId: nonBlankTextSchema.max(1_024).optional(),
@@ -96,6 +102,7 @@ const storedThreadMetadataFieldsShape = {
 };
 
 export const THREAD_METADATA_FIELDS = [
+  "usageMeasurements",
   "preview",
   "projectId",
   "projectlessWorkspace",
