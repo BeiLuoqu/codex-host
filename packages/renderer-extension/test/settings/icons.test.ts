@@ -7,10 +7,7 @@ import {
   CODEXHOST_OTTER_DARK_DETAIL_PATH,
   CODEXHOST_OTTER_PATH,
 } from "../../src/assets/codexhost-otter.js";
-import {
-  createRendererSettingsBrandGlyph,
-  createRendererSettingsBrandIcon,
-} from "../../src/settings/icons.js";
+import { createRendererSettingsBrandGlyph } from "../../src/settings/icons.js";
 
 class FakeSvgElement {
   readonly attributes = new Map<string, string>();
@@ -84,12 +81,5 @@ describe("CodexHost theme-aware otter UI mark", () => {
       expect(svg).toContain('viewBox="0 0 384 384"');
       expect(svg).not.toMatch(/<(?:image|mask|circle|rect)\b/u);
     }
-  });
-
-  it("uses the same vector for settings and console headers", () => {
-    withSvgDocument(() => {
-      expectOtter(createRendererSettingsBrandIcon(32), 32);
-      expectOtter(createRendererSettingsBrandIcon(28), 28);
-    });
   });
 });

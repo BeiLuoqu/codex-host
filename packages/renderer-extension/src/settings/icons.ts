@@ -182,7 +182,3 @@ export function createRendererSettingsBrandGlyph(size = 20): SVGElement {
   svg.classList.add("codexhost-settings-icon");
   return svg;
 }
-
-export function createRendererSettingsBrandIcon(size = 22): SVGElement {
-  return createRendererSettingsBrandGlyph(size);
-}
