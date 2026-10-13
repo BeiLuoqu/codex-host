@@ -587,7 +587,11 @@ function nativeQueuedSubmission(item: ExternalQueuedSubmission): JsonObject {
   return {
     id: item.id,
     clientUserMessageId: item.clientUserMessageId,
-    input: item.input,
+    // Desktop's queue parser requires text_elements even for ordinary text.
+    // Other clients may omit it; preserve explicit native annotations.
+    input: item.input.map((part) =>
+      part.type === "text" ? { ...part, text_elements: part.text_elements ?? [] } : part,
+    ),
   };
 }
 

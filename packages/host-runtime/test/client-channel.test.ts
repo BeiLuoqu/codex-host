@@ -182,6 +182,146 @@ describe("public authenticated owner channel", () => {
     expect(fixture.adapter.sessions).toHaveLength(1);
     current(fixture).succeedTurn();
   });
+  it("publishes GUI queue deletion and removes it from both client snapshots", async () => {
+    const { fixture, a, b, events } = await setup();
+    const id = await startPiThread(fixture);
+    await startPiTurn(fixture, id);
+    writeRequest(fixture.desktopInput, {
+      id: 801,
+      method: "thread/queue/add",
+      params: {
+        threadId: id,
+        clientUserMessageId: "gui-queued-message",
+        input: [{ type: "text", text: "delete before execution" }],
+      },
+    });
+    await fixture.collector.waitFor((value) => value.id === 801);
+    const before = await a.snapshot(id);
+    const queued = before.queue?.items[0];
+    expect(queued).toBeDefined();
+    if (!queued) throw new Error("GUI message did not enter the shared queue");
+    expect((await b.snapshot(id)).queue?.items).toEqual(before.queue?.items);
+    writeRequest(fixture.desktopInput, {
+      id: 802,
+      method: "thread/queue/delete",
+      params: { threadId: id, queuedSubmissionId: queued.id },
+    });
+    expect(await fixture.collector.waitFor((value) => value.id === 802)).toMatchObject({
+      result: { deleted: true },
+    });
+    await vi.waitFor(() =>
+      expect(
+        events.some(
+          (event) =>
+            event.type === "changed" &&
+            event.threadId === id &&
+            event.method === "codexhost/thread/queue/updated" &&
+            event.cursor.sequence > before.cursor.sequence,
+        ),
+      ).toBe(true),
+    );
+    expect((await a.snapshot(id)).queue?.items).toEqual([]);
+    expect((await b.snapshot(id)).queue?.items).toEqual([]);
+    current(fixture).succeedTurn();
+  });
+  it("broadcasts Web dequeue and requeue to the GUI without executing the removed text", async () => {
+    const { fixture, a, b } = await setup();
+    const id = await startPiThread(fixture);
+    await startPiTurn(fixture, id);
+    writeRequest(fixture.desktopInput, {
+      id: 811,
+      method: "thread/queue/add",
+      params: { threadId: id, input: [{ type: "text", text: "old queued text" }] },
+    });
+    await fixture.collector.waitFor((value) => value.id === 811);
+    const item = (await a.snapshot(id)).queue?.items[0];
+    if (!item) throw new Error("Missing queued message");
+    const before = fixture.collector.messages.length;
+    expect(
+      await a.request("thread/queue/delete", { threadId: id, queuedSubmissionId: item.id }),
+    ).toEqual({ deleted: true });
+    await vi.waitFor(() =>
+      expect(
+        fixture.collector.messages
+          .slice(before)
+          .some((value) => value.method === "thread/queue/changed"),
+      ).toBe(true),
+    );
+    writeRequest(fixture.desktopInput, {
+      id: 812,
+      method: "thread/queue/list",
+      params: { threadId: id },
+    });
+    expect(await fixture.collector.waitFor((value) => value.id === 812)).toMatchObject({
+      result: { data: [] },
+    });
+    expect((await b.snapshot(id)).queue?.items).toEqual([]);
+    await a.request("turn/start", {
+      threadId: id,
+      delivery: "queue",
+      clientUserMessageId: "edited-submission",
+      input: [{ type: "text", text: "new queued text" }],
+    });
+    writeRequest(fixture.desktopInput, {
+      id: 813,
+      method: "thread/queue/list",
+      params: { threadId: id },
+    });
+    const reply = await fixture.collector.waitFor((value) => value.id === 813);
+    expect(reply).toMatchObject({
+      result: {
+        data: [
+          expect.objectContaining({
+            clientUserMessageId: "edited-submission",
+            input: [{ type: "text", text: "new queued text", text_elements: [] }],
+          }),
+        ],
+      },
+    });
+    const items = (await b.snapshot(id)).queue?.items;
+    expect(items).toHaveLength(1);
+    expect(items?.[0]?.id).not.toBe(item.id);
+    const execute = vi.spyOn(current(fixture), "execute");
+    current(fixture).succeedTurn();
+    await vi.waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "turn.start",
+          input: [{ type: "text", text: "new queued text" }],
+        }),
+      ),
+    );
+    expect(execute).toHaveBeenCalledTimes(1);
+    current(fixture).succeedTurn();
+  });
+  it("projects native queue text arrays without discarding annotations or image inputs", async () => {
+    const { fixture, a } = await setup();
+    const threadId = await startPiThread(fixture);
+    const annotation = { byteRange: { start: 0, end: 4 }, placeholder: "native-context" };
+    const input = [
+      { type: "text", text: "plain" },
+      { type: "text", text: "test", text_elements: [annotation] },
+      { type: "localImage", path: "/synthetic/image.png" },
+    ];
+    const result = await a.request<{ queuedSubmission: { id: string; input: unknown[] } }>(
+      "thread/queue/add",
+      { threadId, input },
+    );
+    const expected = [{ type: "text", text: "plain", text_elements: [] }, input[1], input[2]];
+    expect(result.queuedSubmission.input).toEqual(expected);
+    writeRequest(fixture.desktopInput, {
+      id: 814,
+      method: "thread/queue/list",
+      params: { threadId },
+    });
+    expect(await fixture.collector.waitFor((value) => value.id === 814)).toMatchObject({
+      result: { data: [{ input: expected }] },
+    });
+    await a.request("thread/queue/delete", {
+      threadId,
+      queuedSubmissionId: result.queuedSubmission.id,
+    });
+  });
   it("queues a busy Web follow-up and starts it after the active Turn", async () => {
     const { fixture, a } = await setup();
     const id = await startPiThread(fixture);

@@ -690,9 +690,14 @@ export class ChSessions {
       const draft = this.drafts.get(request.sessionId);
       if (!draft || draft.canonicalId) await this.owner(request.sessionId);
       // Validate/save before creating a native Thread. Only native path context crosses the Host channel.
-      const input = this.fileInputs
+      const preparedInput = this.fileInputs
         ? await this.fileInputs.prepare(this.id(request.sessionId), request.content)
         : (this.images?.prepare(request.content) ?? request.content);
+      // Use native text inputs so Desktop can also render queue entries when
+      // connected to an older Host that forwards their shape unchanged.
+      const input = preparedInput.map((part) =>
+        part.type === "text" ? { text_elements: [], ...part } : part,
+      );
       const threadId = draft
         ? await this.commit(
             draft,
@@ -776,21 +781,34 @@ export class ChSessions {
         await this.host.request("thread/queue/update", {
           threadId,
           queuedSubmissionId: request.itemId,
-          input: request.action.content,
+          input: request.action.content.map((part) =>
+            part.type === "text" ? { text_elements: [], ...part } : part,
+          ),
           presentationInput: request.action.content,
         });
       } else if (request.action.kind === "remove") {
-        await this.host.request("thread/queue/delete", {
+        const result = await this.host.request<{ deleted: boolean }>("thread/queue/delete", {
           threadId,
           queuedSubmissionId: request.itemId,
         });
+        if (!result.deleted)
+          throw new RpcError(
+            "session/queue-item-not-found",
+            "Queued message is no longer pending.",
+          );
       } else {
         await this.host.request("codexhost/thread/queue/send-now", {
           threadId,
           itemId: request.itemId,
         });
       }
-      await this.view(threadId, true);
+      try {
+        await this.view(threadId, true);
+      } catch {
+        // The mutation was acknowledged. A failed projection read must not
+        // prevent a removed message from being restored to the local composer.
+        this.realtime?.invalidate(threadId);
+      }
       return { accepted: true };
     });
     rpc.register("session/cancel", async (args) => {

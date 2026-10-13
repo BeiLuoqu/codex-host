@@ -1,17 +1,14 @@
 import type { Context } from "@deepseek-ai/cordis";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FileAttachmentRef, ImageAttachmentRef } from "@deepseek-ai/dsh-attachment";
 import type { PropsLocale, PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots";
 import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import {
-  IconCheckOutlineRegular,
   IconChevronDownOutlineRegular,
   IconChevronUpOutlineRegular,
-  IconCloseOutlineRegular,
   FileTypeIcon,
   fileSizeText,
   IconEditOutlineRegular,
-  InlineEditor,
   IconQueueOutlineRegular,
   IconSendOutlineRegular,
   IconTrashOutlineRegular,
@@ -21,6 +18,7 @@ import {
 import type { InboxState } from "@deepseek-ai/dsh-agent/types";
 import type { QueueAction } from "@deepseek-ai/dsh-api-session-controller/types";
 import type { MessageId } from "@deepseek-ai/dsh-llm/brand";
+import type { InputHub } from "../input/hub.ts";
 import { NS } from "../locales.ts";
 import css from "./QueueDock.module.css";
 
@@ -56,6 +54,7 @@ function textOf(content: InboxState["next-turn"][number]["content"]): string | n
 
 /** Queue operations injected by the session-scoped registration. */
 export interface QueueDockInjected {
+  editQueue: (itemId: MessageId, text: string) => Promise<void>;
   updateQueue: (itemId: MessageId, action: QueueAction) => Promise<void>;
   notify: (level: "info" | "error", text: string) => void;
   /** Resolve one durable queued image into a session-scoped browser URL. */
@@ -151,6 +150,7 @@ export function QueueDock({
   useSession,
   useProjection,
   updateQueue,
+  editQueue,
   notify,
   loadImage,
   t,
@@ -187,7 +187,7 @@ export function QueueDock({
   const queueMutable = useSession(
     (s) => s.subagent === null || s.subagent.address.mode === "continuable",
   );
-  const [editing, setEditing] = useState<{ id: MessageId; text: string } | null>(null);
+  const actionPending = useRef(false);
   const [busy, setBusy] = useState<MessageId | null>(null);
   const [collapsed, setCollapsed] = useState(true);
   const listId = useId();
@@ -203,43 +203,33 @@ export function QueueDock({
 
   useEffect(() => {
     if (rowCount === 0 && !collapsed) setCollapsed(true);
-    if (editing !== null && (!queueMutable || !queue.some((row) => row.id === editing.id)))
-      setEditing(null);
-  }, [collapsed, editing, queue, queueMutable, rowCount]);
+  }, [collapsed, rowCount]);
 
   if (rowCount === 0) return null;
 
-  const interactionActive = queueMutable && (editing !== null || busy !== null);
+  const interactionActive = queueMutable && busy !== null;
   const expanded = !collapsed || interactionActive;
   const listVisible = rowCount === 1 || expanded;
 
   const applyAction = async (
     itemId: MessageId,
-    action: QueueAction,
+    action: QueueAction | (() => Promise<void>),
     failure: string,
   ): Promise<boolean> => {
+    if (actionPending.current) return false;
+    actionPending.current = true;
     setBusy(itemId);
     try {
-      await updateQueue(itemId, action);
+      if (typeof action === "function") await action();
+      else await updateQueue(itemId, action);
       return true;
     } catch {
       notify("error", failure);
       return false;
     } finally {
+      actionPending.current = false;
       setBusy((current) => (current === itemId ? null : current));
     }
-  };
-
-  const saveEdit = async (): Promise<void> => {
-    if (editing === null || editing.text.trim() === "") return;
-    if (
-      await applyAction(
-        editing.id,
-        { kind: "edit", content: [{ type: "text", text: editing.text }] },
-        t("queue.editFailed"),
-      )
-    )
-      setEditing(null);
   };
 
   return (
@@ -288,143 +278,91 @@ export function QueueDock({
                       <IconQueueOutlineRegular />
                     </span>
                   )}
-                  {editing?.id === row.id ? (
-                    <InlineEditor
-                      value={editing.text}
-                      label={t("queue.edit")}
-                      onChange={(text) => {
-                        setEditing({ id: row.id, text });
-                      }}
-                      onSave={() => {
-                        void saveEdit();
-                      }}
-                      onCancel={() => {
-                        setEditing(null);
-                      }}
-                    />
-                  ) : (
-                    <>
-                      {attachments.length > 0 && (
-                        <span className={css.attachments}>
-                          {attachments.map((item, index) =>
-                            item.type === "image" ? (
-                              <QueueThumb
-                                key={`${item.attachment.attachmentId}:${index}`}
-                                attachment={item.attachment}
-                                loadImage={loadImage}
-                                label={t("queue.image")}
-                              />
-                            ) : (
-                              <QueueFile
-                                key={`${item.attachment.attachmentId}:${item.attachment.name}:${index}`}
-                                attachment={item.attachment}
-                                label={t("queue.file", { name: item.attachment.name })}
-                              />
-                            ),
-                          )}
-                        </span>
+                  {attachments.length > 0 && (
+                    <span className={css.attachments}>
+                      {attachments.map((item, index) =>
+                        item.type === "image" ? (
+                          <QueueThumb
+                            key={`${item.attachment.attachmentId}:${index}`}
+                            attachment={item.attachment}
+                            loadImage={loadImage}
+                            label={t("queue.image")}
+                          />
+                        ) : (
+                          <QueueFile
+                            key={`${item.attachment.attachmentId}:${item.attachment.name}:${index}`}
+                            attachment={item.attachment}
+                            label={t("queue.file", { name: item.attachment.name })}
+                          />
+                        ),
                       )}
-                      <span className={css.preview}>
-                        {projectUserText(previewOf(row.content), [])}
-                      </span>
-                    </>
+                    </span>
                   )}
+                  <span className={css.preview}>{projectUserText(previewOf(row.content), [])}</span>
                   {queueMutable && (
                     <div className={css.actions}>
-                      {editing?.id === row.id ? (
-                        <>
-                          <Tooltip portal label={t("queue.save")} side="bottom" delayMs={500}>
-                            <button
-                              type="button"
-                              className={css.action}
-                              aria-label={t("queue.save")}
-                              disabled={busy !== null || editing.text.trim() === ""}
-                              onClick={() => {
-                                void saveEdit();
-                              }}
-                            >
-                              <IconCheckOutlineRegular size={14} />
-                            </button>
-                          </Tooltip>
-                          <Tooltip portal label={t("queue.cancelEdit")} side="bottom" delayMs={500}>
-                            <button
-                              type="button"
-                              className={css.action}
-                              aria-label={t("queue.cancelEdit")}
-                              disabled={busy !== null}
-                              onClick={() => {
-                                setEditing(null);
-                              }}
-                            >
-                              <IconCloseOutlineRegular size={14} />
-                            </button>
-                          </Tooltip>
-                        </>
-                      ) : (
-                        <>
-                          <Tooltip
-                            portal
-                            label={t("queue.edit")}
-                            side="bottom"
-                            delayMs={500}
-                            disabled={text === null}
-                          >
-                            <button
-                              type="button"
-                              className={css.action}
-                              aria-label={t("queue.edit")}
-                              // Disabled buttons fire no hover events, so the
-                              // unsupported hint stays a native title.
-                              title={text === null ? t("queue.edit.unsupported") : undefined}
-                              disabled={busy !== null || text === null}
-                              onClick={() => {
-                                if (text !== null) setEditing({ id: row.id, text: text });
-                              }}
-                            >
-                              <IconEditOutlineRegular size={14} />
-                            </button>
-                          </Tooltip>
-                          <Tooltip portal label={t("queue.remove")} side="bottom" delayMs={500}>
-                            <button
-                              type="button"
-                              className={css.action}
-                              aria-label={t("queue.remove")}
-                              disabled={busy !== null}
-                              onClick={() => {
-                                void applyAction(
-                                  row.id,
-                                  { kind: "remove" },
-                                  t("queue.removeFailed"),
-                                );
-                              }}
-                            >
-                              <IconTrashOutlineRegular size={14} />
-                            </button>
-                          </Tooltip>
-                          <Tooltip
-                            portal
-                            label={t(running ? "queue.steer" : "queue.resume")}
-                            side="bottom"
-                            delayMs={500}
-                          >
-                            <button
-                              type="button"
-                              className={css.action}
-                              aria-label={t(running ? "queue.steer" : "queue.resume")}
-                              disabled={busy !== null}
-                              onClick={() => {
-                                void applyAction(
-                                  row.id,
-                                  { kind: "steer" },
-                                  t(running ? "queue.steerFailed" : "queue.resumeFailed"),
-                                );
-                              }}
-                            >
-                              <IconSendOutlineRegular />
-                            </button>
-                          </Tooltip>
-                        </>
-                      )}
+                      <Tooltip
+                        portal
+                        label={t("queue.edit")}
+                        side="bottom"
+                        delayMs={500}
+                        disabled={text === null}
+                      >
+                        <button
+                          type="button"
+                          className={css.action}
+                          aria-label={t("queue.edit")}
+                          // Disabled buttons fire no hover events, so the
+                          // unsupported hint stays a native title.
+                          title={text === null ? t("queue.edit.unsupported") : undefined}
+                          disabled={busy !== null || text === null}
+                          onClick={() => {
+                            if (text !== null)
+                              void applyAction(
+                                row.id,
+                                () => editQueue(row.id, text),
+                                t("queue.editFailed"),
+                              );
+                          }}
+                        >
+                          <IconEditOutlineRegular size={14} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip portal label={t("queue.remove")} side="bottom" delayMs={500}>
+                        <button
+                          type="button"
+                          className={css.action}
+                          aria-label={t("queue.remove")}
+                          disabled={busy !== null}
+                          onClick={() => {
+                            void applyAction(row.id, { kind: "remove" }, t("queue.removeFailed"));
+                          }}
+                        >
+                          <IconTrashOutlineRegular size={14} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip
+                        portal
+                        label={t(running ? "queue.steer" : "queue.resume")}
+                        side="bottom"
+                        delayMs={500}
+                      >
+                        <button
+                          type="button"
+                          className={css.action}
+                          aria-label={t(running ? "queue.steer" : "queue.resume")}
+                          disabled={busy !== null}
+                          onClick={() => {
+                            void applyAction(
+                              row.id,
+                              { kind: "steer" },
+                              t(running ? "queue.steerFailed" : "queue.resumeFailed"),
+                            );
+                          }}
+                        >
+                          <IconSendOutlineRegular />
+                        </button>
+                      </Tooltip>
                     </div>
                   )}
                 </li>
@@ -511,7 +449,7 @@ export function QueueDock({
 export const queueDockEntry = {
   name: "conversation-queue-dock",
   inject: ["slots", "conversation", "sessions", "uiConversation"],
-  apply(ctx: Context): void {
+  apply(ctx: Context, inputHub: InputHub): void {
     ctx.slots.inject("conversation.input.dock", () =>
       ctx.slots.register(
         {
@@ -528,6 +466,19 @@ export const queueDockEntry = {
               throw new Error("queue dock: conversation service unavailable");
             return {
               updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
+              editQueue: async (itemId, text) => {
+                // Retain the originating shell across navigation and the delete RPC.
+                const shell = inputHub.shell(sessionId);
+                await conversation.updateQueue(itemId, { kind: "remove" });
+                // Preserve text, references and attachments typed while deletion was pending.
+                const draft = shell.draftSnapshot;
+                shell.setDraft({
+                  ...draft,
+                  text: draft.text === "" ? text : `${draft.text}\n${text}`,
+                });
+                shell.actions.persistDraft();
+                shell.focus();
+              },
               notify: (level, text) => {
                 conversation.input.for(actx).notify(level, text);
               },

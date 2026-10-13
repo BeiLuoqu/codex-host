@@ -707,5 +707,5 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     maxConcurrentFileUploads,
   });
   ctx.plugin(todoDockEntry);
-  ctx.plugin(queueDockEntry);
+  ctx.plugin(queueDockEntry, inputHub);
 }
