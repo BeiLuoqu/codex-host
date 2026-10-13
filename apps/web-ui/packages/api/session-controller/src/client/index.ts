@@ -5,7 +5,7 @@ import type {} from "@deepseek-ai/dsh-agent/types";
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
 import type {} from "@deepseek-ai/dsh-client-file-upload/client";
 import { typertOwnedValue } from "@deepseek-ai/dsh-typert-protocol";
-import { createSessionControlStream } from "./transport.ts";
+import { createSessionControlStream, type SessionControlStream } from "./transport.ts";
 import { ClientSessions } from "./sessions/service.ts";
 import type { SessionRemotes } from "./sessions/remotes.ts";
 import type {} from "../remote-events.ts";
@@ -133,20 +133,25 @@ export function apply(ctx: Context): void {
     sessions.handleSessionError(sessionId, message);
   });
 
-  const control = createSessionControlStream(remotes, {
-    accept: (frame) => {
-      sessions.handleControlFrame(frame);
-    },
-    failed: (error) => {
-      console.error("[session-controller] control stream failed:", error);
-    },
-  });
+  let control: SessionControlStream | undefined;
   const connected = (): void => {
     if (connection.generation.getSnapshot() === undefined) return;
-    // A ready control baseline may arrive before Cordis delivers connection/reset.
+    // A carrier failure can terminate the old stream before the connection
+    // reports its next generation. restart() cannot revive a closed consumer.
+    const previous = control;
+    control = undefined;
+    void previous?.dispose();
     sessions.handleConnected();
-    control.restart();
-    control.start();
+    const next = createSessionControlStream(remotes, {
+      accept: (frame) => {
+        if (control === next) sessions.handleControlFrame(frame);
+      },
+      failed: (error) => {
+        if (control === next) console.error("[session-controller] control stream failed:", error);
+      },
+    });
+    control = next;
+    next.start();
   };
   ctx.effect(
     () => connection.generation.subscribe(connected),
@@ -164,7 +169,7 @@ export function apply(ctx: Context): void {
   });
   ctx.effect(
     () => async () => {
-      await control.dispose();
+      await control?.dispose();
     },
     "session-controller.client.control",
   );

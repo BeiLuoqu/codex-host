@@ -1,5 +1,5 @@
 /** Isolated server process shared by browser and packed-distribution checks. */
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -19,7 +19,11 @@ export async function startServer(
   cwd: string,
   entry: string[],
   args: string[],
-  options: { authenticated?: boolean; environment?: NodeJS.ProcessEnv } = {},
+  options: {
+    authenticated?: boolean;
+    environment?: NodeJS.ProcessEnv;
+    onSpawn?: (child: ChildProcess) => void;
+  } = {},
 ): Promise<string> {
   const data = mkdtempSync(join(tmpdir(), "codexhost-web-test-"));
   // UI-only checks may target an already packaged server, without compiling
@@ -50,6 +54,7 @@ export async function startServer(
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+  options.onSpawn?.(child);
   let output = "";
   child.stdout.on("data", (chunk) => {
     output += String(chunk);

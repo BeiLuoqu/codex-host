@@ -867,13 +867,19 @@ export class ChSessions {
           return {};
         });
     streams.register("session/control", async (_args, sink) => {
+      const projections: Record<string, unknown> = {};
+      for (const draft of this.drafts.values())
+        if (!draft.canonicalId) {
+          const summary = await this.draftSummary(draft);
+          if (!draft.canonicalId) projections[draft.id] = summary.projections;
+        }
+      if (sink.closed || this.closed) return;
+      // Draft metadata can yield. Capture live state and subscribe only after
+      // it settles, in one synchronous step: the client requires the baseline
+      // before any delta, and changes during preparation belong in that baseline.
+      for (const [id, view] of this.views) projections[id] = view.log.projectionBaseline();
       this.controls.add(sink);
       sink.onClose(() => this.controls.delete(sink));
-      const projections: Record<string, unknown> = {};
-      for (const [id, view] of this.views) projections[id] = view.log.projectionBaseline();
-      for (const draft of this.drafts.values())
-        if (!draft.canonicalId)
-          projections[draft.id] = (await this.draftSummary(draft)).projections;
       sink.push({ type: "baseline", value: { projections } });
     });
     streams.register("session/follow", async (args, sink) => {

@@ -134,7 +134,7 @@ export class RemoteStream<Item> implements AsyncIterable<RemoteStreamItem<Item>>
           if (revision !== this.revision) continue;
           attempt++;
           try {
-            await waitForRemoteStreamRetry(this.connection, error, attempt, signal);
+            await waitForRemoteStreamRetry(this.connection, attempt, signal);
           } catch (retryError) {
             if (isAborted(this.lifetime.signal)) return;
             if (revision !== this.revision) continue;
@@ -159,14 +159,31 @@ export class RemoteStream<Item> implements AsyncIterable<RemoteStreamItem<Item>>
 
 async function waitForRemoteStreamRetry(
   connection: Pick<ConnectionHandle, "generation">,
-  error: RemoteStreamCarrierError,
   attempt: number,
   signal: AbortSignal,
 ): Promise<void> {
   signal.throwIfAborted();
   if (connection.generation.getSnapshot() !== undefined) {
-    if (attempt === 1) return;
-    throw error;
+    // The mux can fail before the event stream withdraws the Host generation,
+    // or while that generation remains healthy. Neither makes a carrier error
+    // terminal. Back off instead of abandoning the only projection consumer.
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => {
+          signal.removeEventListener("abort", aborted);
+          resolve();
+        },
+        Math.min(100 * 2 ** Math.min(attempt - 1, 5), 3000),
+      );
+      const aborted = (): void => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", aborted);
+        reject(signal.reason);
+      };
+      signal.addEventListener("abort", aborted, { once: true });
+      if (signal.aborted) aborted();
+    });
+    return;
   }
   await new Promise<void>((resolve, reject) => {
     const subscription: {
