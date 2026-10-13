@@ -30,6 +30,12 @@ export class UsageMeter {
   #timeToFirstOutputMs: number | undefined;
   #outputTokensPerSecond: number | undefined;
   #timingUnavailable = false;
+  #lastOutputTurnId: string | undefined;
+  #lastLatencyTurnId: string | undefined;
+  #lastOutputAtMs = -1;
+  #lastLatencyAtMs = -1;
+  #lastOutputLive = false;
+  #lastLatencyLive = false;
   readonly #timedRequests = new Set<string>();
 
   get metered(): boolean {
@@ -94,12 +100,15 @@ export class UsageMeter {
       request.completedAtMs <= request.startedAtMs
     ) {
       this.invalidateOutputTiming(turnId);
-      return true;
+      return false;
     }
     this.#timedRequests.add(request.requestId);
     this.#turnOutputTokens += request.outputTokens;
     this.#turnOutputMs += request.completedAtMs - request.startedAtMs;
     this.#outputTokensPerSecond = this.#turnOutputTokens / (this.#turnOutputMs / 1000);
+    this.#lastOutputTurnId = turnId;
+    this.#lastOutputAtMs = request.completedAtMs;
+    this.#lastOutputLive = true;
     return true;
   }
 
@@ -115,6 +124,79 @@ export class UsageMeter {
     this.#timeToFirstOutputMs = undefined;
     this.#timedRequests.clear();
     this.#timingUnavailable = false;
+    this.#lastOutputLive = false;
+    this.#lastLatencyLive = false;
+  }
+
+  /** Restore display-only measurements; never restore a running clock or request accumulator. */
+  restoreMeasurements(
+    value: { outputTokensPerSecond?: number; timeToFirstOutputMs?: number },
+    turnId: string,
+    at: number,
+  ): void {
+    if (!Number.isSafeInteger(at) || at < 0) return;
+    if (
+      (this.#outputTokensPerSecond === undefined ||
+        (at > this.#lastOutputAtMs &&
+          (!this.#lastOutputLive || this.#lastOutputTurnId !== turnId))) &&
+      typeof value.outputTokensPerSecond === "number" &&
+      Number.isFinite(value.outputTokensPerSecond) &&
+      value.outputTokensPerSecond >= 0
+    ) {
+      this.#outputTokensPerSecond = value.outputTokensPerSecond;
+      this.#lastOutputTurnId = turnId;
+      this.#lastOutputAtMs = at;
+      this.#lastOutputLive = false;
+    }
+    if (
+      (this.#timeToFirstOutputMs === undefined ||
+        (at > this.#lastLatencyAtMs &&
+          (!this.#lastLatencyLive || this.#lastLatencyTurnId !== turnId))) &&
+      typeof value.timeToFirstOutputMs === "number" &&
+      Number.isSafeInteger(value.timeToFirstOutputMs) &&
+      value.timeToFirstOutputMs >= 0
+    ) {
+      this.#timeToFirstOutputMs = value.timeToFirstOutputMs;
+      this.#lastLatencyTurnId = turnId;
+      this.#lastLatencyAtMs = at;
+      this.#lastLatencyLive = false;
+    }
+  }
+
+  get outputTimingTurnId(): string | undefined {
+    return this.#lastOutputTurnId;
+  }
+
+  retainMeasurements(turnIds: ReadonlySet<string>): void {
+    if (
+      !this.#lastOutputLive &&
+      this.#lastOutputTurnId &&
+      this.#lastOutputTurnId !== this.#turnId &&
+      !turnIds.has(this.#lastOutputTurnId)
+    ) {
+      this.#outputTokensPerSecond = undefined;
+      this.#lastOutputTurnId = undefined;
+    }
+    if (
+      !this.#lastLatencyLive &&
+      this.#lastLatencyTurnId &&
+      this.#lastLatencyTurnId !== this.#turnId &&
+      !turnIds.has(this.#lastLatencyTurnId)
+    ) {
+      this.#timeToFirstOutputMs = undefined;
+      this.#lastLatencyTurnId = undefined;
+    }
+  }
+
+  measurements(): { outputTokensPerSecond?: number; timeToFirstOutputMs?: number } {
+    return {
+      ...(this.#outputTokensPerSecond === undefined
+        ? {}
+        : { outputTokensPerSecond: this.#outputTokensPerSecond }),
+      ...(this.#timeToFirstOutputMs === undefined
+        ? {}
+        : { timeToFirstOutputMs: this.#timeToFirstOutputMs }),
+    };
   }
 
   /** Replace a read-only session history after recovery, append, rollback or file replacement. */
@@ -147,6 +229,9 @@ export class UsageMeter {
     }
     this.#turnOutputObserved = true;
     this.#timeToFirstOutputMs = Math.max(0, Math.round(nowMs - this.#turnStartedAtMs));
+    this.#lastLatencyTurnId = turnId;
+    this.#lastLatencyAtMs = nowMs;
+    this.#lastLatencyLive = true;
     return true;
   }
 

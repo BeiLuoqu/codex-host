@@ -276,6 +276,7 @@ import {
 import { listSectionThreads, moveThreadSection } from "./external-thread-sections.js";
 import { externalThreadListEntries } from "./external-thread-list.js";
 import { ModelPriceCatalog } from "./model-prices.js";
+import { UsageMeasurementsStore } from "./usage-measurements-store.js";
 import { ObservedSessionUsage } from "./observed-session-usage.js";
 import type { UsageStatistics, UsageStatisticsSource } from "./usage-statistics.js";
 import { USAGE_STATISTICS_METHOD, usageStatisticsParamsSchema } from "@codexhost/shared-contracts";
@@ -729,6 +730,13 @@ export class AppServerHost {
         ),
       this.#modelPrices,
       (error) => this.#diagnose(error),
+      new UsageMeasurementsStore(
+        path.resolve(
+          (options.environment ?? process.env).CODEXHOST_DATA_DIR ??
+            path.join((options.environment ?? process.env).HOME ?? os.homedir(), ".codexhost"),
+        ),
+        (error) => this.#diagnose(error),
+      ),
     );
     this.#writer = new OrderedWriter(this.#options.desktopOutput, (value) => {
       this.#noteDesktopReply(value);
@@ -1008,7 +1016,7 @@ export class AppServerHost {
   }
 
   async #closeAdapters(): Promise<void> {
-    this.#observedSessionUsage.close();
+    await this.#observedSessionUsage.close();
     const results = await Promise.allSettled([
       this.#plugins?.close(),
       ...[...new Set(this.#options.externalAdapters?.values())].map((adapter) =>

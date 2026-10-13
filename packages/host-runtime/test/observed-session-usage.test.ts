@@ -8,6 +8,7 @@ import type {
   HarnessSessionUsageObservation,
 } from "@codexhost/harness-adapter/plugin";
 import { ModelPriceCatalog } from "../src/model-prices.js";
+import { UsageMeasurementsStore } from "../src/usage-measurements-store.js";
 import { ObservedSessionUsage } from "../src/observed-session-usage.js";
 
 let directory: string;
@@ -35,15 +36,20 @@ const history = (): HarnessSessionUsageHistory => ({
     },
   ],
 });
-function setup() {
+function setup(measurementScope?: string) {
   let observation: HarnessSessionUsageObservation | null = null;
   const read = vi.fn<HarnessSessionUsageCapability["read"]>().mockResolvedValue(history());
-  const provider: HarnessSessionUsageCapability = { observe: () => observation, read };
+  const provider: HarnessSessionUsageCapability = {
+    observe: () => observation,
+    read,
+    ...(measurementScope ? { measurementScope } : {}),
+  };
   const diagnose = vi.fn();
   const bridge = new ObservedSessionUsage(
     () => [provider],
     new ModelPriceCatalog({ directory }),
     diagnose,
+    measurementScope ? new UsageMeasurementsStore(directory, diagnose) : undefined,
   );
   return {
     bridge,
@@ -270,4 +276,93 @@ it("works without a plugin", async () => {
   expect(bridge.observe({})).toEqual([]);
   expect(await bridge.read("s")).toBeNull();
   bridge.close();
+});
+
+it("restores measured speed and latency after restart without reviving in-flight timing", async () => {
+  const first = setup("home-a");
+  first.read.mockResolvedValue({ ...history(), retainedTurnIds: ["t"] });
+  first.observe({ sessionId: "s", turn: { id: "t", phase: "started" } }, 1000);
+  first.observe({ sessionId: "s", turn: { id: "t", phase: "output" } }, 1100);
+  first.observe(
+    {
+      sessionId: "s",
+      requestTiming: {
+        turnId: "t",
+        requestId: "r1",
+        outputTokens: 100,
+        startedAtMs: 1100,
+        completedAtMs: 2100,
+      },
+    },
+    2100,
+  );
+  await first.bridge.close();
+  const restored = setup("home-a");
+  const isolated = setup("home-b");
+  try {
+    restored.read.mockResolvedValue({ ...history(), retainedTurnIds: ["t"] });
+    isolated.read.mockResolvedValue({ ...history(), retainedTurnIds: ["t"] });
+    expect(await restored.bridge.read("s")).toMatchObject({
+      outputTokensPerSecond: 100,
+      timeToFirstOutputMs: 100,
+    });
+    expect(await isolated.bridge.read("s")).not.toHaveProperty("outputTokensPerSecond");
+    restored.observe({ sessionId: "s", turn: { id: "next", phase: "started" } }, 5000);
+    restored.observe({ sessionId: "s", turn: { id: "next", phase: "output" } }, 5150);
+    restored.observe(
+      {
+        sessionId: "s",
+        requestTiming: {
+          turnId: "next",
+          requestId: "r2",
+          outputTokens: 50,
+          startedAtMs: 6000,
+          completedAtMs: 8000,
+        },
+      },
+      8000,
+    );
+    restored.read.mockResolvedValue({
+      ...history(),
+      retainedTurnIds: ["t", "next"],
+      lastTurnTiming: { turnId: "next", timeToFirstOutputMs: 999, at: 9000 },
+    });
+    expect(await restored.bridge.read("s")).toMatchObject({
+      outputTokensPerSecond: 25,
+      timeToFirstOutputMs: 150,
+    });
+  } finally {
+    await restored.bridge.close();
+    await isolated.bridge.close();
+  }
+});
+
+it("drops restored measurements for removed turns and recovers native TTFT independently", async () => {
+  const writer = new UsageMeasurementsStore(directory, () => {});
+  writer.record("home", "s", "removed", 1000, {
+    outputTokensPerSecond: 80,
+    timeToFirstOutputMs: 10,
+  });
+  await writer.close();
+  const { bridge, read } = setup("home");
+  try {
+    read.mockResolvedValue({ ...history(), retainedTurnIds: ["removed"] });
+    expect((await bridge.read("s"))?.outputTokensPerSecond).toBe(80);
+    read.mockResolvedValue({
+      ...history(),
+      retainedTurnIds: ["kept"],
+      lastTurnTiming: { turnId: "kept", timeToFirstOutputMs: 120, at: 2000 },
+    });
+    const result = await bridge.read("s");
+    expect(result).not.toHaveProperty("outputTokensPerSecond");
+    expect(result?.timeToFirstOutputMs).toBe(120);
+    read.mockResolvedValue({
+      ...history(),
+      retainedTurnIds: ["kept", "later"],
+      lastTurnTiming: { turnId: "later", timeToFirstOutputMs: 0, at: 3000 },
+    });
+    expect((await bridge.read("s"))?.timeToFirstOutputMs).toBe(0);
+  } finally {
+    await bridge.close();
+  }
 });
