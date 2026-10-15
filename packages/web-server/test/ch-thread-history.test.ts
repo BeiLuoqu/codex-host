@@ -167,6 +167,36 @@ it("handles empty history and new Turns without rereading an unavailable older p
   assert.equal((await view.olderPage(view.log.lastSeq, view.log.firstSeq)).hasMore, false);
 });
 
+it("rejects replaced live Items before appending any replacement output", async () => {
+  const { row, view } = fixture(1);
+  const turn = row.turns[0];
+  assert.ok(turn);
+  turn.status = "inProgress";
+  row.status.type = "active";
+  await view.refresh();
+  const events = structuredClone(view.log.events);
+  turn.items = turn.items.map((item) => ({ ...item, id: `persisted-${item.id}` }));
+  turn.status = "completed";
+  row.status.type = "idle";
+  await assert.rejects(view.refresh(), { code: "host/items-replaced" });
+  assert.deepEqual(view.log.events, events);
+});
+
+it("preserves identical text from distinct Items when neither Item was replaced", async () => {
+  const { row, view } = fixture(1);
+  const turn = row.turns[0];
+  assert.ok(turn);
+  turn.status = "inProgress";
+  turn.items = [{ id: "first", type: "agentMessage", text: "Repeated text" }];
+  row.status.type = "active";
+  await view.refresh();
+  turn.items.push({ id: "second", type: "agentMessage", text: "Repeated text" });
+  turn.status = "completed";
+  row.status.type = "idle";
+  await view.refresh();
+  assert.equal(JSON.stringify(view.log.events).split("Repeated text").length - 1, 2);
+});
+
 it("rejects repeated cursors and rewritten history rather than looping or fabricating continuity", async () => {
   const { host, row, view } = fixture(12);
   await view.refresh();

@@ -343,13 +343,23 @@ export class ChSessions {
     try {
       await view.refresh(force);
     } catch (error) {
-      if (error instanceof RpcError && error.code === "host/history-changed") {
+      if (
+        error instanceof RpcError &&
+        (error.code === "host/history-changed" || error.code === "host/items-replaced")
+      ) {
         view.retire();
+        // Browsers retain per-key projection watermarks across Thread reopening.
+        // Rebuilt history must not make fresh queue/control values look stale.
+        this.viewOrigins.set(id, view.log.lastSeq + 2);
         this.views.delete(id);
         this.historyReadAt.delete(id);
         this.loadingControls.delete(id);
         this.loadingUsage.delete(id);
         this.usageReadAt.delete(id);
+        if (error.code === "host/items-replaced") {
+          view.log.reconnectFollowers();
+          return this.readView(id, true);
+        }
         view.log.invalidate(error.code, error.message);
       }
       throw error;
