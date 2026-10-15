@@ -16,6 +16,82 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(process.env.CODEXHOST_TEST_SCREENSHOTS, `${name}.png`) });
 }
 
+it(
+  "startup draft preparation does not request a workspace or override an explicit pick",
+  { timeout: 60_000 },
+  async (t) => {
+    const home = mkdtempSync(join(tmpdir(), "ch-startup-gui-"));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    const project = join(home, "picked-project");
+    mkdirSync(project);
+    const host = new FakeChHost();
+    host.add("existing-project-session", project);
+    const debug = await startFakeChDebugger(host);
+    t.after(() => debug.close());
+    const url = await startServer(
+      t,
+      resolve(import.meta.dirname, "../.."),
+      ["--import", "tsx", "src/main.ts"],
+      ["--session-source", "codexhost", "--ch-cdp", debug.endpoint],
+      { environment: { ...process.env, HOME: home, USERPROFILE: home } },
+    );
+    const browser = await chromium.launch();
+    t.after(() => browser.close());
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const preparing = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    const settled = Promise.withResolvers<undefined>();
+    t.after(() => release.resolve(undefined));
+    let firstCreate = true;
+    await page.route("**/api/session/create", async (route) => {
+      if (!firstCreate) return route.continue();
+      firstCreate = false;
+      preparing.resolve(undefined);
+      await release.promise;
+      await route.continue();
+      settled.resolve(undefined);
+    });
+    await page.goto(url);
+    await preparing.promise;
+    const editor = page.locator("[data-input-scroll] [data-placeholder]");
+    assert.equal(await editor.getAttribute("data-placeholder"), "Preparing conversation…");
+    assert.equal(await editor.getAttribute("aria-haspopup"), null);
+    await shot(page, "startup-preparing");
+    await page.locator("[data-input-scroll]").click();
+    assert.equal(await page.getByRole("menu").count(), 0);
+    await shot(page, "startup-input-no-picker");
+
+    const chip = page.getByRole("button", { name: "Choose workspace", exact: true });
+    await chip.click();
+    await page.getByRole("menuitem", { name: "picked-project", exact: true }).click();
+    await page.getByText("Native Model", { exact: true }).waitFor();
+    await chip.getByText("picked-project", { exact: true }).waitFor();
+    const selected = await page
+      .locator("[data-conversation-content]")
+      .getAttribute("data-conversation-session");
+    const initialResponse = page.waitForResponse((response) =>
+      response.url().endsWith("/api/session/create"),
+    );
+    release.resolve(undefined);
+    await settled.promise;
+    await initialResponse;
+    assert.equal(
+      await page.locator("[data-conversation-content]").getAttribute("data-conversation-session"),
+      selected,
+    );
+    await editor.fill("Draft kept after startup");
+    assert.equal(await editor.textContent(), "Draft kept after startup");
+    await shot(page, "startup-ready-picked-workspace");
+    assert.deepEqual(errors, []);
+    assert.equal(
+      host.requests.some((request) => request.method === "thread/start"),
+      false,
+    );
+  },
+);
+
 for (const mobile of [false, true]) {
   it(
     `Recents is flat and newest-first; its draft can keep, select or clear a workspace (${mobile ? "touch" : "desktop"})`,

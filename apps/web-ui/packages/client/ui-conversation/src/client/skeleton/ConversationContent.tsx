@@ -166,13 +166,13 @@ export function ConversationContent(props: ConversationContentProps) {
     </div>
   );
 
-  // The placeholder chip ("Choose workspace") and the Workspace-trigger input travel
-  // together: no workspace picked yet (cold start, no session at all), or a
-  // blank session whose workspace vanished (deleted from the sidebar). The
-  // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
-  // not a different tree, so the textarea DOM survives the transition.
-  const inert =
-    sessionId === undefined || (hero && chipTitle === undefined && !workspaces.canStartProjectless);
+  // Only a confirmed workspace prerequisite opens the picker. A missing Session
+  // during startup can instead mean its draft/model configuration is still loading.
+  // Keep the resident textarea mounted across both states.
+  const workspaceRequired =
+    workspaces.phase === "ready" && !workspaces.canStartProjectless && chipTitle === undefined;
+  const preparingSession = sessionId === undefined && !workspaceRequired;
+  const inert = sessionId === undefined || (hero && workspaceRequired);
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.
@@ -182,11 +182,15 @@ export function ConversationContent(props: ConversationContentProps) {
     ...(inert
       ? {
           disabled: true,
-          placeholder: t("placeholder.workspace"),
-          workspacePickerOpen: pickerOpen,
-          onRequestWorkspace: () => {
-            setPickerOpen(true);
-          },
+          placeholder: t(preparingSession ? "placeholder.preparing" : "placeholder.workspace"),
+          ...(!preparingSession
+            ? {
+                workspacePickerOpen: pickerOpen,
+                onRequestWorkspace: () => {
+                  setPickerOpen(true);
+                },
+              }
+            : {}),
         }
       : blocked
         ? // `blocked`, not `disabled`: the bar refuses input either way, but a
