@@ -287,7 +287,7 @@ it("does not confirm an archive from a catalog read started before the mutation"
   assert.deepEqual(await write, { archivedSessionIds: ["active", "archived"] });
 });
 
-it("keeps standalone archive persistence without a shared Host", async (t) => {
+it("retains persisted local archive records", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "local-archives-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const data = new DataDir(root);

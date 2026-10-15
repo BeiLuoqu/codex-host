@@ -5,11 +5,8 @@ import { homedir } from "node:os";
 import {
   IsolatedSessions,
   LocalSessionOrganization,
-  acquireSourceOwnerLock,
   canonicalSessionPath,
-  migrateLegacyWebSource,
-  recoverSessionMigration,
-  type SessionOwnership,
+  SessionFileStore,
   type SessionSink,
   type SessionNotification,
 } from "@codexhost/session-runtime";
@@ -22,7 +19,6 @@ import {
 } from "@codexhost/shared-contracts";
 import type { ClientChannelEvents } from "./client-channel-events.js";
 import { createWebCodexHarness } from "./web-codex-harness.js";
-import { readSharedHostExitProof } from "./shared-host-exit-proof.js";
 
 type PendingInteraction = {
   sessionId: string;
@@ -49,7 +45,6 @@ export class SharedWebCodexOwner {
   private scope: string | undefined;
   private owner: IsolatedSessions | undefined;
   private organization: LocalSessionOrganization | undefined;
-  private ownership: SessionOwnership | undefined;
   private harness: Awaited<ReturnType<typeof createWebCodexHarness>> | undefined;
   private configuring: Promise<WebCodexConfigurationReply> | undefined;
   private pending = new Map<string, PendingInteraction>();
@@ -101,15 +96,7 @@ export class SharedWebCodexOwner {
     requested: WebCodexConfiguration,
   ): Promise<WebCodexConfigurationReply> {
     if (this.closed) throw new Error("owner-offline");
-    if (
-      ![
-        requested.home,
-        requested.command,
-        ...requested.pluginRoots,
-        ...(requested.migrateSource ? [requested.migrateSource] : []),
-        ...(requested.legacySource ? [requested.legacySource] : []),
-      ].every(path.isAbsolute)
-    )
+    if (![requested.home, requested.command, ...requested.pluginRoots].every(path.isAbsolute))
       throw new Error("scope-conflict: configuration paths must be absolute");
     const configuration: WebCodexConfiguration = {
       home: canonicalSessionPath(requested.home),
@@ -135,129 +122,56 @@ export class SharedWebCodexOwner {
         throw new Error("scope-conflict: GUI home overlap");
     }
     if (this.closed) throw new Error("owner-offline");
-    if (requested.legacySource && !requested.migrateSource) {
-      let legacyIndex: Record<string, unknown> | undefined;
-      try {
-        legacyIndex = JSON.parse(
-          await readFile(
-            path.join(requested.legacySource, "codex-sessions/sessions/index.json"),
-            "utf8",
-          ),
-        );
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-      if (legacyIndex && Object.keys(legacyIndex).length) {
-        let commit: { sourceDataRoot?: string } | undefined;
-        try {
-          commit = JSON.parse(
-            await readFile(path.join(this.root, "migration-commit-v1.json"), "utf8"),
-          );
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-        if (commit?.sourceDataRoot !== canonicalSessionPath(requested.legacySource))
-          throw new Error(
-            "migration-required: Existing Web Codex sessions require --web-codex-migrate-source and --web-codex-legacy-stopped after verifying quiescence",
-          );
-      }
-    }
     if (this.configuration) {
       if (JSON.stringify(configuration) !== JSON.stringify(this.configuration))
         throw new Error("scope-conflict");
-      if (requested.migrateSource) {
-        const commit = JSON.parse(
-          await readFile(path.join(this.root, "migration-commit-v1.json"), "utf8"),
-        ) as { sourceDataRoot?: string; nativeHome?: string };
-        if (
-          commit.sourceDataRoot !== canonicalSessionPath(requested.migrateSource) ||
-          commit.nativeHome !== configuration.home
-        )
-          throw new Error("migration-source-conflict");
-      }
       return this.description();
     }
     const scope = `web-codex:${createHash("sha256").update(configuration.home).digest("hex")}`;
-    // Validate CLI/home isolation before creating any owner lock in that home.
     const harness = await createWebCodexHarness(
       configuration,
       this.environment,
       scope,
       this.preferencesRequest,
     );
-    let ownership: SessionOwnership;
-    try {
-      const nativeExitProof = await readSharedHostExitProof(this.environment);
-      ownership = await acquireSourceOwnerLock({
-        root: this.root,
-        home: configuration.home,
-        ...(this.environment.CODEXHOST_SHARED_HOST_GENERATION
-          ? {
-              ownerGeneration: this.environment.CODEXHOST_SHARED_HOST_GENERATION,
-            }
-          : {}),
-        ...(nativeExitProof ? { nativeExitProof } : {}),
-      });
-    } catch (error) {
-      await harness.close();
-      throw error;
-    }
     try {
       if (this.closed) throw new Error("owner-offline");
-      const recovery = await recoverSessionMigration(ownership);
-      if (recovery === "rolled-back" && !requested.migrateSource)
-        throw new Error("migration-rolled-back: Explicit source configuration required");
-      if (requested.migrateSource) {
-        if (!requested.legacyWriterStopped) throw new Error("legacy-writer-confirmation-required");
-        await migrateLegacyWebSource({
-          sourceDataRoot: requested.migrateSource,
-          targetRoot: this.root,
-          codexHome: configuration.home,
-          legacyWriterStopped: true,
-          ownership,
-        });
-      }
-      if (this.closed) throw new Error("owner-offline");
+      const data = new SessionFileStore(this.root);
       const organization: LocalSessionOrganization = new LocalSessionOrganization(
-        ownership.data,
+        data,
         (id): boolean => owner.owns(id),
       );
-      const owner: IsolatedSessions = new IsolatedSessions(
-        ownership.data,
-        harness.harnesses,
-        organization,
-        {
-          changed: (_kind, ...args) => {
-            const first = args[0];
-            const id =
-              typeof first === "string"
-                ? first
-                : first && typeof first === "object" && "sessionId" in first
-                  ? String(first.sessionId)
-                  : undefined;
-            this.events.webCodexChanged(scope, id);
-          },
-          interaction: (sessionId, interaction) => {
-            const id = randomUUID();
-            const completion = Promise.withResolvers<unknown>();
-            this.pending.set(id, {
-              sessionId,
-              interaction,
-              resolve: completion.resolve,
-              reject: completion.reject,
-            });
-            this.events.webCodexChanged(scope, sessionId);
-            return {
-              result: completion.promise,
-              cancel: () => {
-                if (!this.pending.delete(id)) return;
-                completion.reject(new Error("Interaction withdrawn"));
-                this.events.webCodexChanged(scope, sessionId);
-              },
-            };
-          },
+      const owner: IsolatedSessions = new IsolatedSessions(data, harness.harnesses, organization, {
+        changed: (_kind, ...args) => {
+          const first = args[0];
+          const id =
+            typeof first === "string"
+              ? first
+              : first && typeof first === "object" && "sessionId" in first
+                ? String(first.sessionId)
+                : undefined;
+          this.events.webCodexChanged(scope, id);
         },
-      );
+        interaction: (sessionId, interaction) => {
+          const id = randomUUID();
+          const completion = Promise.withResolvers<unknown>();
+          this.pending.set(id, {
+            sessionId,
+            interaction,
+            resolve: completion.resolve,
+            reject: completion.reject,
+          });
+          this.events.webCodexChanged(scope, sessionId);
+          return {
+            result: completion.promise,
+            cancel: () => {
+              if (!this.pending.delete(id)) return;
+              completion.reject(new Error("Interaction withdrawn"));
+              this.events.webCodexChanged(scope, sessionId);
+            },
+          };
+        },
+      });
       for (const id of owner.ids())
         if (await this.externalOwns(id)) throw new Error("session-source-collision");
       owner.notifier = (notification: SessionNotification) => {
@@ -270,18 +184,16 @@ export class SharedWebCodexOwner {
         await owner.close();
         throw new Error("owner-offline");
       }
-      ownership.data.writeConfiguration("service-config-v1.json", configuration);
+      data.writeJson("service-config-v1.json", configuration);
       this.configuration = configuration;
       this.scope = scope;
       this.owner = owner;
       this.harness = harness;
-      this.ownership = ownership;
       this.organization = organization;
       this.events.webCodexChanged(scope);
       return this.description();
     } catch (error) {
       await harness?.close();
-      await ownership.release();
       throw error;
     }
   }
@@ -499,7 +411,6 @@ export class SharedWebCodexOwner {
       this.pending.clear();
       await this.owner?.close();
       await this.harness?.close();
-      await this.ownership?.release();
     })());
   }
 }

@@ -100,36 +100,63 @@ it(
       JSON.parse(readFileSync(join(moved, "package.json"), "utf8")).bin["codexhost-web"],
       "./app/server.mjs",
     );
-    const url = await startServer(t, root, [join(moved, "app/server.mjs")], ["--harness", "fake"]);
-    assert.match(
-      readFileSync(join(moved, "README.md"), "utf8"),
-      /Included Harness plugins: codex, fake/u,
-    );
-    const index = await fetch(url);
-    assert.equal(index.status, 200);
-    assert.match(await index.text(), /CodexHost/u);
-    const iconResponse = await fetch(new URL("harness-icons/fake", url));
-    assert.equal(iconResponse.status, 200);
-    assert.equal(iconResponse.headers.get("content-type"), "image/png");
-    assert.deepEqual(Buffer.from(await iconResponse.arrayBuffer()), icon);
-    const catalog = await fetch(new URL("api/session/modelCatalog", url), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        type: "client-request",
-        rpcId: "test",
-        method: "session/modelCatalog",
-        payload: { args: {} },
-      }),
-    });
-    const response = (await catalog.json()) as {
-      result: { ok: boolean; value: { groups: Array<{ id: string }> } };
+    const hostData = join(root, "host-data");
+    const environment = { ...cliEnvironment, HOME: root, USERPROFILE: root };
+    const stopHost = async () => {
+      await exec(
+        join(moved, "native", process.platform === "win32" ? "codexhost.exe" : "codexhost"),
+        [
+          "host",
+          "stop",
+          "--node",
+          process.execPath,
+          "--host-runtime",
+          join(moved, "app/host-runtime.mjs"),
+          "--data",
+          hostData,
+        ],
+        { env: environment, timeout: 15_000 },
+      );
     };
-    assert.equal(response.result.ok, true);
-    assert.deepEqual(
-      response.result.value.groups.map((group) => group.id),
-      ["fake"],
-    );
+    await t.test("the relocated Web gateway uses its bundled shared Host", async (viewer) => {
+      const url = await startServer(
+        viewer,
+        root,
+        [join(moved, "app/server.mjs")],
+        ["--harness", "fake", "--ch-data", hostData, "--ch-codex-home", join(root, "gui-home")],
+        { environment },
+      );
+      viewer.after(stopHost);
+      assert.match(
+        readFileSync(join(moved, "README.md"), "utf8"),
+        /Included Harness plugins: codex, fake/u,
+      );
+      const index = await fetch(url);
+      assert.equal(index.status, 200);
+      assert.match(await index.text(), /CodexHost/u);
+      const iconResponse = await fetch(new URL("harness-icons/fake", url));
+      assert.equal(iconResponse.status, 200);
+      assert.equal(iconResponse.headers.get("content-type"), "image/png");
+      assert.deepEqual(Buffer.from(await iconResponse.arrayBuffer()), icon);
+      const catalog = await fetch(new URL("api/session/modelCatalog", url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "client-request",
+          rpcId: "test",
+          method: "session/modelCatalog",
+          payload: { args: {} },
+        }),
+      });
+      const response = (await catalog.json()) as {
+        result: { ok: boolean; value: { groups: Array<{ id: string }> } };
+      };
+      assert.equal(response.result.ok, true);
+      assert.deepEqual(
+        response.result.value.groups.map((group) => group.id),
+        ["fake"],
+      );
+    });
 
     // Exercise the shipped launcher with a fake server; never invoke Desktop or a real Harness.
     const preview = join(root, "preview-fixture");

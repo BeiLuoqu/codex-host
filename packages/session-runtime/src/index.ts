@@ -13,17 +13,6 @@ export type {
   SessionHarnesses,
 } from "./contracts.js";
 export type { DraftConfiguration } from "./draft-configuration.js";
-export {
-  acquireSourceOwnerLock,
-  canonicalSessionPath,
-  OwnedSessionDataStore,
-} from "./ownership-lock.js";
-export type { SessionOwnership, NativeExitProof } from "./ownership-lock.js";
-export {
-  migrateLegacyWebSource,
-  recoverSessionMigration,
-  rollbackSessionMigration,
-} from "./migration.js";
-export type { MigrationCommit, SourceActivity } from "./migration.js";
+export { canonicalSessionPath, SessionFileStore } from "./session-data-store.js";
 export { LocalSessionOrganization } from "./organization-store.js";
 export type { LocalOrganizationState, LocalWorkspace } from "./organization-store.js";

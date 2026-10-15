@@ -3,8 +3,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  realpathSync,
-  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -14,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { DataDir } from "../src/store.ts";
-import { WebImages, WEB_IMAGE_LIMITS, readImageFile } from "../src/web-images.ts";
+import { WebImages, WEB_IMAGE_LIMITS } from "../src/web-images.ts";
 import { ChAttachments } from "../src/ch-attachments.ts";
 
 import { PNG } from "./support/image.ts";
@@ -74,43 +72,6 @@ it("saves exact bytes and uses native path context, with restart-safe history pr
     restored.project("thread", images.prepare([image])),
     "native whitespace normalization retains image-only history",
   );
-});
-
-it("restores migrated image references only through the recorded root without relaxing native symlink reads", (t) => {
-  const temporary = mkdtempSync(join(tmpdir(), "web-images-migration-"));
-  t.after(() => rmSync(temporary, { recursive: true, force: true }));
-  const root = realpathSync(temporary);
-  const source = join(root, "legacy");
-  const target = join(root, "web");
-  const original = new WebImages(new DataDir(source));
-  const input = original.prepare([image]);
-  const oldPath = /## image-1.png: (.+)\nImage attachment: true/u.exec(input[0]?.text ?? "")?.[1];
-  assert.ok(oldPath);
-  renameSync(source, target);
-  symlinkSync(target, source, process.platform === "win32" ? "junction" : "dir");
-  const data = new DataDir(target);
-  assert.equal(new WebImages(data).idForPath(oldPath), undefined);
-  assert.throws(() => readImageFile(oldPath), /unavailable/u);
-  data.writeJson("data-root-migration-v1.json", {
-    version: 1,
-    sourceRoot: source,
-    targetRoot: realpathSync(target),
-  });
-  const images = new WebImages(data);
-  const id = images.idForPath(oldPath);
-  assert.ok(id);
-  assert.equal(images.read(id).data, PNG);
-  const projected = new ChAttachments(images).project("thread", input) as Array<{
-    attachment: { attachmentId: string; bytes: number };
-  }>;
-  assert.equal(projected[0]?.attachment.attachmentId, id);
-  assert.ok((projected[0]?.attachment.bytes ?? 0) > 0);
-  const unknown = join(root, "unrecorded");
-  symlinkSync(target, unknown, process.platform === "win32" ? "junction" : "dir");
-  assert.equal(images.idForPath(oldPath.replace(source, unknown)), undefined);
-  rmSync(source);
-  symlinkSync(root, source, process.platform === "win32" ? "junction" : "dir");
-  assert.equal(images.idForPath(oldPath), undefined, "a retargeted legacy link is refused");
 });
 
 it("validates every image before any files are written", (t) => {

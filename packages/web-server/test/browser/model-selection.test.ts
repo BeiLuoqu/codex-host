@@ -4,16 +4,39 @@ import { resolve } from "node:path";
 import { it, type TestContext } from "node:test";
 import { chromium, type Page } from "playwright";
 import { startServer } from "../support/server.ts";
+import { FakeChHost, startFakeChDebugger } from "../support/ch-host.ts";
+import { createHarnessAdapter as createFake } from "../fake-harness/fake/plugin.ts";
+import { createHarnessAdapter as createOther } from "../fake-harness/other/plugin.ts";
 
 const selectionUrl = "**/api/session/selectModel";
 const composerLabel = "Describe what you want to build, / commands, @ files or sessions";
 
 async function startPicker(t: TestContext, width: number): Promise<Page> {
+  const host = new FakeChHost();
+  const adapters = { fake: createFake(), other: createOther() };
+  t.after(async () => {
+    await Promise.all(Object.values(adapters).map((adapter) => adapter.close()));
+  });
+  const request = host.request.bind(host);
+  host.request = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
+    if (method === "codexhost/harness/plugins/list")
+      return {
+        plugins: [
+          { id: "fake", name: "Fake Harness", version: "1" },
+          { id: "other", name: "Other Harness", version: "1" },
+        ],
+      } as T;
+    if (method === "codexhost/harness/inspect")
+      return (await adapters[params.harnessId as keyof typeof adapters].inspect()) as T;
+    return request<T>(method, params);
+  };
+  const debuggerServer = await startFakeChDebugger(host);
+  t.after(() => debuggerServer.close());
   const url = await startServer(
     t,
     resolve(import.meta.dirname, "../.."),
     ["--import", "tsx", "src/main.ts"],
-    ["--adapters", "test/fake-harness"],
+    ["--ch-cdp", debuggerServer.endpoint],
   );
   const browser = await chromium.launch();
   t.after(() => browser.close());

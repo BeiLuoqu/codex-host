@@ -73,7 +73,7 @@ describe("development Desktop start", () => {
       const spawnImplementation = vi.fn(() => exitingChild(code));
       expect(
         await runDevelopmentDesktop({
-          arguments_: ["web", "--no-build", "--port", "3181", "--session-source", "standalone"],
+          arguments_: ["web", "--no-build", "--port", "3181"],
           root,
           nodePath,
           platform: "darwin",
@@ -89,8 +89,6 @@ describe("development Desktop start", () => {
           path.join(root, "packages/web-server/scripts/preview.ts"),
           "--port",
           "3181",
-          "--session-source",
-          "standalone",
         ],
         expect.objectContaining({ cwd: root, env: environment, stdio: "inherit" }),
       );

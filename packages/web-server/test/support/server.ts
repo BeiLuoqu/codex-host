@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { TestContext } from "node:test";
+import { FakeChHost, startFakeChDebugger } from "./ch-host.ts";
 
 /**
  * Start the real entry point on an OS-assigned port with disposable data and workspace directories.
@@ -34,6 +35,12 @@ export async function startServer(
   const serverEntry = bundle
     ? entry.map((part) => (part === "src/main.ts" ? resolve(bundle) : part))
     : entry;
+  const hostArgs: string[] = [];
+  if (!["--ch-cdp", "--ch-control-directory", "--ch-data"].some((flag) => args.includes(flag))) {
+    const debuggerServer = await startFakeChDebugger(new FakeChHost());
+    t.after(() => debuggerServer.close());
+    hostArgs.push("--ch-cdp", debuggerServer.endpoint);
+  }
   const child = spawn(
     process.execPath,
     [
@@ -46,7 +53,7 @@ export async function startServer(
       "--workspace",
       join(data, "workspace"),
       ...(options.authenticated ? [] : ["--no-auth"]),
-      ...(!args.includes("--session-source") ? ["--session-source", "standalone"] : []),
+      ...hostArgs,
       ...args,
     ],
     {

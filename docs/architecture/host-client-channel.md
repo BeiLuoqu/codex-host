@@ -19,11 +19,11 @@ Web / App → Web 网关 → 客户端通道 ───────────�
 
 任一入口可按需通过原生 Launcher 的 `host ensure` 启动后台，或连接同一数据目录中已运行的所有者。用户无须先打开另一界面。Desktop-only、Web-only、任一启动顺序和晚到客户端共用相同 canonical Threads；当前页面、草稿和滚动位置仍各端独立。
 
-- Rust 管理脱离前台进程树的服务监督进程、`shared-host-process.lock`、子进程实例身份与退出证明。并发启动只能产生一个执行所有者；Node 崩溃后须证明旧受监管进程树退出才释放启动锁。就绪文件只记录进程身份，不是会话索引或认证凭据。
+- Rust 管理脱离前台进程树的服务监督进程、就绪通知与正常退出时的子进程清理。启动先检查已有后台，有则连接，无则启动；动态端口发现和检查不是原子互斥，不保证并发启动严格单实例。Shared Host 不使用单实例锁或退出证明；就绪文件只记录进程身份，不是会话索引或认证凭据。Mapping Store 保留自身的存储锁。
 - Node 后台拥有唯一生产 Mapping Store、插件注册表和 `SharedThreadOwner`。Desktop 协议前端复用同一存储对象和原生 Codex scope/account control，不通过另一份数据库或存储 RPC 合并状态。
 - 官方 Codex 延迟启动：纯 Web 外部会话不需要启动 Desktop 或 stock Codex。首个 Desktop 的原生可执行文件、app-server 参数及功能标志在首个 backend generation 前确定，之后不因客户端接入而替换进程。官方 Codex 使用仍需要已安装的原生组件；后台不会安装 CLI、切换账号或自动登录。
 - 关闭 Web 或 Desktop 只断开对应传输，不停止后台，也不把断线解释成取消。Desktop 连接若仍拥有原生执行，会在后台排空真实结束事件；其他客户端不受其退出影响。待处理交互不会自动作答。
-- 后台保持运行，最后一个界面退出不触发自动停机。显式 `codexhost host stop` 是管理操作，会停止后台及其任务，并等待原生监管者确认进程树退出、释放执行准入锁，关闭请求的回执本身不算退出证明。若优雅清理停滞，原生层在短暂等待后仅终止关闭请求前已验证的后台进程实例，再由监管者清理子进程树；不会终止替代代次或绕过准入锁；仍打开的客户端可能按需重新启动它，应先退出界面再进行维护。后台崩溃恢复只恢复已有事实，不能保证中断中的 Harness 任务继续执行，也不重发结果未知的命令。
+- 后台保持运行，最后一个界面退出不触发自动停机。显式 `codexhost host stop` 是管理操作，会停止后台及其任务，并等待所连接后台的监管进程完成正常清理后退出。优雅清理停滞时，原生层在短暂等待后终止关闭请求前记录的后台进程，由仍在运行的监管者清理子进程树。仍打开的客户端可能按需启动后台，应先退出界面再进行维护。不提供监管者被强杀后的安全交接保证；后台重启只恢复已有事实，不保证中断中的 Harness 任务继续执行，也不重发结果未知的命令。
 - 认证描述文件标记 `owner: service`。发现不仅校验 PID，还用认证 hello/epoch 探测端点。Web 的服务模式断线后重新发现或按需启动同一数据目录的所有者；不切换到独立插件模式。
 - 已运行的旧 Desktop-owned Host 不会被接管、停止或绕过存储锁。旧客户端通道与显式 CDP 仍可连接；切换独立后台需要用户另行更新并重启 Desktop。构建源码不等于正在运行的进程已经升级。
 
@@ -31,11 +31,11 @@ Web / App → Web 网关 → 客户端通道 ───────────�
 
 ## 隔离 Web Codex 来源
 
-显式启用的单个 Web Codex 配置由同一 shared Host 中的独立 `IsolatedSessions` owner 拥有。`session-runtime` 提供现有隔离运行/恢复和持久 journal，Web gateway 不加载该执行 Adapter 或保存第二份可写会话；explicit standalone 复用同实现。external AppServerHost/MappingStore保持原边界，GUI native Codex仍使用official route。官方项目文件保持只读，external官方pin写仍依赖Desktop；Host仅保存Web自建workspace及隔离local pin/archive。
+显式启用的单个 Web Codex 配置由同一 shared Host 中的独立 `IsolatedSessions` owner 拥有。`session-runtime` 提供现有隔离运行/恢复和持久 journal，Web gateway 不加载该执行 Adapter 或保存第二份可写会话。external AppServerHost/MappingStore保持原边界，GUI native Codex仍使用official route。官方项目文件保持只读，external官方pin写仍依赖Desktop；Host仅保存Web自建workspace及隔离local pin/archive。
 
 隔离来源使用Host-private的配置、受限操作及follow/control通道，并携epoch和服务端返回的home散列scope。配置不注册为浏览器RPC；所有会话操作检查已配置scope/identity，不能传home/nativeRef改变执行身份。客户端通道增加 `web-codex-changed` 失效通知，继续使用既有epoch/cursor/reset机制；它不是可追加token，也不构成另一份durable journal。网关重连核对列表和待处理交互，原生交互仍由唯一owner仲裁，迟到epoch回答不生效。隔离 owner 按 Session/requestId 保留最多256个进程内提交回执；多个 gateway 的相同输入复用结果，冲突输入拒绝，淘汰或重启后不保证exactly-once。
 
-停止gateway不停止shared隔离执行；Push依赖gateway存活。profile/home准入锁防止codexhost并发owner，但不控制用户手动CLI。native close未确认时不释放锁；崩溃后不能仅依据Node PID消失接管home，Rust清理旧受监管树后发布私有退出证明；Node验证记录与旧锁的PID、supervisor generation及canonical owner root匹配后才恢复，浏览器配置不能传入自认证证明。结果未知的写入不自动重发，也不保证跨重启exactly-once。迁移commit封存旧源以阻止新版writer重开；旧无锁二进制仍须显式停用。离线维护入口先原生stop、再校验退出/锁与无新mutation，成功后解封源并封存目标配置。单源迁移的显式确认、完整格式、路径保留与回滚限制见[独立Web](../product/standalone-web.md#显式迁移一个旧-web-codex-来源)。
+停止 gateway 不停止 shared 隔离执行；Push 依赖 gateway 存活。隔离来源不使用 profile/home 所有权锁、恢复抢锁或退出证明，不为不同 Host 共用同一 home 提供互斥。正常关闭仍会关闭所拥有的原生会话；重启读取当前共享来源的配置和会话文件，不检查或清理旧锁及迁移标记。不提供旧 standalone 迁移、回滚或交接入口，也不移动用户数据。结果未知的写入不自动重发，不保证跨重启 exactly-once。
 
 ## 认证与传输
 

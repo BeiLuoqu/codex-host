@@ -10,9 +10,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 import { SharedWebCodexOwner } from "../src/web-codex-owner.js";
 import { ClientChannelEvents } from "../src/client-channel-events.js";
 import { startClientChannelServer } from "../src/client-channel-server.js";
@@ -30,8 +27,8 @@ async function fixture() {
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const plugins = join(root, "plugins"),
     home = join(root, "isolated-home"),
-    data = join(root, "host"),
-    source = join(root, "legacy-web");
+    data = join(root, "host");
+  const source = join(data, "web-codex");
   mkdirSync(home);
   mkdirSync(join(plugins, "codex"), { recursive: true });
   json(join(plugins, "codex", "manifest.json"), {
@@ -45,38 +42,43 @@ async function fixture() {
   writeFileSync(
     join(plugins, "codex", "plugin.mjs"),
     `
-export function createHarnessAdapter(context) {
+export function createHarnessAdapter() {
   return { harnessId: 'codex', inspect: async () => ({ status:'ready', catalog:{ models:[{ref:{id:'fake'},label:'Fake'}],defaultModel:{id:'fake'},thinkingOptions:[] }, capabilities:{configuration:{selectModel:true,selectThinkingOption:false,selectPermissionMode:false},history:{fork:false,forkAcrossCwd:false,rollbackLastTurn:false}} }),
     open: async () => { throw new Error('No model submissions in this test'); }, close: async () => {} };
 }
 `,
   );
-  const metadata = {
-    sessionId: "kept",
-    cwd: root,
-    createdAt: 1,
-    updatedAt: 2,
-    blank: false,
-    harnessId: "codex",
-    nativeRef: { harnessId: "codex", nativeSessionId: "native-kept", locator: { codexHome: home } },
-    checkpoints: { "1": { nativeTurnKey: "native-turn" } },
-  };
-  json(join(source, "codex-sessions", "sessions", "index.json"), { kept: metadata });
-  json(join(source, "codex-sessions", "sessions", "kept", "projections.json"), {
-    title: "Old title",
+  json(join(source, "sessions/index.json"), {
+    kept: {
+      sessionId: "kept",
+      cwd: root,
+      createdAt: 1,
+      updatedAt: 2,
+      blank: false,
+      harnessId: "codex",
+      nativeRef: {
+        harnessId: "codex",
+        nativeSessionId: "native-kept",
+        locator: { codexHome: home },
+      },
+      checkpoints: { "1": { nativeTurnKey: "native-turn" } },
+    },
   });
+  json(join(source, "sessions/kept/projections.json"), { title: "Saved title" });
   writeFileSync(
-    join(source, "codex-sessions", "sessions", "kept", "events.jsonl"),
-    JSON.stringify({ seq: 0, type: "session/title", time: 1, data: { title: "Old title" } }) + "\n",
+    join(source, "sessions/kept/events.jsonl"),
+    JSON.stringify({ seq: 0, type: "session/title", time: 1, data: { title: "Saved title" } }) +
+      "\n",
   );
-  json(join(source, "workspaces.json"), {
+  json(join(source, "organization-v1.json"), {
+    version: 1,
     items: [
       {
         workspaceId: "workspace",
         path: root,
         title: "Original",
         origin: "web",
-        sessionIds: ["kept", "external"],
+        sessionIds: ["kept"],
         createdAt: new Date(1).toISOString(),
         updatedAt: new Date(2).toISOString(),
       },
@@ -135,10 +137,8 @@ export function createHarnessAdapter(context) {
       body: (await response.json()) as { result?: unknown; error?: { message: string } },
     };
   };
-  const configuration = { home, command: process.execPath, pluginRoots: [plugins] };
   return {
     root,
-    plugins,
     home,
     data,
     source,
@@ -146,86 +146,19 @@ export function createHarnessAdapter(context) {
     preferences,
     owner,
     events,
-    server,
     post,
-    configuration,
+    configuration: { home, command: process.execPath, pluginRoots: [plugins] },
   };
 }
 
 describe("production owner over private authenticated HTTP", () => {
-  it.skipIf(process.platform === "win32")(
-    "runs the existing Host maintenance entry after a confirmed synthetic launcher stop",
-    async () => {
-      const f = await fixture();
-      const configured = await f.post("configure", {
-        ...f.configuration,
-        migrateSource: f.source,
-        legacyWriterStopped: true,
-      });
-      expect(configured.status).toBe(200);
-      await f.owner.close();
-      const launcher = join(f.root, "synthetic-launcher.mjs"),
-        stopArguments = join(f.root, "stop-arguments.json");
-      writeFileSync(
-        launcher,
-        `#!${process.execPath}\nimport { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(stopArguments)}, JSON.stringify(process.argv.slice(2)));\n`,
-        { mode: 0o700 },
-      );
-      const result = await promisify(execFile)(process.execPath, [
-        fileURLToPath(new URL("../dist/main.js", import.meta.url)),
-        "--codexhost-web-codex-rollback",
-        "--data",
-        f.data,
-        "--home",
-        f.home,
-        "--launcher",
-        launcher,
-      ]);
-      expect(result.stderr).toContain("migration rolled back");
-      expect(JSON.parse(readFileSync(stopArguments, "utf8")).slice(0, 2)).toEqual(["host", "stop"]);
-      expect(existsSync(join(f.data, "web-codex", "service-config-v1.json"))).toBe(false);
-      expect(existsSync(join(f.source, "codex-sessions", "source-migrated-v1.json"))).toBe(false);
-      expect(existsSync(join(f.data, "web-codex", "migration-rolled-back-v1.json"))).toBe(true);
-      const recovered = new SharedWebCodexOwner(
-        f.environment,
-        new ClientChannelEvents(),
-        async () => false,
-        f.preferences,
-      );
-      cleanup.push(() => recovered.close());
-      await recovered.initialize();
-      await expect(recovered.configure(f.configuration)).rejects.toThrow("migration-rolled-back");
-      const remigrated = await recovered.configure({
-        ...f.configuration,
-        migrateSource: f.source,
-        legacyWriterStopped: true,
-      });
-      expect(remigrated.sessionIds).toEqual(["kept"]);
-      expect(existsSync(join(f.data, "web-codex", "migration-rolled-back-v1.json"))).toBe(false);
-    },
-  );
-  it("migrates one source, persists only local organization and restores it after owner restart", async () => {
+  it("restores shared sessions and organization after a normal owner restart", async () => {
     const f = await fixture();
-    const unauthorized = await f.post("configure", f.configuration, false);
-    expect(unauthorized.status).toBe(401);
-    const migrated = await f.post("configure", {
-      ...f.configuration,
-      migrateSource: f.source,
-      legacyWriterStopped: true,
-    });
-    expect(migrated.status).toBe(200);
-    const reply = migrated.body.result as { scope: string; sessionIds: string[] };
+    expect((await f.post("configure", f.configuration, false)).status).toBe(401);
+    const configured = await f.post("configure", f.configuration);
+    expect(configured.status).toBe(200);
+    const reply = configured.body.result as { scope: string; sessionIds: string[] };
     expect(reply.sessionIds).toEqual(["kept"]);
-    expect(
-      (
-        await f.post("configure", {
-          ...f.configuration,
-          migrateSource: f.source,
-          legacyWriterStopped: true,
-        })
-      ).body.result,
-    ).toEqual(migrated.body.result);
-    expect(existsSync(join(f.data, "web-codex", "migration-mutated-v1.json"))).toBe(false);
     const request = (action: string, input: Record<string, unknown> = {}) =>
       f.post("request", {
         epoch: f.events.epoch,
@@ -233,17 +166,13 @@ describe("production owner over private authenticated HTTP", () => {
         operation: "organization",
         input: { action, ...input },
       });
-    const snapshot = (await request("snapshot")).body.result as {
-      items: Array<{ sessionIds: string[] }>;
-    };
-    expect(snapshot.items[0]?.sessionIds).toEqual(["kept"]);
     expect((await request("rename", { workspaceId: "workspace", title: "Confirmed" })).status).toBe(
       200,
     );
     expect((await request("archive", { sessionId: "kept" })).status).toBe(200);
-    const denied = await request("pin", { sessionId: "official-id" });
-    expect(denied.body.error?.message).toContain("session-not-found");
-    expect(existsSync(join(f.data, "web-codex", "migration-mutated-v1.json"))).toBe(true);
+    expect((await request("pin", { sessionId: "official-id" })).body.error?.message).toContain(
+      "session-not-found",
+    );
     await f.owner.close();
     const recovered = new SharedWebCodexOwner(
       f.environment,
@@ -267,21 +196,36 @@ describe("production owner over private authenticated HTTP", () => {
     expect(restored.items[0]?.title).toBe("Confirmed");
     expect(restored.archivedSessionIds).toEqual(["kept"]);
     expect(restored.pinnedSessionIds).toEqual(["kept"]);
-    const native = JSON.parse(
-      readFileSync(join(f.data, "web-codex", "sessions", "index.json"), "utf8"),
-    ).kept.nativeRef;
-    expect(native.locator.codexHome).toBe(f.home);
-    expect(JSON.parse(readFileSync(join(f.source, "workspaces.json"), "utf8")).items[0].title).toBe(
-      "Original",
-    );
+    expect(
+      JSON.parse(readFileSync(join(f.source, "sessions/index.json"), "utf8")).kept.nativeRef.locator
+        .codexHome,
+    ).toBe(f.home);
   });
-  it("rejects late configuration conflicts, a second home owner and forged request envelopes", async () => {
+
+  it("does not inspect, overwrite or remove ownership artifacts", async () => {
+    const f = await fixture();
+    const artifacts = [
+      join(f.home, ".codexhost-source-owner-v1.lock"),
+      join(f.source, "source-owner-v1.lock"),
+      join(f.source, "source-owner-v1.lock.reap"),
+      join(f.data, "shared-host-exit-v1.json"),
+      join(f.source, "source-migrated-v1.json"),
+    ];
+    for (const file of artifacts) writeFileSync(file, "leave untouched");
+    expect((await f.post("configure", f.configuration)).status).toBe(200);
+    await f.owner.close();
+    for (const file of artifacts) expect(readFileSync(file, "utf8")).toBe("leave untouched");
+    expect(existsSync(join(f.source, "migration-mutated-v1.json"))).toBe(false);
+  });
+
+  it("rejects configuration conflicts and forged requests without enforcing cross-Host home ownership", async () => {
     const f = await fixture();
     const configured = await f.post("configure", f.configuration);
     expect(configured.status).toBe(200);
     const reply = configured.body.result as { scope: string };
-    const repeated = await f.post("configure", f.configuration);
-    expect(repeated.body.result).toEqual(configured.body.result);
+    expect((await f.post("configure", f.configuration)).body.result).toEqual(
+      configured.body.result,
+    );
     const other = join(f.root, "other-home");
     mkdirSync(other);
     expect(
@@ -294,20 +238,23 @@ describe("production owner over private authenticated HTTP", () => {
       f.preferences,
     );
     cleanup.push(() => second.close());
-    await expect(second.configure(f.configuration)).rejects.toThrow("source-owner-live");
+    expect((await second.configure(f.configuration)).scope).toBe(reply.scope);
     for (const input of [
       { request: { home: other } },
       { nativeRef: { nativeSessionId: "official-id" } },
       { home: other },
       { adapter: "official" },
     ]) {
-      const denied = await f.post("request", {
-        epoch: f.events.epoch,
-        address: { scope: reply.scope },
-        operation: "list",
-        input,
-      });
-      expect(denied.body.error).toBeDefined();
+      expect(
+        (
+          await f.post("request", {
+            epoch: f.events.epoch,
+            address: { scope: reply.scope },
+            operation: "list",
+            input,
+          })
+        ).body.error,
+      ).toBeDefined();
     }
     expect(
       (
@@ -327,8 +274,14 @@ describe("production owner over private authenticated HTTP", () => {
         })
       ).body.error?.message,
     ).toContain("GUI home overlap");
+    for (const field of ["migrateSource", "legacySource", "legacyWriterStopped"]) {
+      expect(
+        (await f.post("configure", { ...f.configuration, [field]: true })).body.error,
+      ).toBeDefined();
+    }
   });
-  it("scopes bounded submission receipts to the complete session address and input", async () => {
+
+  it("scopes submission receipts to the complete session address and input", async () => {
     const f = await fixture();
     const reply = (await f.post("configure", f.configuration)).body.result as { scope: string };
     const request = (operation: string, input: Record<string, unknown>, sessionId?: string) =>
@@ -363,10 +316,8 @@ describe("production owner over private authenticated HTTP", () => {
         )
       ).body.error?.message,
     ).toContain("request-id-conflict");
-    // The synthetic Adapter deliberately refuses native execution. Receipt acceptance
-    // and one durable user input per address are independently testable without a model.
     for (const id of [one.sessionId, two.sessionId]) {
-      const log = readFileSync(join(f.data, "web-codex", "sessions", id, "events.jsonl"), "utf8")
+      const log = readFileSync(join(f.source, "sessions", id, "events.jsonl"), "utf8")
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));

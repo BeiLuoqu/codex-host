@@ -62,7 +62,7 @@ it("does not replay a write when the confirmation snapshot fails", async (t) => 
   );
 });
 
-it("projects only shared external pins, synchronizes changes and never overwrites standalone records", async (t) => {
+it("projects only shared external pins, synchronizes changes and never overwrites legacy local records", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "ch-pins-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const data = new DataDir(root);
@@ -215,7 +215,7 @@ it("keeps native Desktop pins available beside the selected realtime Host channe
   assert.deepEqual(await client.pins({ threadId: "shared", pinned: false }), []);
 });
 
-it("standalone mode retains local pin persistence", async (t) => {
+it("retains persisted local pin records", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "local-pins-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const data = new DataDir(root),

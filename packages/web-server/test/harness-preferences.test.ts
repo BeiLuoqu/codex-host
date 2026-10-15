@@ -46,17 +46,14 @@ it("shares GUI file preferences across Web clients, restores defaults and isolat
         revision,
       });
   });
-  const a = new WebHarnessPreferences(host, data, events, join(root, "home-a"));
-  const b = new WebHarnessPreferences(host, data, events, join(root, "home-b"));
+  const a = new WebHarnessPreferences(host, events, join(root, "home-a"));
+  const b = new WebHarnessPreferences(host, events, join(root, "home-b"));
   const workspaces = new Workspaces(data, root, true);
   const sessions = new ChSessions(host, workspaces, events, undefined, undefined, undefined, a);
   const rpc = new RpcRegistry();
   sessions.register(rpc, new StreamRegistry());
   sessions.registerCommands(rpc);
   a.register(rpc);
-  await a.initialize({ provider: "fake", model: "legacy" });
-  assert.equal((await a.get()).values.newThread?.lastHarness, "fake");
-  assert.equal((await a.configuration("fake"))?.model?.id, "legacy");
   t.after(async () => {
     await sessions.close();
     await a.close();
@@ -98,7 +95,6 @@ it("shares GUI file preferences across Web clients, restores defaults and isolat
   assert.equal(await b.configuration("codex"), undefined);
   assert.equal((await store.get()).values.newThread?.byHarness.codex, undefined);
   await a.remember("fake", { model: { id: "native" }, permissionModeId: "auto" });
-  await a.initialize({ provider: "fake", model: "obsolete" });
   assert.equal((await a.configuration("fake"))?.model?.id, "native");
   await call("session/create", { sessionId: "first", cwd: root });
   const projection = (await call("session/projections", { sessionId: "first" })) as {
@@ -139,11 +135,7 @@ it("shares GUI file preferences across Web clients, restores defaults and isolat
 
 it("retains normal catalogs when an older Host lacks preference methods", async () => {
   const root = mkdtempSync(join(tmpdir(), "web-old-preferences-"));
-  const prefs = new WebHarnessPreferences(
-    new FakeChChannel(),
-    new DataDir(root),
-    new EventHub(root),
-  );
+  const prefs = new WebHarnessPreferences(new FakeChChannel(), new EventHub(root));
   try {
     const result = await prefs.decorate({
       default: { provider: "fake", model: "native" },

@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { HarnessRegistry } from "../src/harnesses.ts";
+import { HarnessRegistry } from "./support/harnesses.ts";
 import type { WireEvent } from "../src/session-log.ts";
-import { Sessions, type SessionNotification } from "../src/sessions.ts";
+import { Sessions, type SessionNotification } from "./support/isolated-sessions.ts";
 import { DataDir } from "../src/store.ts";
 import { EventHub, RpcRegistry, StreamRegistry, type StreamSink } from "../src/transport.ts";
 import { Workspaces } from "../src/workspaces.ts";

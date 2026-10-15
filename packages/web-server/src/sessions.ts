@@ -1,11 +1,7 @@
-/** Web protocol gateway over the shared isolated-session implementation. */
-import { IsolatedSessions, SessionRuntimeError } from "@codexhost/session-runtime";
-import type { SessionNotification, SessionDataStore } from "@codexhost/session-runtime";
-import type { HarnessRegistry } from "./harnesses.ts";
-import { type EventHub, type RpcRegistry, type StreamRegistry } from "./transport.ts";
-import type { Workspaces } from "./workspaces.ts";
-export type { SessionNotification };
-export { SessionRuntimeError };
+/** Browser interaction projection for sessions executed by the shared Host. */
+import { SessionRuntimeError } from "@codexhost/session-runtime";
+import type { EventHub } from "./transport.ts";
+export type { SessionNotification } from "@codexhost/session-runtime";
 
 export function bridgeSessionInteraction(
   events: EventHub,
@@ -94,54 +90,4 @@ export function bridgeSessionInteraction(
     return { result, cancel: invocation.cancel };
   }
   throw new Error("Unsupported session interaction");
-}
-
-export class Sessions extends IsolatedSessions {
-  constructor(
-    data: SessionDataStore,
-    harnesses: HarnessRegistry,
-    workspaces: Workspaces,
-    events: EventHub,
-  ) {
-    super(data, harnesses, workspaces, {
-      changed: (kind, ...args) => events.emit(kind, ...args),
-      interaction: (id, value) => bridgeSessionInteraction(events, id, value),
-    });
-  }
-
-  register(rpc: RpcRegistry, streams: StreamRegistry): void {
-    rpc.register("session/list", () => this.list());
-    rpc.register("session/create", (args) => this.createRequest(args));
-    rpc.register("session/modelCatalog", () => this.modelCatalog());
-    rpc.register("session/selectModel", (args) => this.selectModel(args));
-    rpc.register("session/prompt", (args) => this.prompt(args));
-    rpc.register("session/cancel", (args) => this.cancel(args));
-    rpc.register("session/updateQueue", (args) => this.updateQueue(args));
-    rpc.register("session/rename", (args) => this.rename(args));
-    rpc.register("session/fork", (args) => this.forkRequest(args));
-    rpc.register("session/search", (args) => this.search(args));
-    rpc.register("session/page", (args) => this.page(args));
-    rpc.register("session/projections", (args) => this.projections(args));
-    rpc.register("session/workspacePathApplications", () => ({ applications: [] }));
-    rpc.register("session/openWorkspacePath", () => {
-      throw new SessionRuntimeError(
-        "session/open-unavailable",
-        "Opening host paths is not available from the Web UI",
-      );
-    });
-    streams.register("session/follow", (args, sink) => this.follow(args, sink));
-    streams.register("session/control", (args, sink) => this.control(args, sink));
-  }
-
-  registerImport(rpc: RpcRegistry): void {
-    rpc.register("codexhost/importSources", () => this.importSources());
-    rpc.register("codexhost/importCandidates", (args) => this.importCandidatesRequest(args));
-    rpc.register("codexhost/import", (args) => this.importNativeRequest(args));
-  }
-
-  registerCommands(rpc: RpcRegistry): void {
-    rpc.register("commands/list", (args) => this.commandsList(args));
-    rpc.register("commands/execute", (args) => this.commandsExecute(args));
-    rpc.register("permissionPresets/catalog", (args) => this.permissionCatalogRequest(args));
-  }
 }

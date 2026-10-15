@@ -23,11 +23,11 @@ export class WebHarnessDisplaySettings {
   private fingerprint: string | undefined;
 
   constructor(
-    private readonly host: ChHostClient | undefined,
+    private readonly host: ChHostClient,
     private readonly directory: string,
     private readonly events: EventHub,
   ) {
-    this.stop = host?.realtime?.subscribe((event) => {
+    this.stop = host.realtime?.subscribe((event) => {
       if (this.closed) return;
       if (event.type === "display-settings-changed")
         events.emit("codexhost/display-settings-changed");
@@ -40,7 +40,7 @@ export class WebHarnessDisplaySettings {
         this.clearTimer();
       }
     });
-    if (host && !this.support) void this.negotiate().catch(() => {});
+    if (!this.support) void this.negotiate().catch(() => {});
   }
 
   private clearTimer() {
@@ -59,7 +59,6 @@ export class WebHarnessDisplaySettings {
     this.clearTimer();
     this.eventMode = false;
     const operation = (async () => {
-      if (!this.host) return false;
       if (!this.host.realtime) {
         this.legacy(generation);
         return false;
@@ -121,11 +120,6 @@ export class WebHarnessDisplaySettings {
   async get(): Promise<HarnessDisplaySettings> {
     const generation = this.generation;
     this.valid(generation);
-    if (!this.host) {
-      const entries = await readHarnessDisplayEntries(this.directory);
-      this.valid(generation);
-      return { entries };
-    }
     try {
       const value = harnessDisplaySettingsSchema.parse(
         await this.host.request(HARNESS_DISPLAY_GET_METHOD, {}),
@@ -174,11 +168,6 @@ export class WebHarnessDisplaySettings {
       return { events };
     });
     rpc.register("codexhost/display-settings/set", async (args) => {
-      if (!this.host)
-        throw new RpcError(
-          "display-settings/unavailable",
-          "Sorting changes require the shared Host.",
-        );
       const generation = this.generation;
       this.valid(generation);
       const request = harnessDisplaySetSchema.parse(args.request);

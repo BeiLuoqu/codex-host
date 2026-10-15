@@ -194,7 +194,7 @@ export class Workspaces {
     }
   }
 
-  /** Ephemeral view of the native owner's pins. Never overwrite standalone pin records. */
+  /** Ephemeral view of the native owner's pins. Never overwrite legacy local pin records. */
   setReferencePins(ids: readonly string[]): void {
     const next = [...new Set(ids)];
     if (JSON.stringify(next) === JSON.stringify(this.referencePins)) return;

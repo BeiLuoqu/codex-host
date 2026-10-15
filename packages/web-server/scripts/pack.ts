@@ -225,11 +225,13 @@ This launcher removes inherited CODEXHOST_* variables, CODEX_CLI_PATH, NODE_OPTI
 It defaults to every bundled session Harness (including Codex and Pi), listens on 127.0.0.1, keeps authentication enabled,
 and uses ~/.codexhost/web and ~/codexhost-web-preview-workspace.
 Without --data, a custom --ch-data <root> also selects <root>/web.
-Existing legacy data must be migrated offline or selected explicitly; profiles are never merged automatically.
+Old profiles, lock files and migration markers are not inspected or moved. There is no standalone migration or rollback entry.
 No Harness selection is needed; \`--harness <id,...>\` remains an optional advanced subset override.
 Missing CLIs and connection failures are normal unavailable states, not Web startup failures.
 Using a Harness requires an installed/authenticated native CLI; default enablement does not imply full Web capability verification.
 Optional preview flags: --port, --data, --workspace, --harness, --ch-data, --ch-codex-home, --codex-command, --codex-home.
+Startup checks for an existing Host before launching; dynamic-port discovery does not guarantee a strict singleton.
+No profile/home ownership lock or exit proof is used. The existing Mapping Store lock remains.
 Ctrl+C stops Web only. Explicit backend maintenance: native/codexhost host stop --node <absolute-node> --host-runtime <absolute-host-runtime.mjs> --data <absolute-ch-data>.
 Close clients first to prevent their on-demand restart; stopping the backend also stops its tasks.
 Do not launch app/server.mjs directly from a CodexHost-managed session with inherited Desktop settings.
@@ -241,14 +243,13 @@ Codex is never added to the shared Host's enabled.json; GUI native Codex request
 
 Included Harness plugins: ${["codex", ...extraAdapters.map((plugin) => plugin.id)].join(", ")}.
 External plugins load in the canonical Host in shared mode. Codex loads only in the isolated Web execution scope.
-Standalone mode can load explicitly selected external plugins directly from \`adapters/\`.
 Codex Desktop and CodexHost.app are not required for Web external Threads.
 Default plugin input is the build of this checkout, not an installed CodexHost.app.
 The packed server uses only its bundled plugins unless --adapters is supplied.
 Install and authenticate each Harness CLI separately on the server machine.
 \`--adapters\` overrides the plugin directories (comma-separated); it does not install Harness CLIs.
 
-Web data lives in \`~/.codexhost/web\` (settings, access token, push keys, uploaded attachments and explicit standalone sessions).
+Web data lives in \`~/.codexhost/web\` (settings, access token, push keys and uploaded attachments).
 Shared canonical metadata remains in the Host's \`~/.codexhost\` and history remains native to each Harness.
 The default listener is localhost. For phones, use an HTTPS reverse proxy such as Tailscale Serve;
 PWA installation and Web Push need HTTPS. Do not expose \`--no-auth\` to a network.

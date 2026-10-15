@@ -4,12 +4,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeHarnessPluginRoute } from "@codexhost/shared-contracts";
+import { HarnessPreferencesStore } from "@codexhost/harness-plugin-files";
 import { WebHarnessPreferences } from "../src/harness-preferences.ts";
 import { it, type TestContext } from "node:test";
 import { ChSessions } from "../src/ch-sessions.ts";
-import { HarnessRegistry } from "../src/harnesses.ts";
+import { HarnessRegistry } from "./support/harnesses.ts";
 import { MixedSessions } from "../src/mixed-sessions.ts";
-import { Sessions } from "../src/sessions.ts";
+import { Sessions } from "./support/isolated-sessions.ts";
 import { DataDir } from "../src/store.ts";
 import {
   EventHub,
@@ -76,8 +77,23 @@ function setup(t: TestContext, sharedPreferences = false) {
   host.add("gui-official", root, "GUI official Codex").modelProvider = "openai";
   const events = new EventHub(root);
   const workspaces = new Workspaces(data, root, true);
+  const preferenceStore = sharedPreferences
+    ? new HarnessPreferencesStore(join(root, "host"))
+    : undefined;
+  if (preferenceStore) {
+    const request = host.request.bind(host);
+    host.request = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
+      if (method === "codexhost/harness/preferences/get")
+        return preferenceStore.get(params.scope as Parameters<typeof preferenceStore.get>[0]) as T;
+      if (method === "codexhost/harness/preferences/patch")
+        return (await preferenceStore.patch(
+          params as Parameters<typeof preferenceStore.patch>[0],
+        )) as T;
+      return request<T>(method, params);
+    };
+  }
   const preferences = sharedPreferences
-    ? new WebHarnessPreferences(undefined, data, events, join(root, "code-home"))
+    ? new WebHarnessPreferences(host, events, join(root, "code-home"))
     : undefined;
   const harnesses = new HarnessRegistry([plugins], new Set(["codex"]), {
     scope: "web-codex",
@@ -115,6 +131,7 @@ function setup(t: TestContext, sharedPreferences = false) {
     await sessions.close();
     await harnesses.close();
     await preferences?.close();
+    await preferenceStore?.close();
     globalThis.fakeHarnessLog = undefined;
     globalThis.fakeHarnessScripts = undefined;
     rmSync(root, { recursive: true, force: true });

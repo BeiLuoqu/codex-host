@@ -1,9 +1,6 @@
 use super::{publish_status, readiness, wait_for_shutdown};
-use fs2::FileExt;
-use std::fs::OpenOptions;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs, thread};
 
 #[test]
@@ -45,47 +42,16 @@ fn publishes_complete_private_status_before_readiness() {
 }
 
 #[test]
-fn shutdown_requires_supervised_tree_admission_to_be_released() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let root = env::temp_dir().join(format!("codexhost-stop-{}-{nonce}", std::process::id()));
-    fs::create_dir_all(&root).unwrap();
-    let owner = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .open(root.join("shared-host-process.lock"))
-        .unwrap();
-    owner.lock_exclusive().unwrap();
-    assert_eq!(
-        wait_for_shutdown(&root, None, Duration::from_millis(1))
-            .unwrap_err()
-            .to_string(),
-        "Shared Host process tree exit was not confirmed"
-    );
-    FileExt::unlock(&owner).unwrap();
-    wait_for_shutdown(&root, None, Duration::from_secs(1)).unwrap();
-    drop(owner);
-    fs::remove_dir_all(&root).unwrap();
-    wait_for_shutdown(&root, None, Duration::from_secs(1)).unwrap();
+fn shutdown_without_a_running_owner_returns_immediately() {
+    wait_for_shutdown(None, None, Duration::from_millis(1)).unwrap();
 }
 
 #[test]
-fn stalled_shutdown_escalates_only_the_captured_process_instance() {
+fn stalled_shutdown_terminates_the_captured_fixture_process() {
     const TEST: &str =
-        "host_service::tests::stalled_shutdown_escalates_only_the_captured_process_instance";
+        "host_service::tests::stalled_shutdown_terminates_the_captured_fixture_process";
     if let Some(root) = env::var_os("CODEXHOST_STOP_TEST_ROOT") {
-        let root = std::path::PathBuf::from(root);
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(root.join("shared-host-process.lock"))
-            .unwrap();
-        lock.lock_exclusive().unwrap();
-        fs::write(root.join("held"), "held").unwrap();
+        fs::write(std::path::PathBuf::from(root).join("started"), "started").unwrap();
         loop {
             thread::sleep(Duration::from_millis(20));
         }
@@ -105,20 +71,14 @@ fn stalled_shutdown_escalates_only_the_captured_process_instance() {
         .spawn()
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !root.join("held").exists() {
-        assert!(Instant::now() < deadline, "fixture did not hold admission");
+    while !root.join("started").exists() {
+        assert!(Instant::now() < deadline, "fixture did not start");
         assert!(child.try_wait().unwrap().is_none());
         thread::sleep(Duration::from_millis(20));
     }
     let owner = codexhost_platform::process_snapshot(child.id()).unwrap();
-    let mut obsolete = owner.clone();
-    obsolete.started_at_micros += 1;
-    assert!(wait_for_shutdown(&root, Some(&obsolete), Duration::from_millis(2100)).is_err());
-    assert!(
-        child.try_wait().unwrap().is_none(),
-        "must not terminate a reused PID"
-    );
-    wait_for_shutdown(&root, Some(&owner), Duration::from_secs(5)).unwrap();
+    assert!(wait_for_shutdown(Some(&owner), None, Duration::from_millis(1)).is_err());
+    wait_for_shutdown(Some(&owner), None, Duration::from_secs(5)).unwrap();
     assert!(!child.wait().unwrap().success());
     fs::remove_dir_all(root).unwrap();
 }

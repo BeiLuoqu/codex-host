@@ -3,7 +3,7 @@ import type { WebCodexConfiguration, WebCodexRequest } from "@codexhost/shared-c
 import type { LocalOrganizationState } from "@codexhost/session-runtime";
 import type { Workspaces } from "./workspaces.ts";
 import type { ChHostClient } from "./ch-host-client.ts";
-import { HarnessRegistry, type Inspection } from "./harnesses.ts";
+import { HarnessRegistry, type HarnessCatalog, type Inspection } from "./harnesses.ts";
 import { bridgeSessionInteraction, type SessionNotification } from "./sessions.ts";
 import { requestOf } from "./store.ts";
 import { RpcError, type EventHub, type RpcRegistry, type StreamRegistry } from "./transport.ts";
@@ -49,10 +49,7 @@ export class RemoteCodexSessions {
   private dirty = false;
   private needsConfiguration = false;
   notifier: ((notification: SessionNotification) => void) | undefined;
-  readonly harnesses: Pick<
-    HarnessRegistry,
-    "ids" | "manifest" | "iconPath" | "inspect" | "modelCatalog" | "close"
-  >;
+  readonly harnesses: HarnessCatalog;
   private get channel() {
     const channel = this.host.webCodex;
     if (!channel) throw new RpcError("owner/offline", "Isolated owner is disconnected");
@@ -157,10 +154,7 @@ export class RemoteCodexSessions {
         const configure = this.needsConfiguration;
         this.needsConfiguration = false;
         if (configure) {
-          const configuration = { ...this.configuration };
-          delete configuration.migrateSource;
-          delete configuration.legacyWriterStopped;
-          const value = await this.channel.configure(configuration);
+          const value = await this.channel.configure(this.configuration);
           if (value.cursor.epoch !== this.notificationEpoch) {
             this.notificationCursor = value.notificationCursor;
             this.notificationEpoch = value.cursor.epoch;

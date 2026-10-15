@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, readFile, rm, chmod, realpath } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -30,7 +30,7 @@ async function until(check: () => Promise<boolean>) {
 
 for (const first of ["Web", "Desktop"])
   it(
-    `${first}-first native startup is single-owner, survives client exit, and recovers without resending`,
+    `${first}-first startup reuses the running Host, survives client exit, and cleans up on stop`,
     { timeout: 90_000 },
     async (t) => {
       const root = await mkdtemp(path.join(tmpdir(), "codexhost-independent-"));
@@ -127,13 +127,16 @@ for (const first of ["Web", "Desktop"])
         desktopThreadId = result.stdout.trim();
         assert.match(desktopThreadId, /^[0-9a-f-]{36}$/u);
       }
-      // Independent frontends may race or join an owner whose first viewer exited.
-      await Promise.all(
-        [1, 2].map(() => exec(launcher, ["host", "ensure", ...args], { env, timeout: 45_000 })),
-      );
+      await exec(launcher, ["host", "ensure", ...args], { env, timeout: 45_000 });
+      const firstEndpoint = await discoverHostClientChannel(path.join(data, "client-hosts"));
+      await exec(launcher, ["host", "ensure", ...args], { env, timeout: 45_000 });
       const endpoint = await discoverHostClientChannel(path.join(data, "client-hosts"));
       assert.ok(endpoint);
       assert.equal(endpoint.owner, "service");
+      assert.equal(endpoint.pid, firstEndpoint?.pid, "ensure must not restart a running Host");
+      await assert.rejects(readFile(path.join(data, "shared-host-process.lock")), {
+        code: "ENOENT",
+      });
       const connect = async () => {
         const descriptor = await discoverHostClientChannel(path.join(data, "client-hosts"));
         assert.ok(descriptor);
@@ -143,7 +146,7 @@ for (const first of ["Web", "Desktop"])
         return client;
       };
       const web = await connect();
-      // Cold isolated configuration acquires a separate home lock without starting native Codex.
+      // Configure the isolated source without starting native Codex or creating ownership locks.
       const isolatedCommand = path.join(root, "isolated-native-agent");
       const isolatedHome = path.join(root, "isolated-codex-home");
       const isolatedConfiguration = {
@@ -157,11 +160,11 @@ for (const first of ["Web", "Desktop"])
         await chmod(isolatedCommand, 0o700);
         const configured = await web.configureWebCodex(isolatedConfiguration);
         isolatedScope = configured.scope;
-        const lock = JSON.parse(
-          await readFile(path.join(isolatedHome, ".codexhost-source-owner-v1.lock"), "utf8"),
-        );
-        assert.equal(lock.pid, endpoint.pid);
-        assert.match(lock.generation, /^\d+-\d+$/u);
+        for (const file of [
+          path.join(isolatedHome, ".codexhost-source-owner-v1.lock"),
+          path.join(data, "web-codex/source-owner-v1.lock"),
+        ])
+          await assert.rejects(readFile(file), { code: "ENOENT" });
       }
       const desktop = await connectLocalSharedHost({ launcher, runtime, dataDirectory: data });
       t.after(() => desktop.close());
@@ -231,46 +234,35 @@ for (const first of ["Web", "Desktop"])
         pinned: [id],
       });
       for (const client of clients) client.close();
-      // Kill only the verified fixture owner. Rust must retire its process tree before admitting a replacement.
+      // Explicit stop waits for the fixture supervisor's normal child cleanup.
       assert.equal(
         (await discoverHostClientChannel(path.join(data, "client-hosts")))?.epoch,
         endpoint.epoch,
       );
-      process.kill(endpoint.pid, "SIGKILL");
-      await exec(launcher, ["host", "ensure", ...args], { env, timeout: 45_000 });
+      await exec(launcher, ["host", "stop", ...args], { env, timeout: 15_000 });
       if (childInstance) {
         assert.ok(
           await childInstance.hasExited(),
-          "old Harness process instance must exit before the new owner is admitted",
+          "normal stop must clean up the fixture Harness process",
         );
       } else {
         assert.throws(
           () => process.kill(descendant.pid, 0),
-          "old Harness child must exit before the new owner is admitted",
+          "normal stop must clean up the fixture Harness child",
         );
       }
+      await exec(launcher, ["host", "ensure", ...args], { env, timeout: 45_000 });
       const recovered = await connect();
       const newOwner = await discoverHostClientChannel(path.join(data, "client-hosts"));
       assert.ok(newOwner);
       assert.notEqual(newOwner.epoch, endpoint.epoch);
-      const exitProof = JSON.parse(
-        await readFile(path.join(data, "shared-host-exit-v1.json"), "utf8"),
-      );
-      assert.equal(exitProof.pid, endpoint.pid);
-      assert.equal(exitProof.dataRoot, await realpath(data));
+      await assert.rejects(readFile(path.join(data, "shared-host-exit-v1.json")), {
+        code: "ENOENT",
+      });
       if (isolatedScope) {
         const configuration = await recovered.configureWebCodex(isolatedConfiguration);
         assert.equal(configuration.scope, isolatedScope);
         assert.deepEqual(configuration.sessionIds, []);
-        const lock = JSON.parse(
-          await readFile(path.join(isolatedHome, ".codexhost-source-owner-v1.lock"), "utf8"),
-        );
-        assert.equal(
-          lock.pid,
-          newOwner.pid,
-          "exact prior native proof admits the replacement isolated owner",
-        );
-        assert.notEqual(lock.generation, exitProof.generation);
       }
       const list = await recovered.request<{ data: Array<{ id: string }> }>("thread/list", {});
       assert.equal(list.data.filter((thread) => thread.id === id).length, 1);

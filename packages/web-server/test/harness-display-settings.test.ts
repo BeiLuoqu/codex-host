@@ -214,10 +214,12 @@ it("keeps a successfully saved snapshot when the next read fails and rejects ret
   await assert.rejects(entries, /connection changed/);
 });
 
-it("does not publish standalone file reads that finish after disposal", async (t) => {
+it("does not publish legacy Host reads that finish after disposal", async (t) => {
   const f = setup(t);
-  const service = new WebHarnessDisplaySettings(undefined, f.root, new EventHub(f.root));
-  const reading = service.get();
-  service.close();
+  f.host.request = async () => {
+    throw Object.assign(new Error("Unsupported"), { code: -32601 });
+  };
+  const reading = f.service.get();
+  f.service.close();
   await assert.rejects(reading, /connection changed/);
 });

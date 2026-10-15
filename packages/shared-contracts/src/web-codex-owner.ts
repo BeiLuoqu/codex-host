@@ -7,9 +7,6 @@ export const webCodexConfigurationSchema = z
     home: z.string().min(1),
     command: z.string().min(1),
     pluginRoots: z.array(z.string().min(1)).min(1),
-    migrateSource: z.string().min(1).optional(),
-    legacySource: z.string().min(1).optional(),
-    legacyWriterStopped: z.literal(true).optional(),
   })
   .strict();
 export type WebCodexConfiguration = z.infer<typeof webCodexConfigurationSchema>;

@@ -1,8 +1,7 @@
-/** Web preferences use the shared owner RPC; standalone keeps an independent file. */
+/** Web preferences use the shared owner RPC. */
 import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, basename } from "node:path";
-import { HarnessPreferencesStore } from "@codexhost/harness-plugin-files";
 import {
   DEFAULT_IDLE_RELEASE_SETTINGS,
   HARNESS_PREFERENCES_GET_METHOD,
@@ -14,7 +13,6 @@ import {
   type HarnessPreferenceSnapshot,
 } from "@codexhost/shared-contracts";
 import type { ChHostClient } from "./ch-host-client.ts";
-import type { DataDir } from "./store.ts";
 import { type EventHub, type RpcRegistry, RpcError } from "./transport.ts";
 import type { ModelGroup } from "./harnesses.ts";
 
@@ -25,43 +23,23 @@ function canonicalHome(value: string): string {
   return parent === path ? path : join(canonicalHome(parent), basename(path));
 }
 export class WebHarnessPreferences {
-  private readonly store: HarnessPreferencesStore | undefined;
   private readonly codexScope: string | undefined;
   private unsubscribe: (() => void) | undefined;
   private pollTimer: ReturnType<typeof setInterval> | undefined;
   private closed = false;
-  private get localStore() {
-    if (!this.store) throw new Error("Preferences are owned by CH");
-    return this.store;
-  }
   constructor(
-    private readonly host: ChHostClient | undefined,
-    data: DataDir,
+    private readonly host: ChHostClient,
     private readonly events: EventHub,
     codexHome?: string,
   ) {
-    if (!host) this.store = new HarnessPreferencesStore(data.root);
     if (codexHome)
       this.codexScope = `web-codex:${createHash("sha256").update(canonicalHome(codexHome)).digest("hex")}`;
-    if (host?.realtime)
+    if (host.realtime)
       this.unsubscribe = host.realtime.subscribe((event) => {
         if (event.type === "preferences-changed" || event.type === "hello")
           events.emit("codexhost/preferences-changed");
       });
-    else if (this.store)
-      void this.store
-        .subscribe(() => events.emit("codexhost/preferences-changed"))
-        .then((remove) => {
-          if (this.closed) remove();
-          else this.unsubscribe = remove;
-        })
-        .catch(() =>
-          events.emit(
-            "codexhost/preferences-error",
-            "Preference change monitoring is unavailable.",
-          ),
-        );
-    if (host && !host.realtime) {
+    if (!host.realtime) {
       let revision = -1;
       let busy = false;
       this.pollTimer = setInterval(() => {
@@ -90,11 +68,9 @@ export class WebHarnessPreferences {
   }
   async get(harnessId?: string): Promise<HarnessPreferenceSnapshot> {
     const scope = this.scope(harnessId);
-    return this.host
-      ? harnessPreferenceSnapshotSchema.parse(
-          await this.host.request(HARNESS_PREFERENCES_GET_METHOD, { scope }),
-        )
-      : this.localStore.get(scope);
+    return harnessPreferenceSnapshotSchema.parse(
+      await this.host.request(HARNESS_PREFERENCES_GET_METHOD, { scope }),
+    );
   }
   private async patch(
     harnessId: string | undefined,
@@ -102,11 +78,9 @@ export class WebHarnessPreferences {
     initializeOnly = false,
   ) {
     const input = { scope: this.scope(harnessId), operations, initializeOnly };
-    const result = this.host
-      ? harnessPreferenceSnapshotSchema.parse(
-          await this.host.request(HARNESS_PREFERENCES_PATCH_METHOD, input),
-        )
-      : await this.localStore.patch(input);
+    const result = harnessPreferenceSnapshotSchema.parse(
+      await this.host.request(HARNESS_PREFERENCES_PATCH_METHOD, input),
+    );
     this.events.emit("codexhost/preferences-changed");
     return result;
   }
@@ -179,51 +153,17 @@ export class WebHarnessPreferences {
       return { ...catalog, modelFavorites: {}, preferencesAvailable: false };
     }
   }
-  async initialize(legacySelection?: {
-    provider: string;
-    model: string;
-    reasoningEffort?: string;
-  }) {
-    if (legacySelection) {
-      if (legacySelection.provider !== "codex" || this.codexScope) {
-        const operation = harnessPreferenceOperationSchema.parse({
-          kind: "newThread",
-          harnessId: legacySelection.provider,
-          configuration: {
-            model: { id: legacySelection.model },
-            thinkingOptionId: legacySelection.reasoningEffort,
-          },
-        });
-        await this.patch(legacySelection.provider, [operation], true);
-        await this.patch(
-          undefined,
-          [
-            {
-              kind: "newThread",
-              lastHarness: installedHarnessPluginIdSchema.parse(legacySelection.provider),
-            },
-          ],
-          true,
-        );
-      }
-    }
-  }
   register(rpc: RpcRegistry) {
     rpc.register("codexhost/preferences/get", async () => {
       const external = await this.get();
       return {
         idleRelease: external.values.idleRelease ?? DEFAULT_IDLE_RELEASE_SETTINGS,
-        idleReleaseAvailable: Boolean(this.host),
+        idleReleaseAvailable: true,
         revision: external.revision,
       };
     });
     rpc.register("codexhost/preferences/patch", async (args) => {
       const operation = harnessPreferenceOperationSchema.parse(args.operation);
-      if (operation.kind === "idleRelease" && !this.host)
-        throw new RpcError(
-          "preferences/unavailable",
-          "Idle release settings require the shared Host.",
-        );
       const harnessId = "harnessId" in operation ? operation.harnessId : undefined;
       return this.patch(harnessId, [operation]);
     });
@@ -247,6 +187,5 @@ export class WebHarnessPreferences {
     this.closed = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.unsubscribe?.();
-    await this.store?.close();
   }
 }

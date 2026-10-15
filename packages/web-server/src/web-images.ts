@@ -156,27 +156,12 @@ export function readImageFile(path: string): Buffer {
 
 export class WebImages {
   readonly directory: string;
-  private readonly migratedSourceRoot: string | undefined;
-  private readonly dataRoot: string;
   constructor(data: DataDir) {
     const directory = data.path("attachments", "images");
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     if (lstatSync(directory).isSymbolicLink())
       throw new Error("Web image directory must not be a symlink");
     this.directory = realpathSync(directory);
-    this.dataRoot = realpathSync(data.root);
-    const migration = data.readJson<{
-      version?: number;
-      sourceRoot?: string;
-      targetRoot?: string;
-    }>("data-root-migration-v1.json", {});
-    this.migratedSourceRoot =
-      migration.version === 1 &&
-      typeof migration.sourceRoot === "string" &&
-      isAbsolute(migration.sourceRoot) &&
-      migration.targetRoot === this.dataRoot
-        ? migration.sourceRoot
-        : undefined;
     if (/[\u0000-\u001f\u007f]/u.test(this.directory))
       throw new Error("Web image directory cannot contain control characters");
   }
@@ -257,18 +242,6 @@ export class WebImages {
       return undefined;
     const directory = dirname(resolve(path));
     if (directory === this.directory) return `web-image:${basename(path)}`;
-    // Only an explicitly recorded offline move can name this owned image store
-    // through its former root. Read bytes from the canonical store, not the link;
-    // readBytes still checks the immutable content hash and refuses symlink files.
-    const source = this.migratedSourceRoot;
-    if (source && directory === join(source, "attachments", "images")) {
-      try {
-        if (lstatSync(source).isSymbolicLink() && realpathSync(source) === this.dataRoot)
-          return `web-image:${basename(path)}`;
-      } catch {
-        // A removed or retargeted compatibility link is not an owned path.
-      }
-    }
     return undefined;
   }
 

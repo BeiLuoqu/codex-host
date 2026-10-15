@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import type { OwnedSessionDataStore } from "./ownership-lock.js";
+import type { SessionDataStore } from "./contracts.js";
 
 export interface LocalWorkspace {
   workspaceId: string;
@@ -67,7 +67,7 @@ export class LocalSessionOrganization {
   private state: LocalOrganizationState;
   private listeners = new Set<() => void>();
   constructor(
-    private readonly data: Pick<OwnedSessionDataStore, "readJson" | "writeJson">,
+    private readonly data: Pick<SessionDataStore, "readJson" | "writeJson">,
     private readonly owns: (id: string) => boolean,
   ) {
     this.state = validateOrganizationState(

@@ -5,7 +5,6 @@ import { runRemoteControlAppServerBridge } from "./remote-control-app-server.js"
 import { runRemoteHostCli } from "./remote-host-cli.js";
 import { runClaudeAquaHarnessBroker } from "./aqua-harness-broker.js";
 import { installRuntimeLog, runtimeLogPath } from "./runtime-log.js";
-import { runWebCodexRollback } from "./web-codex-rollback.js";
 
 const arguments_ = process.argv.slice(2);
 
@@ -22,14 +21,12 @@ function runLoggedHostRuntime(): Promise<number> {
 }
 
 process.exitCode =
-  arguments_[0] === "--codexhost-web-codex-rollback"
-    ? await runWebCodexRollback(arguments_.slice(1), import.meta.url)
-    : arguments_[0] === "--codexhost-delegation-cli"
-      ? await runDelegationCli({ arguments: arguments_.slice(1), environment: process.env })
-      : arguments_[0] === "--codexhost-harness-broker"
-        ? await runClaudeAquaHarnessBroker(process.env, arguments_[1] ?? "claude-code")
-        : arguments_[0] === "--codexhost-remote"
-          ? await runRemoteHostCli({ arguments: arguments_.slice(1), environment: process.env })
-          : arguments_[0] === "--codexhost-remote-control-bridge"
-            ? await runRemoteControlAppServerBridge()
-            : await runLoggedHostRuntime();
+  arguments_[0] === "--codexhost-delegation-cli"
+    ? await runDelegationCli({ arguments: arguments_.slice(1), environment: process.env })
+    : arguments_[0] === "--codexhost-harness-broker"
+      ? await runClaudeAquaHarnessBroker(process.env, arguments_[1] ?? "claude-code")
+      : arguments_[0] === "--codexhost-remote"
+        ? await runRemoteHostCli({ arguments: arguments_.slice(1), environment: process.env })
+        : arguments_[0] === "--codexhost-remote-control-bridge"
+          ? await runRemoteControlAppServerBridge()
+          : await runLoggedHostRuntime();

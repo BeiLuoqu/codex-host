@@ -5,13 +5,11 @@ import { resolve } from "node:path";
 import { parseArgs, promisify } from "node:util";
 
 import { previewLaunch } from "../src/preview-launch.ts";
-import { assertDefaultWebDataReady } from "../src/data-paths.ts";
 
 const { values } = parseArgs({
   options: {
     "codex-command": { type: "string" },
     "codex-home": { type: "string" },
-    "session-source": { type: "string" },
     "ch-cdp": { type: "string" },
     "ch-control-directory": { type: "string" },
     "ch-launcher": { type: "string" },
@@ -41,16 +39,11 @@ const available = readdirSync(adapters, { withFileTypes: true })
       kind?: string;
     },
   }));
-const requested =
-  values.harness ?? (values["session-source"] === "standalone" ? "claude-code" : "all");
+const requested = values.harness ?? "all";
 const harness =
   requested === "all"
     ? available
-        .filter(
-          ({ manifest }) =>
-            manifest.kind !== "usage" &&
-            !(values["session-source"] === "standalone" && manifest.id === "codex"),
-        )
+        .filter(({ manifest }) => manifest.kind !== "usage")
         .map(({ manifest }) => manifest.id)
         .sort()
         .join(",")
@@ -60,8 +53,6 @@ const launch = previewLaunch(
   { ...values, ...(harness === undefined ? {} : { harness }) },
   process.env,
 );
-if (values.data === undefined && !values["ch-data"] && !values["ch-control-directory"])
-  assertDefaultWebDataReady(launch.args[launch.args.indexOf("--data") + 1] as string);
 const selected = launch.args[launch.args.indexOf("--harness") + 1] as string;
 for (const id of selected.split(",")) {
   if (

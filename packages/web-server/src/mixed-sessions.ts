@@ -2,11 +2,11 @@
 import { readFileSync } from "node:fs";
 import type { ChSessions } from "./ch-sessions.ts";
 import type { ModelSelection } from "./ch-harness-catalog.ts";
-import type { HarnessRegistry, Inspection, HarnessManifest } from "./harnesses.ts";
+import type { HarnessCatalog, Inspection, HarnessManifest } from "./harnesses.ts";
 import { MixedDrafts, type MixedDraft } from "./mixed-drafts.ts";
 import { SourceEndpoints, mergeSessionControls } from "./session-source-endpoints.ts";
 import type { RemoteCodexSessions } from "./remote-codex-sessions.ts";
-import type { Sessions, SessionNotification } from "./sessions.ts";
+import type { SessionNotification } from "./sessions.ts";
 import { requestOf } from "./store.ts";
 import {
   RpcError,
@@ -21,7 +21,7 @@ import { withHarnessDisplayOrder } from "./harness-display-order.ts";
 import type { WebHarnessPreferences } from "./harness-preferences.ts";
 
 type Source = "shared" | "local";
-type Catalog = Awaited<ReturnType<HarnessRegistry["modelCatalog"]>>;
+type Catalog = Awaited<ReturnType<HarnessCatalog["modelCatalog"]>>;
 type Row = { sessionId: string; updatedAt?: number };
 
 function addressedSession(args: Record<string, unknown>): string | undefined {
@@ -77,23 +77,14 @@ export class MixedSessions {
 
   constructor(
     private readonly shared: ChSessions,
-    private readonly local:
-      | Pick<
-          Sessions,
-          | "register"
-          | "registerCommands"
-          | "registerImport"
-          | "owns"
-          | "ids"
-          | "prepareDraft"
-          | "close"
-          | "notifier"
-        >
-      | RemoteCodexSessions,
-    private readonly localHarnesses: Pick<
-      HarnessRegistry,
-      "ids" | "manifest" | "iconPath" | "inspect" | "modelCatalog" | "close"
-    >,
+    private readonly local: Pick<
+      RemoteCodexSessions,
+      "register" | "owns" | "ids" | "prepareDraft" | "close" | "notifier"
+    > & {
+      registerCommands(rpc: RpcRegistry): void;
+      registerImport(rpc: RpcRegistry): void;
+    },
+    private readonly localHarnesses: HarnessCatalog,
     private readonly workspaces: Workspaces,
     private readonly events: EventHub,
   ) {

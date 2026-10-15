@@ -1,7 +1,7 @@
 {
   "name": "@codexhost/web-server",
   "version": "0.0.0",
-  "description": "Independent Web Host using the repository's Harness plugins",
+  "description": "Web gateway for the shared CodexHost service",
   "private": true,
   "type": "module",
   "license": "LGPL-3.0-only",
@@ -16,8 +16,6 @@
   },
   "dependencies": {
     "@codexhost/desktop-control": "0.0.0",
-    "@codexhost/harness-adapter": "0.0.0",
-    "@codexhost/harness-plugin-files": "0.0.0",
     "@codexhost/session-runtime": "0.0.0",
     "@codexhost/shared-contracts": "0.0.0",
     "image-size": "2.0.2",
@@ -27,6 +25,8 @@
   },
   "devDependencies": {
     "@codexhost/adapter-codex": "0.0.0",
+    "@codexhost/harness-adapter": "0.0.0",
+    "@codexhost/harness-plugin-files": "0.0.0",
     "@codexhost/host-runtime": "0.0.0",
     "@types/ws": "8.18.1",
     "esbuild": "0.28.1",

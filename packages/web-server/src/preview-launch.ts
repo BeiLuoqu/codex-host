@@ -12,7 +12,6 @@ export interface PreviewOptions {
   data?: string;
   workspace?: string;
   harness?: string;
-  "session-source"?: string;
   "ch-cdp"?: string;
   "ch-control-directory"?: string;
   "ch-launcher"?: string;
@@ -56,8 +55,6 @@ export function previewLaunch(
     env,
     args: [
       resolve(distribution, "app/server.mjs"),
-      "--session-source",
-      options["session-source"] ?? "codexhost",
       ...(["codex-command", "codex-home"] as const).flatMap((key) =>
         options[key] ? [`--${key}`, options[key] as string] : [],
       ),

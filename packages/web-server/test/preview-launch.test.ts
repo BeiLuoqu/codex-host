@@ -1,7 +1,7 @@
 /** Preview process isolation without executing any real Harness or Desktop entry point. */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
@@ -106,6 +106,33 @@ it("rejects empty ids and unsafe selection syntax before spawning", () => {
   for (const harness of ["", "claude-code,", "../other", "--no-auth", "PI"]) {
     assert.throws(() => previewLaunch("/packed", { harness }, {}), /not allowed/u);
   }
+});
+
+it("rejects standalone at both Web entry points before creating a profile", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "codexhost-no-standalone-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const entry of ["src/main.ts", "scripts/preview.ts"]) {
+    await assert.rejects(
+      exec(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          entry,
+          "--session-source",
+          "standalone",
+          "--data",
+          join(root, "profile"),
+        ],
+        {
+          cwd: resolve(import.meta.dirname, ".."),
+          timeout: 10_000,
+        },
+      ),
+      /Unknown.*session-source/u,
+    );
+  }
+  assert.equal(existsSync(join(root, "profile")), false);
 });
 
 it("passes only isolated settings to the actual child process", async (t) => {
