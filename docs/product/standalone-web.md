@@ -14,13 +14,23 @@ Web 与 Codex Desktop 在同一仓库开发，浏览器通过 `packages/web-serv
 npm ci
 npm run build:web
 npm run start:web
-# 3180 已有旧 Web 服务时，不重启 Desktop；改用另一端口：
-npm run start:web -- --port 3181
+# 4400 已有旧 Web 服务时，不重启 Desktop；改用另一端口：
+npm run start:web -- --port 4401
 ```
 
 `build:web` 编译当前工作树的 CH 包并调用已有插件构建器，构建原生 Launcher，随后编译前端和打包。插件输入为 `packages/host-runtime/dist/plugins`，不是已安装的 CH.app 或另一个仓库。用量统计专用插件不作为聊天 Harness；Web 另行打包同仓库的 Codex Adapter。
 
 发行目录为 `packages/web-server/dist/codexhost-web`，包含 Node 网关、Web 界面、同一 Host bundle、当前平台的原生 Launcher 和自包含插件；会话与用量插件在后台显式启用，Codex Adapter 仅由显式启用的 Web 执行作用域加载，不进入共享 Host 的 external 注册表。整体目录可以移动到仓库外运行，无需源码目录或仓库的 node_modules，但原生 Launcher 不能跨 OS/CPU 使用。默认共享模式也不要求 Desktop 运行：Web、Desktop 均可独立使用，同时开启时共享后台，晚开启的一端读取最新事实；关闭任意界面不停止另一端或后台任务。需要本机受支持的 Node，Harness CLI 和其认证仍由用户安装、配置。
+
+## Web 数据目录
+
+Web 默认端口为 **4400**，控制台仍为 **4399**。Web 网关自有数据默认位于 `~/.codexhost/web/`，源码入口与打包预览使用相同默认值；指定 `--ch-data <root>` 或 `--ch-control-directory <root>/client-hosts` 时，默认跟随为 `<root>/web`。显式 `--data`（直接 server 入口也支持 `CODEXHOST_WEB_DATA`）仍可选择独立目录，不修改 Host 的 Mapping Store 位置。
+
+该目录包含访问令牌、设置、Push 密钥/订阅、上传附件及 standalone 自有记录。隔离 Web Codex home 默认沿用 `<web-data>/codex-home`，即 `~/.codexhost/web/codex-home`；shared Codex 元数据仍在 `~/.codexhost/web-codex`。用户项目代码、GUI 官方 Codex home 与其他 Harness 的原生数据保持原位。
+
+本版本不会自动合并旧 `~/.codexhost-web-preview` 与 `~/.codexhost-web`。默认目标尚不存在且检测到旧目录时，启动明确报错要求离线迁移或显式选择 `--data`，避免静默创建空配置。已存在目标为默认权威；多份旧 profile 必须分开保留，不混合令牌、Push 密钥或历史。迁移需要停止使用源目录的网关；已有隔离 Codex home/会话还需独立处理 canonical home 及后台所有权，不能仅移动目录。
+
+离线迁移可保留旧根目录到新根目录的兼容链接，以维持原生历史中的附件绝对路径；实际字节仅存于新目录。仅有链接不会放宽图片读取限制：新目录中的 `data-root-migration-v1.json` 必须记录 `version: 1`、绝对 `sourceRoot` 与 canonical `targetRoot`，旧根链接还必须实际指向当前数据目录。只有该 profile 自有、内容寻址的图片可通过旧路径识别并从新目录校验读取；其他符号链接仍拒绝。未发送上传回执不跨网关重启恢复。备份该目录含敏感令牌和密钥，应离线停写并安全保存；只备份 codexhost 目录不等于备份全部原生会话或项目。
 
 ## GUI / Web 共享偏好
 
@@ -203,7 +213,7 @@ Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 
 
 ## 并发运行与预览
 
-`start:web` 固定监听 localhost 并保留访问令牌认证，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。独立模式通过 `--session-source standalone` 显式选择；其预览默认只启用 Claude Code。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost-web-preview`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认仅 Claude Code；`npm run start:web -- --harness all` 启用本发行包除 Codex、Pi 和用量统计专用插件外的所有会话插件。显式选择 Pi、缺失插件或用量统计插件会在启动前报错；Codex 通过上述显式配置启用。
+`start:web` 固定监听 localhost 并保留访问令牌认证，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。独立模式通过 `--session-source standalone` 显式选择；其预览默认只启用 Claude Code。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost/web/`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认仅 Claude Code；`npm run start:web -- --harness all` 启用本发行包除 Codex、Pi 和用量统计专用插件外的所有会话插件。显式选择 Pi、缺失插件或用量统计插件会在启动前报错；Codex 通过上述显式配置启用。
 
 启用插件不等于机器已安装、认证对应 CLI，也不等于所有能力已完成 Web 验收。模型菜单只列检查就绪的 Harness；未安装的不会列为可用，检查失败由目录接口报告。Pi 的独立启动入口仍未验证，隔离预览拒绝启用；Codex 的加载/路由及隔离由假原生协议和浏览器回归覆盖，真实模型与高级能力仍需专项验收；其他插件所需的可选 Host 上下文以及完整界面能力也需逐项验收。不要从 CH 承载的 Agent 会话直接启动继承原环境的 `server.mjs`，也不要把 Desktop 的环境变量恢复到预览进程。
 

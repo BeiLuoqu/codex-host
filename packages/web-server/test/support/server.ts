@@ -21,6 +21,8 @@ export async function startServer(
   args: string[],
   options: {
     authenticated?: boolean;
+    /** Exercise the entry point's default rather than supplying a temporary --data. */
+    useDefaultData?: boolean;
     environment?: NodeJS.ProcessEnv;
     onSpawn?: (child: ChildProcess) => void;
   } = {},
@@ -40,8 +42,7 @@ export async function startServer(
       "127.0.0.1",
       "--port",
       "0",
-      "--data",
-      data,
+      ...(options.useDefaultData ? [] : ["--data", data]),
       "--workspace",
       join(data, "workspace"),
       ...(options.authenticated ? [] : ["--no-auth"]),

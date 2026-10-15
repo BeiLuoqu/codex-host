@@ -222,7 +222,9 @@ Recovery reconnects and reloads history; it does not resend uncertain commands.
 For an authenticated localhost preview, use \`node preview.mjs\` (requires bundled Claude Code).
 This launcher removes inherited CODEXHOST_* variables, CODEX_CLI_PATH, NODE_OPTIONS and NODE_PATH from the server environment.
 It defaults to Claude Code, listens on 127.0.0.1, keeps authentication enabled,
-and uses ~/.codexhost-web-preview and ~/codexhost-web-preview-workspace.
+and uses ~/.codexhost/web and ~/codexhost-web-preview-workspace.
+Without --data, a custom --ch-data <root> also selects <root>/web.
+Existing legacy profiles must be migrated offline or selected explicitly; they are never merged automatically.
 Use \`--harness all\` for every bundled session plugin except Codex/Pi, or \`--harness <id,...>\` for a subset.
 Selection requires installed/authenticated native CLIs and does not imply full Web capability verification.
 Optional preview flags: --port, --data, --workspace, --harness, --ch-data, --ch-codex-home, --codex-command, --codex-home.
@@ -246,7 +248,7 @@ The packed server uses only its bundled plugins unless --adapters is supplied.
 Install and authenticate each Harness CLI separately on the server machine.
 \`--adapters\` overrides the plugin directories (comma-separated); it does not install Harness CLIs.
 
-Web data lives in \`~/.codexhost-web\` (settings, access token, push keys and explicit standalone sessions).
+Web data lives in \`~/.codexhost/web\` (settings, access token, push keys, attachments and explicit standalone sessions).
 Shared canonical metadata remains in the Host's \`~/.codexhost\` and history remains native to each Harness.
 The default listener is localhost. For phones, use an HTTPS reverse proxy such as Tailscale Serve;
 PWA installation and Web Push need HTTPS. Do not expose \`--no-auth\` to a network.

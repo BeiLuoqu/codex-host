@@ -1,6 +1,7 @@
 /** Isolated, localhost-only preview of the packed Web application. */
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { defaultWebDataDirectory } from "./data-paths.ts";
 
 /** Never auto-enable these with `--harness all`; Codex needs explicit native CLI setup. */
 export const PREVIEW_EXCLUDED_HARNESSES: readonly string[] = ["codex", "pi"];
@@ -77,13 +78,21 @@ export function previewLaunch(
       "--host",
       "127.0.0.1",
       "--port",
-      options.port ?? "3180",
+      options.port ?? "4400",
       "--adapters",
       resolve(distribution, "adapters"),
       "--harness",
       harnesses.join(","),
       "--data",
-      resolve(options.data ?? join(homedir(), ".codexhost-web-preview")),
+      resolve(
+        options.data ??
+          defaultWebDataDirectory(
+            options["ch-data"] ??
+              (options["ch-control-directory"]
+                ? dirname(resolve(options["ch-control-directory"]))
+                : undefined),
+          ),
+      ),
       "--workspace",
       resolve(options.workspace ?? join(homedir(), "codexhost-web-preview-workspace")),
     ],

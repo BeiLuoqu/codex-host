@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { PREVIEW_EXCLUDED_HARNESSES, previewLaunch } from "../src/preview-launch.ts";
+import { assertDefaultWebDataReady } from "../src/data-paths.ts";
 
 const { values } = parseArgs({
   options: {
@@ -55,6 +56,8 @@ const launch = previewLaunch(
   { ...values, ...(harness === undefined ? {} : { harness }) },
   process.env,
 );
+if (values.data === undefined && !values["ch-data"] && !values["ch-control-directory"])
+  assertDefaultWebDataReady(launch.args[launch.args.indexOf("--data") + 1] as string);
 const selected = launch.args[launch.args.indexOf("--harness") + 1] as string;
 for (const id of selected.split(",")) {
   if (
