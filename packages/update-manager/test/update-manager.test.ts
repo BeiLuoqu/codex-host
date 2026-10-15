@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import { createHash } from "node:crypto";
 import type { PathLike } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -47,9 +46,21 @@ async function temporaryDirectory(): Promise<string> {
   return root;
 }
 
+/** Fake Updaters stay alive like the real one; stop them before their files are removed. */
+const updaters: ChildProcess[] = [];
+
+function stopUpdater(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    child.once("exit", () => resolve());
+    child.kill();
+  });
+}
+
 afterEach(async () => {
   renameFixture.attempts = 0;
   renameFixture.remainingFailures = 0;
+  await Promise.all(updaters.splice(0).map(stopUpdater));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -95,7 +106,6 @@ describe("background update manager", () => {
       await mkdir(path.dirname(filePath), { recursive: true });
       await writeFile(filePath, "fixture\n");
     }
-    let updater: ChildProcess | undefined;
     const manager = createBackgroundUpdateManager({
       platform: "darwin",
       randomId: () => "npm-fixture",
@@ -106,21 +116,29 @@ describe("background update manager", () => {
           `
           const fs = require("node:fs");
           const request = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          setTimeout(() => {
-            const status = JSON.parse(fs.readFileSync(request.status_path, "utf8"));
-            // Match the real updater: readers see either complete status, never a truncated file.
-            const temporary = request.status_path + ".ready.tmp";
-            fs.writeFileSync(temporary, JSON.stringify({ ...status, phase: "waiting-for-exit" }));
-            fs.renameSync(temporary, request.status_path);
-          }, 150);
-          // The real updater stays alive while waiting for its owner. Let the
-          // test stop this fixture after handoff instead of racing a 500ms exit.
-          setInterval(() => {}, 1000);
+          const temporary = request.status_path + ".ready.tmp";
+          // Match the real updater: readers see either complete status, never a truncated file,
+          // and Windows sharing violations while the owner polls the status are retried.
+          const handOff = (attempt) => {
+            try {
+              const status = JSON.parse(fs.readFileSync(request.status_path, "utf8"));
+              fs.writeFileSync(temporary, JSON.stringify({ ...status, phase: "waiting-for-exit" }));
+              fs.renameSync(temporary, request.status_path);
+            } catch (error) {
+              if (attempt >= 250 || !["EPERM", "EACCES", "EBUSY"].includes(error.code)) throw error;
+              setTimeout(() => handOff(attempt + 1), 20);
+            }
+          };
+          setTimeout(() => handOff(0), 150);
+          // Like the real updater, stay alive after the handoff (it waits for the owner to exit).
+          // The test stops it; a closed stdin means the test worker itself went away.
+          process.stdin.on("end", () => process.exit(0));
+          process.stdin.resume();
         `,
           executable,
           requestPath,
         ]);
-        updater = child;
+        updaters.push(child);
         return child;
       },
     });
@@ -158,20 +176,12 @@ describe("background update manager", () => {
       updatedAt: 1_700_000_000,
     });
 
-    try {
-      const started = await manager.start(prepared);
-      expect(started.updaterPid).toBeTypeOf("number");
-      await expect(manager.readStatus(prepared.statusPath)).resolves.toMatchObject({
-        phase: "waiting-for-exit",
-      });
-      await expect(async () => manager.start(prepared)).rejects.toThrow("already started");
-    } finally {
-      if (updater?.pid && updater.exitCode === null && updater.signalCode === null) {
-        const exited = once(updater, "exit");
-        updater.kill();
-        await exited;
-      }
-    }
+    const started = await manager.start(prepared);
+    expect(started.updaterPid).toBeTypeOf("number");
+    await expect(manager.readStatus(prepared.statusPath)).resolves.toMatchObject({
+      phase: "waiting-for-exit",
+    });
+    await expect(async () => manager.start(prepared)).rejects.toThrow("already started");
   });
 
   it.skipIf(process.platform !== "win32")(
