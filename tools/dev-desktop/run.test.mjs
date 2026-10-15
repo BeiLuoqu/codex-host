@@ -61,6 +61,39 @@ afterEach(() => {
 });
 
 describe("development Desktop start", () => {
+  it.each([0, 7])(
+    "routes web to the preview without Desktop cleanup or build (exit %s)",
+    async (code) => {
+      const root = temporaryDirectory();
+      const nodePath = path.join(root, "node");
+      const environment = { PATH: "/fixture/bin" };
+      const spawnImplementation = vi.fn(() => exitingChild(code));
+      expect(
+        await runDevelopmentDesktop({
+          arguments_: ["web", "--port", "3181", "--session-source", "standalone"],
+          root,
+          nodePath,
+          platform: "darwin",
+          environment,
+          spawnImplementation,
+        }),
+      ).toBe(code);
+      expect(spawnImplementation).toHaveBeenCalledExactlyOnceWith(
+        nodePath,
+        [
+          "--import",
+          "tsx",
+          path.join(root, "packages/web-server/scripts/preview.ts"),
+          "--port",
+          "3181",
+          "--session-source",
+          "standalone",
+        ],
+        expect.objectContaining({ cwd: root, env: environment, stdio: "inherit" }),
+      );
+    },
+  );
+
   it("parses the default and bounded options", () => {
     expect(parseArguments([])).toEqual({ build: true, help: false });
     expect(parseArguments(["--no-build"])).toEqual({
@@ -211,7 +244,9 @@ describe("development Desktop start", () => {
     expect(windowsScript).toContain("Get-CimInstance Win32_Process");
     expect(windowsScript).toContain("\\windowsapps\\openai.codex_");
     expect(windowsScript).toContain("Stop-Process -Id");
-    expect(windowsScript).toContain("'codexhost', 'codexhost-shim'");
+    expect(windowsScript).not.toContain("Get-Process -Name");
+    expect(windowsScript).not.toContain("Stop-Process -Name");
+    expect(windowsScript).not.toContain("$runtimeProcessIds");
 
     const macOsInvocation = runningDesktopCleanupInvocation("darwin");
     expect(macOsInvocation?.command).toBe("/bin/sh");
@@ -228,6 +263,8 @@ describe("development Desktop start", () => {
     expect(macOsScript).toContain("packages/desktop-control/dist/release-main.js");
     expect(macOsScript).toContain("kill -TERM");
     expect(macOsScript).toContain("pkill -KILL");
+    expect(macOsScript).not.toContain("pgrep -x codexhost");
+    expect(macOsScript).not.toContain("pkill -KILL -x codexhost");
     expect(runningDesktopCleanupInvocation("linux")).toBeNull();
   });
 

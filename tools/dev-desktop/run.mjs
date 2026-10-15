@@ -50,27 +50,8 @@ if ($remainingDesktopProcesses.Count -ne 0) {
   throw 'Codex Desktop did not exit before timeout.'
 }
 
-$graceDeadline = [DateTime]::UtcNow.AddSeconds(2)
-do {
-  $runtimeProcesses = @(Get-Process -Name 'codexhost', 'codexhost-shim' -ErrorAction SilentlyContinue)
-  if ($runtimeProcesses.Count -eq 0) {
-    break
-  }
-  if ([DateTime]::UtcNow -ge $graceDeadline) {
-    $runtimeProcessIds = @($runtimeProcesses | ForEach-Object { [int]$_.Id })
-    Stop-Process -Id $runtimeProcessIds -Force -ErrorAction SilentlyContinue
-    Wait-Process -Id $runtimeProcessIds -Timeout 10 -ErrorAction SilentlyContinue
-    break
-  }
-  Start-Sleep -Milliseconds 50
-} while ($true)
-
-$remainingRuntimeProcesses = @(
-  Get-Process -Name 'codexhost', 'codexhost-shim' -ErrorAction SilentlyContinue
-)
-if ($remainingRuntimeProcesses.Count -ne 0) {
-  throw 'The previous codexhost runtime did not exit before timeout.'
-}
+# The native Desktop Launcher owns cleanup of its process tree. Do not stop
+# codexhost by name: an independent shared Host may own running Web tasks.
 
 Write-Output "codexhost dev: stopped $($desktopProcessIds.Count) Codex Desktop process(es)"
 `;
@@ -128,10 +109,11 @@ controller_pid() {
   esac
 }
 
+# The native Launcher cleans its Desktop tree while preserving transferred
+# independent services. Only the verified Desktop Controller is ours to stop;
+# never kill codexhost by name, since Web may already own a shared Host.
 runtime_running() {
-  /usr/bin/pgrep -x codexhost >/dev/null 2>&1 ||
-    /usr/bin/pgrep -x codexhost-shim >/dev/null 2>&1 ||
-    [ -n "$(controller_pid)" ]
+  [ -n "$(controller_pid)" ]
 }
 
 controller="$(controller_pid)"
@@ -149,8 +131,6 @@ if runtime_running; then
   if [ -n "$controller" ]; then
     /bin/kill -KILL "$controller" >/dev/null 2>&1 || true
   fi
-  /usr/bin/pkill -KILL -x codexhost >/dev/null 2>&1 || true
-  /usr/bin/pkill -KILL -x codexhost-shim >/dev/null 2>&1 || true
 fi
 
 attempt=0
@@ -168,8 +148,10 @@ echo 'codexhost dev: stopped the running Codex Desktop'
 
 export function usage() {
   return `usage: npm start [version] [-- --no-build]
+       npm start web [-- --port 3181]
 
 Stop any running Codex Desktop, then build and run the current codexhost worktree.
+The web subcommand starts the built Web preview without stopping Desktop.
 
 arguments:
   version            set the runtime version, e.g. npm start 0.12.0
@@ -407,6 +389,24 @@ export async function runDevelopmentDesktop({
   nodePath = process.execPath,
   spawnImplementation = spawn,
 } = {}) {
+  if (arguments_[0] === "web") {
+    const result = await runChild(
+      {
+        command: nodePath,
+        arguments: [
+          "--import",
+          "tsx",
+          path.join(root, "packages/web-server/scripts/preview.ts"),
+          ...arguments_.slice(1),
+        ],
+      },
+      root,
+      spawnImplementation,
+      environment,
+    );
+    return result.code ?? 1;
+  }
+
   const options = parseArguments(arguments_);
   if (options.help) {
     console.log(usage());
