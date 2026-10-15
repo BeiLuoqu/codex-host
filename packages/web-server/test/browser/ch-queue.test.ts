@@ -9,11 +9,12 @@ import { FakeChChannel, startFakeChChannel } from "../support/ch-channel.ts";
 import { startFakeChDebugger } from "../support/ch-host.ts";
 import { startServer } from "../support/server.ts";
 
-for (const reconnect of [false, true])
+for (const scenario of ["delete", "reconnect", "auto-send"] as const)
   it(
-    `removes GUI queued messages without another transcript event (reconnect: ${reconnect})`,
+    `removes queued messages from the open Thread (${scenario})`,
     { timeout: 30_000 },
     async (t) => {
+      const reconnect = scenario === "reconnect";
       const directory = mkdtempSync(join(tmpdir(), "ch-browser-queue-"));
       t.after(() => rmSync(directory, { recursive: true, force: true }));
       const host = new FakeChChannel();
@@ -22,6 +23,28 @@ for (const reconnect of [false, true])
       let queue: ClientThreadSnapshot["queue"] = { items: [], pausedReason: null };
       const snapshot = host.snapshot.bind(host);
       host.snapshot = async (id) => ({ ...(await snapshot(id)), queue: structuredClone(queue) });
+      const request = host.request.bind(host);
+      host.request = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
+        if (scenario === "auto-send" && method === "turn/start") {
+          assert.equal(params.delivery, "queue");
+          queue = {
+            pausedReason: null,
+            items: [
+              {
+                id: "queued-id",
+                clientUserMessageId: String(params.clientUserMessageId),
+                input: params.input as NonNullable<
+                  ClientThreadSnapshot["queue"]
+                >["items"][number]["input"],
+                presentationInput: null,
+              },
+            ],
+          };
+          host.changed(row.id, "codexhost/thread/queue/updated");
+          return { queued: true, queuedSubmission: queue.items[0] } as T;
+        }
+        return request<T>(method, params);
+      };
       const debuggerServer = await startFakeChDebugger(host);
       t.after(() => debuggerServer.close());
       const channel = await startFakeChChannel(host, directory);
@@ -62,7 +85,9 @@ for (const reconnect of [false, true])
         .click();
       await page.getByRole("treeitem").filter({ hasText: "Queue synchronization" }).click();
       await page.getByText("existing CH answer", { exact: true }).waitFor();
-      const prompt = page.getByText("Queued from GUI", { exact: true });
+      const prompt = page
+        .locator("[data-queue-dock]")
+        .getByText("Queued from GUI", { exact: true });
       queue = {
         pausedReason: null,
         items: [
@@ -74,14 +99,39 @@ for (const reconnect of [false, true])
           },
         ],
       };
-      host.changed(row.id, "codexhost/thread/queue/updated");
+      if (scenario === "auto-send") {
+        queue = { items: [], pausedReason: null };
+        await page.locator('[contenteditable="true"]').fill("Queued from GUI");
+        await page.getByRole("button", { name: "Queue message", exact: true }).click();
+      } else {
+        host.changed(row.id, "codexhost/thread/queue/updated");
+      }
       await prompt.waitFor({ timeout: 3000 });
+      await page
+        .locator('[data-queue-dock] button[aria-label="Remove queued message"]:enabled')
+        .waitFor();
       if (process.env.CODEXHOST_TEST_SCREENSHOTS)
         await page.screenshot({
           path: join(process.env.CODEXHOST_TEST_SCREENSHOTS, "queue-added.png"),
         });
       if (reconnect) await page.context().setOffline(true);
+      const clientId = queue.items[0]?.clientUserMessageId;
       queue = { items: [], pausedReason: null };
+      if (scenario === "auto-send") {
+        row.turns.push({
+          id: "automatically-started",
+          status: "inProgress",
+          items: [
+            {
+              id: "queued-user",
+              type: "userMessage",
+              clientId,
+              content: [{ type: "text", text: "Queued from GUI" }],
+            },
+            { id: "queued-answer", type: "agentMessage", text: "Reply to queued message" },
+          ],
+        });
+      }
       host.changed(row.id, "codexhost/thread/queue/updated");
       if (reconnect) {
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -89,6 +139,8 @@ for (const reconnect of [false, true])
         await page.getByText(/^Reconnecting/u).waitFor({ state: "hidden", timeout: 10_000 });
       }
       await prompt.waitFor({ state: "hidden", timeout: 5000 });
+      if (scenario === "auto-send")
+        await page.getByText("Reply to queued message", { exact: true }).waitFor();
       // Clearing projections during reconnect is not proof the live stream
       // recovered. Require another add/delete round trip on that same page.
       queue = {

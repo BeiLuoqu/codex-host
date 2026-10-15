@@ -1025,7 +1025,9 @@ export class ChSessions {
       }
       const unfollow = this.realtime?.follow(this.id(request.address.sessionId));
       sink.onClose(() => unfollow?.());
-      const view = await this.view(request.address.sessionId, true);
+      // A read started before follow can miss changes made before subscription.
+      // Reconcile after that read instead of adopting its potentially stale queue.
+      const view = await this.view(request.address.sessionId, !this.realtime);
       // Reopening a Thread must not retain a snapshot that went stale while it
       // had no realtime follower. The initial open already has a read in flight.
       if (this.usageReadAt.has(view.thread.id) && !this.loadingUsage.has(view.thread.id))
