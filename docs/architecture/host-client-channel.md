@@ -29,6 +29,14 @@ Web / App → Web 网关 → 客户端通道 ───────────�
 
 既有 GUI 项目归属由后台只读读取 `CODEX_HOME/.codex-global-state.json`；没有文件时 GUI 集合为空，损坏文件明确失败，不写原生文件。`codexhost/workspace/read` 只投影 canonical external IDs，并合并唯一 Mapping Store 中明确记录的项目/无项目事实；生成的执行目录不凭 cwd 匹配变成项目。置顶写入仍走 Desktop 的原生服务，未接入 headless 置顶操作；保存的置顶读取不等于所有 Desktop 版本的实时分区状态。远程 SSH 的原有执行所有权保持原样，公开客户端通道仍只支持本地 external Threads；移动后台推送不是此改造的能力。
 
+## 隔离 Web Codex 来源
+
+显式启用的单个 Web Codex 配置由同一 shared Host 中的独立 `IsolatedSessions` owner 拥有。`session-runtime` 提供现有隔离运行/恢复和持久 journal，Web gateway 不加载该执行 Adapter 或保存第二份可写会话；explicit standalone 复用同实现。external AppServerHost/MappingStore保持原边界，GUI native Codex仍使用official route。官方项目文件保持只读，external官方pin写仍依赖Desktop；Host仅保存Web自建workspace及隔离local pin/archive。
+
+隔离来源使用Host-private的配置、受限操作及follow/control通道，并携epoch和服务端返回的home散列scope。配置不注册为浏览器RPC；所有会话操作检查已配置scope/identity，不能传home/nativeRef改变执行身份。客户端通道增加 `web-codex-changed` 失效通知，继续使用既有epoch/cursor/reset机制；它不是可追加token，也不构成另一份durable journal。网关重连核对列表和待处理交互，原生交互仍由唯一owner仲裁，迟到epoch回答不生效。隔离 owner 按 Session/requestId 保留最多256个进程内提交回执；多个 gateway 的相同输入复用结果，冲突输入拒绝，淘汰或重启后不保证exactly-once。
+
+停止gateway不停止shared隔离执行；Push依赖gateway存活。profile/home准入锁防止codexhost并发owner，但不控制用户手动CLI。native close未确认时不释放锁；崩溃后不能仅依据Node PID消失接管home，Rust清理旧受监管树后发布私有退出证明；Node验证记录与旧锁的PID、supervisor generation及canonical owner root匹配后才恢复，浏览器配置不能传入自认证证明。结果未知的写入不自动重发，也不保证跨重启exactly-once。迁移commit封存旧源以阻止新版writer重开；旧无锁二进制仍须显式停用。离线维护入口先原生stop、再校验退出/锁与无新mutation，成功后解封源并封存目标配置。单源迁移的显式确认、完整格式、路径保留与回滚限制见[独立Web](../product/standalone-web.md#显式迁移一个旧-web-codex-来源)。
+
 ## 认证与传输
 
 Host 只监听 `127.0.0.1`，使用随机 Bearer token，拒绝带 Origin 的直接浏览器请求。私有描述文件位于 `$CODEXHOST_DATA_DIR/client-hosts`，默认 `~/.codexhost/client-hosts`，文件权限为 `0600`；PID 和 epoch 区分不同实例。发现时验证存活 PID、文件类型、大小和 Unix 所有者/权限，并通过打开的文件句柄校验，拒绝符号链接。描述文件不是会话索引。
