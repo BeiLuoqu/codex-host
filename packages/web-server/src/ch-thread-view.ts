@@ -19,6 +19,9 @@ export interface ChTurn {
   id: string;
   status: string;
   items: ChItem[];
+  /** Native Turn boundaries in Unix seconds. */
+  startedAt?: number | null;
+  completedAt?: number | null;
   error?: { message?: string | undefined } | null | undefined;
 }
 export interface ChThread {
@@ -101,6 +104,11 @@ function itemOf(item: ChItem, reasoningPreviewIds: ReadonlySet<string>): HostIte
     default:
       return undefined;
   }
+}
+function nativeTime(seconds: number | null | undefined): number | undefined {
+  return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0
+    ? seconds * 1000
+    : undefined;
 }
 function finished(status: string): boolean {
   return status !== "inProgress" && status !== "running";
@@ -229,11 +237,30 @@ export class ChThreadView {
       blank: thread.turns.length === 0,
       lastPromptAt: thread.updatedAt * 1000,
     });
+    try {
+      this.projectTurns(thread);
+    } finally {
+      this.log.clock = undefined;
+    }
+    this.log.setProjection("codexhostToolOutput", Object.fromEntries(this.liveOutput));
+  }
+
+  private projectTurns(thread: ChThread): void {
+    let previousEnd = thread.createdAt * 1000;
     for (const turn of thread.turns) {
       let view = this.turns.get(turn.id);
+      const complete = finished(turn.status);
+      const start = nativeTime(turn.startedAt) ?? (complete ? previousEnd : Date.now());
+      const end = Math.max(
+        start,
+        nativeTime(turn.completedAt) ?? (view && !view.done ? Date.now() : start),
+      );
+      previousEnd = end;
+      // Untimed history stays anchored to known history, never to the time it was loaded.
+      this.log.clock = complete && view ? () => end : () => start;
       if (!view) {
         const projector = new TurnProjector(this.log, {
-          live: !finished(turn.status),
+          live: !complete,
           turn: this.turnStart + this.turns.size + 1,
           cwd: thread.cwd,
           model: { provider: this.harnessId, model: "harness" },
@@ -255,6 +282,7 @@ export class ChThreadView {
         view = { projector, items: new Map(), completed: new Set(), done: false };
         this.turns.set(turn.id, view);
       }
+      if (!complete) this.log.clock = undefined;
       if (view.done) continue;
       const reasoningPreviewIds = new Set(
         turn.items.filter((item) => item.type === "reasoning").map((item) => item.id),
@@ -310,7 +338,8 @@ export class ChThreadView {
           view.completed.add(item.id);
         }
       }
-      if (finished(turn.status)) {
+      if (complete) {
+        this.log.clock = () => end;
         for (const item of view.items.values())
           if (!view.completed.has(item.itemId))
             view.projector.itemCompleted(item, { status: "succeeded" });
@@ -318,6 +347,5 @@ export class ChThreadView {
         view.done = true;
       }
     }
-    this.log.setProjection("codexhostToolOutput", Object.fromEntries(this.liveOutput));
   }
 }

@@ -61,6 +61,9 @@ export const zh = {
   "delete.desc":
     "将把“{name}”从工作区列表中移除。文件夹与会话记录会保留，其会话将显示在“未分组”下。",
   "delete.pending": "正在删除工作区…",
+  "menu.copySessionLink": "复制会话链接",
+  "toast.sessionLinkCopied": "已复制",
+  "toast.sessionLinkCopyFailed": "复制会话链接失败",
   "menu.fork": "分叉会话",
   "menu.archiveSession": "归档会话",
   "menu.unarchiveSession": "取消归档",
@@ -188,6 +191,9 @@ export const en = {
   "delete.desc":
     "This removes “{name}” from the workspace list. The folder and session logs will be kept. Its sessions will appear under Ungrouped.",
   "delete.pending": "Deleting workspace…",
+  "menu.copySessionLink": "Copy session link",
+  "toast.sessionLinkCopied": "Copied",
+  "toast.sessionLinkCopyFailed": "Could not copy session link",
   "menu.fork": "Fork session",
   "menu.archiveSession": "Archive session",
   "menu.unarchiveSession": "Unarchive session",

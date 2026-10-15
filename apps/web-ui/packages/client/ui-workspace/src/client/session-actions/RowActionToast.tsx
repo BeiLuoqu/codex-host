@@ -108,6 +108,10 @@ function plainNoticeText(
       return t("defaultWorkspace.failed");
     case "archivedNotOpenable":
       return t("toast.archivedNotOpenable");
+    case "sessionLinkCopied":
+      return t("toast.sessionLinkCopied");
+    case "sessionLinkCopyFailed":
+      return t("toast.sessionLinkCopyFailed");
     /* v8 ignore next 2 -- closed-union backstop; only reached if a notice kind is forged */
     default:
       return assertNever(toast);

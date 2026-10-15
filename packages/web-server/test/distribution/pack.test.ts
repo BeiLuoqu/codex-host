@@ -80,7 +80,27 @@ it(
       version: 1,
       enabled: ["fake"],
     });
-    const url = await startServer(t, root, [join(moved, "server.mjs")], ["--harness", "fake"]);
+    // Exercise the installed CLI's own resource resolution, without a runtime-path override.
+    const cliEnvironment = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith("CODEXHOST_") && !["NODE_OPTIONS", "NODE_PATH"].includes(key),
+      ),
+    );
+    const { stdout: help } = await exec(
+      join(moved, "native", process.platform === "win32" ? "codexhost.exe" : "codexhost"),
+      ["delegate", "--help"],
+      {
+        cwd: root,
+        env: { ...cliEnvironment, CODEXHOST_CLI_NODE_PATH: process.execPath },
+        timeout: 10_000,
+      },
+    );
+    assert.match(help, /codexhost thread read/u);
+    assert.equal(
+      JSON.parse(readFileSync(join(moved, "package.json"), "utf8")).bin["codexhost-web"],
+      "./app/server.mjs",
+    );
+    const url = await startServer(t, root, [join(moved, "app/server.mjs")], ["--harness", "fake"]);
     assert.match(
       readFileSync(join(moved, "README.md"), "utf8"),
       /Included Harness plugins: codex, fake/u,
@@ -119,8 +139,9 @@ it(
       join(preview, "adapters/claude-code/manifest.json"),
       JSON.stringify({ id: "claude-code" }),
     );
+    mkdirSync(join(preview, "app"));
     writeFileSync(
-      join(preview, "server.mjs"),
+      join(preview, "app/server.mjs"),
       "console.log(JSON.stringify({args:process.argv.slice(2),env:process.env}))\n",
     );
     const { stdout } = await exec(
@@ -181,7 +202,7 @@ it(
       env: previewEnv,
     });
     assert.deepEqual(JSON.parse(defaultStdout).args, all.args);
-    assert.equal(all.args[all.args.indexOf("--host") + 1], "127.0.0.1");
+    assert.equal(all.args[all.args.indexOf("--host") + 1], "0.0.0.0");
     assert.equal(all.env.CODEXHOST_RUNTIME_TOKEN, undefined);
     assert.equal(all.args.includes("--no-auth"), false);
     assert.equal(all.args.includes("--import-recent"), false);

@@ -40,6 +40,7 @@ import type {} from "@deepseek-ai/dsh-client-ui-layout/client";
 import type {} from "@deepseek-ai/dsh-client-ui-session/client";
 import {
   type ArchiveSessionInjected,
+  type CopySessionLinkInjected,
   type ForkSessionInjected,
   menuOpenStateFactory,
   type PinSessionInjected,
@@ -64,6 +65,11 @@ import {
 } from "./session-actions/ArchiveSession.tsx";
 import { derive } from "./session-actions/derived.ts";
 import { ForkSessionMenuItem } from "./session-actions/ForkSession.tsx";
+import { CopySessionLinkMenuItem } from "./session-actions/CopySessionLink.tsx";
+import {
+  threadReferenceOf,
+  threadReferenceUri,
+} from "@deepseek-ai/dsh-client-ui-conversation/thread-reference";
 import { PinSessionMenuItem, PinSessionRowButton } from "./session-actions/PinSession.tsx";
 import { RenameSessionMenuItem, SessionRenameDialog } from "./session-actions/RenameSession.tsx";
 import { RowActionToast } from "./session-actions/RowActionToast.tsx";
@@ -289,6 +295,21 @@ export function apply(ctx: Context): void {
         });
     },
   });
+  const copySessionLinkInjected = (): CopySessionLinkInjected => ({
+    copySessionLink: (sessionId) => {
+      const session = sessions.list.getSnapshot().byId[sessionId];
+      const reference = session === undefined ? undefined : threadReferenceOf(session);
+      if (reference === undefined) return;
+      void (async () => {
+        try {
+          await navigator.clipboard.writeText(threadReferenceUri(reference));
+          notify({ kind: "sessionLinkCopied" });
+        } catch {
+          notify({ kind: "sessionLinkCopyFailed" });
+        }
+      })();
+    },
+  });
   const renameInjected = (): RenameSessionInjected => ({ requestSessionRename });
   const renameDialogInjected = (): SessionRenameDialogInjected => ({
     hooks: { renameRequest },
@@ -411,6 +432,16 @@ export function apply(ctx: Context): void {
         inject: forkInjected,
       },
       ForkSessionMenuItem,
+    );
+    yield ctx.slots.register(
+      {
+        name: "sidebar.workspaces.session.menu.item",
+        id: "copy-session-link",
+        order: 350,
+        locale: NS,
+        inject: copySessionLinkInjected,
+      },
+      CopySessionLinkMenuItem,
     );
     yield ctx.slots.register(
       {

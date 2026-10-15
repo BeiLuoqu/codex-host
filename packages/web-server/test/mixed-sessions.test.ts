@@ -196,6 +196,32 @@ it("combines model catalogs and lists while excluding GUI native Codex", async (
   );
 });
 
+it("advertises local Thread references only for bound shared external Sessions", async (t) => {
+  const bench = setup(t);
+  const draft = await bench.create();
+  const before = await bench.call<{ items: Summary[] }>("session/list");
+  assert.deepEqual(
+    before.items.find((row) => row.sessionId === "gui-external")?.projections.values
+      .threadReference,
+    { hostId: "local" },
+  );
+  assert.equal(
+    before.items.find((row) => row.sessionId === draft)?.projections.values.threadReference,
+    undefined,
+  );
+  await bench.select(draft, "codex");
+  await bench.prompt(draft, "isolated Codex reference exclusion");
+  const after = await bench.call<{ items: Summary[] }>("session/list");
+  assert.equal(
+    after.items.find((row) => row.sessionId === draft)?.projections.values.threadReference,
+    undefined,
+  );
+  assert.equal(
+    after.items.some((row) => row.sessionId === "gui-official"),
+    false,
+  );
+});
+
 it("keeps Codex available when CH has no ready external Harness", async (t) => {
   const bench = setup(t);
   const nativeRequest = bench.host.request.bind(bench.host);

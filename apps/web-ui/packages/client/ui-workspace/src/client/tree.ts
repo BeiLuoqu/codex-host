@@ -13,6 +13,17 @@ import type { SessionStatusSnapshot } from "@deepseek-ai/dsh-client-ui-session/c
 import type { SessionId } from "@deepseek-ai/dsh-session/types";
 import { assertNever } from "@deepseek-ai/dsh-util-values";
 import { workspaceTitleOf } from "@deepseek-ai/dsh-util-workspace-path";
+import {
+  threadReferenceOf,
+  type ThreadReference,
+} from "@deepseek-ai/dsh-client-ui-conversation/thread-reference";
+
+/** Only the shared external catalog advertises this capability; absence is unsupported. */
+declare module "@deepseek-ai/dsh-session-projection/types" {
+  interface SessionProjectionMap {
+    threadReference: { hostId: "local" } | null;
+  }
+}
 
 /** Group key for Sessions outside every Workspace. */
 export const UNGROUPED_KEY = "";
@@ -41,6 +52,7 @@ function mainSessionId(list: SessionListState): SessionId | undefined {
 /** One top-level session row in a group or the flat list. */
 export interface SessionNode {
   id: SessionId;
+  reference?: ThreadReference | undefined;
   /** Stored title, or empty; the renderer localizes blank and unnamed row labels. */
   title: string;
   /** Domain blank marker; browser navigation filters these provisional Sessions out. */
@@ -431,6 +443,7 @@ function sessionNode(
   const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind);
   return {
     id: s.id,
+    reference: threadReferenceOf(s),
     title: sessionTitle(s),
     blank: s.blank,
     running: status?.running ?? s.running,

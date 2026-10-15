@@ -618,8 +618,8 @@ export function ModelSelect({
       onKeyDown={onRootKeyDown}
       onBlur={onBlur}
       onMouseDown={(event) => {
-        // WebKit blurs a focused row before click unless the button's mousedown keeps focus.
-        if (event.target instanceof Element && event.target.closest("button") !== null)
+        // Keep menu chrome and buttons from blurring the menu; inputs retain native focus.
+        if (event.target instanceof Element && event.target.closest("input") === null)
           event.preventDefault();
       }}
     >
@@ -693,7 +693,19 @@ export function ModelSelect({
                   <span>{t("menu.model")}</span>
                 </div>
                 {showSearch && (
-                  <div className={css.searchRow}>
+                  <div
+                    className={css.searchRow}
+                    onMouseDown={(event) => {
+                      // Search padding belongs to the field, not an outside blur target.
+                      if (
+                        event.target instanceof Element &&
+                        event.target.closest("input, button") === null
+                      ) {
+                        event.preventDefault();
+                        searchRef.current?.focus();
+                      }
+                    }}
+                  >
                     <Input
                       ref={searchRef}
                       className={clsx(css.search, query !== "" && css.searchWithQuery)}

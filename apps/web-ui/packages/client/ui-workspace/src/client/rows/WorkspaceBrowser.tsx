@@ -102,6 +102,7 @@ function useNativeDragAcceptance(active: boolean): void {
   useEffect(() => {
     if (!active) return;
     const acceptDrag = (event: DragEvent): void => {
+      if (event.defaultPrevented) return;
       event.preventDefault();
       if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "move";
     };
@@ -721,8 +722,8 @@ function SessionTree({
                   if (drag === null) return;
                   commitSessionDrag(drag, { id: node.id, half: normalizeHalf(half) });
                 },
-                end: () => {
-                  if (drag?.over !== null && drag?.over !== undefined)
+                end: (copied?: boolean) => {
+                  if (!copied && drag?.over !== null && drag?.over !== undefined)
                     commitSessionDrag(drag, drag.over);
                   else setDrag(null);
                   sessionDropCommitted.current = false;
@@ -943,8 +944,9 @@ function FlatList({
                 drop: (half) => {
                   if (drag !== null) commitDrag(drag, { id: node.id, half: normalizeHalf(half) });
                 },
-                end: () => {
-                  if (drag?.over !== null && drag?.over !== undefined) commitDrag(drag, drag.over);
+                end: (copied?: boolean) => {
+                  if (!copied && drag?.over !== null && drag?.over !== undefined)
+                    commitDrag(drag, drag.over);
                   else setDrag(null);
                   dropCommitted.current = false;
                 },

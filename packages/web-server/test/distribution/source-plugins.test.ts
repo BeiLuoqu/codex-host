@@ -43,7 +43,7 @@ it(
       enabled: ["claude-code", "pi", ...usageIds],
     });
     assert.match(
-      readFileSync(join(output, "host-runtime.mjs"), "utf8"),
+      readFileSync(join(output, "app/host-runtime.mjs"), "utf8"),
       /--codexhost-shared-host/u,
     );
     const executable = process.platform === "win32" ? "codexhost.exe" : "codexhost";

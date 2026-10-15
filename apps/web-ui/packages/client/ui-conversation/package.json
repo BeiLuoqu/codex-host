@@ -13,6 +13,7 @@
       "types": "./src/client/index.ts",
       "default": "./lib/client.js"
     },
+    "./thread-reference": "./src/client/thread-reference.ts",
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },

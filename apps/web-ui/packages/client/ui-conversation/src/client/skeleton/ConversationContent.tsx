@@ -8,6 +8,7 @@ import type {
   InputZone,
 } from "../contract/slots.ts";
 import { HeroShell, WorkspaceChip, workspaceLabel } from "./EmptyHero.tsx";
+import { ThreadReferenceDropTarget } from "./ThreadReferenceDropTarget.tsx";
 import css from "./ConversationRoot.module.css";
 
 function ConversationSessionView({ renderSlot }: ConversationViewsProps) {
@@ -37,6 +38,7 @@ export function ConversationContent(props: ConversationContentProps) {
     renderSlot,
     renderSlotChain,
     selectWorkspace,
+    referenceEditor,
     t,
     useFactorySlot,
   } = props;
@@ -246,6 +248,13 @@ export function ConversationContent(props: ConversationContentProps) {
         {composerSeat}
       </div>
       <WidthControls container={body} phase={phase} />
+      <ThreadReferenceDropTarget
+        key={sessionId}
+        container={body}
+        editor={referenceEditor}
+        useSessions={useSessions}
+        t={t}
+      />
     </div>
   );
 }

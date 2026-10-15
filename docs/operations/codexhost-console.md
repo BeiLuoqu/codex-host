@@ -61,6 +61,12 @@ Launcher 在打开控制台之前先写入 `starting` 启动记录（`finishedAt
 
 源码工作区的 `npm start` 会移除继承的 `CODEXHOST_NPM_*` 更新路由，避免从已安装的 Harness 会话启动时，Shim 又选回 npm 包里的旧 Host Runtime。显式数据目录与代理配置仍保留；从远程 Host 会话启动本机 Desktop 时，应确认 `CODEXHOST_DATA_DIR` 没有指向正在使用的远程数据目录，需要本机默认目录时可用 `env -u CODEXHOST_DATA_DIR npm start`（POSIX）。
 
+### 从源码重启共享 Host
+
+在仓库根目录的交互式终端执行 `npm start host`，无需分别关闭 Web 和 Desktop。命令先运行 `build:typescript`（含插件）与 `build:rust`，验证所需产物，再询问是否中断共享 Host 的运行中任务。输入 `y` 后，通过原生 Launcher 的 `host stop` 等待进程树退出，再用当前工作树的 Host Runtime 执行 `host ensure`，等待后台就绪。
+
+构建失败、产物缺失或取消确认不会停止旧 Host；停止失败则不继续启动。此命令不重启界面、不重放中断的任务，也不自动提交代码。界面沿用现有重连行为；维护期间不要提交新任务或同时启动其他版本的 Host。数据目录沿用 `CODEXHOST_DATA_DIR`，未设置时使用 `~/.codexhost`。非交互式终端不能确认重启，不提供跳过确认选项。普通 `npm start` / `npm start web` 仍保留已运行的共享 Host。
+
 ## 端口
 
 - 默认 `4399`，只监听 `127.0.0.1`。可用 `CODEXHOST_CONSOLE_PORT` 修改（1024–65535）。

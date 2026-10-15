@@ -35,14 +35,22 @@ it("shares canonical CH identity and cwd without a Web index/history or physical
     ["permission"],
   );
   assert.equal(commands[0]?.input?.hint, "<mode>");
-  const list = await call<{ items: Array<{ sessionId: string; cwd: string }> }>("session/list");
+  const list = await call<{
+    items: Array<{
+      sessionId: string;
+      cwd: string;
+      projections: { values: Record<string, unknown> };
+    }>;
+  }>("session/list");
   assert.equal(list.items[0]?.sessionId, "gui-thread");
+  assert.deepEqual(list.items[0]?.projections.values.threadReference, { hostId: "local" });
   assert.equal(workspaces.ownerOf("gui-thread")?.path, join(root, "deleted-worktree"));
   assert.equal(existsSync(join(root, "deleted-worktree")), false);
   const projections = await call<{ values: Record<string, unknown> }>("session/projections", {
     request: { sessionId: "gui-thread" },
   });
   assert.deepEqual(projections.values.attachmentInput, { enabled: false });
+  assert.deepEqual(projections.values.threadReference, { hostId: "local" });
   const canonical = host.threads.get("gui-thread");
   assert.ok(canonical);
   assert.equal(canonical.cwd, join(root, "deleted-worktree"));

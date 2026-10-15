@@ -2,8 +2,8 @@
  * Display projection of reference forms in sent user text (bubble and queue
  * rows). The logged model text remains the single truth; this is presentation
  * only. Inline references follow the consumer's wrapping policy and keep long
- * labels within its width. Four decoration sources, by precedence: the wire session form
- * `@[label](dsh-session:...)` folds to its label; exact session labels
+ * labels within its width. Explicit CH `[@label](thread://...?hostId=...)` and
+ * DSH `@[label](dsh-session:...)` forms fold to session labels; exact session labels
  * supplied by an adjacent recall decorate their bare `@label` mention; plain
  * `@name` word-boundary tokens decorate by shape alone; and a plain `/name`
  * token decorates only when the caller names it — a skill the host actually
@@ -22,6 +22,10 @@ import markdownCss from "./markdown/MarkdownText.module.css";
 
 /** The wire form a session chip serializes to; label is the display text. */
 const SESSION_WIRE_RE = /@\[([^\]\n]+)\]\(dsh-session:[^)\s]+\)/gu;
+
+/** Explicit CH mention: keep manual bare IDs/URIs and ordinary Markdown as plain text. */
+const THREAD_WIRE_RE =
+  /\[@((?:\\.|[^\\\]\r\n])+)\]\((thread:\/\/[^/?#()\s<>]+\?hostId=[^&#()\s<>]+)\)/gu;
 
 /** Sentence punctuation a bare `@name` token may carry without being part of the reference. */
 const TRAILING_PUNCTUATION_RE = /[.,;:!?，。；：！？]+$/u;
@@ -63,6 +67,15 @@ export function projectUserText(
   references?: UserTextReferences,
 ): ReactNode {
   const ranges: DecorationRange[] = [];
+  for (const mention of text.matchAll(THREAD_WIRE_RE)) {
+    ranges.push({
+      start: mention.index,
+      end: mention.index + mention[0].length,
+      label: mention[0],
+      kind: "session",
+      display: (mention[1] as string).replace(/\\([\\`*{}[\]()#+.!_<>|~-])/gu, "$1"),
+    });
+  }
   SESSION_WIRE_RE.lastIndex = 0;
   let wire: RegExpExecArray | null;
   while ((wire = SESSION_WIRE_RE.exec(text)) !== null) {

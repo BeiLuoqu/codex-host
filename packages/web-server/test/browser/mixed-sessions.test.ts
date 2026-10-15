@@ -102,6 +102,16 @@ it(
       false,
     );
     await screenshot("mixed-codex-result");
+    const codexRow = page.locator('[data-row-key^="session:"][aria-current="page"]');
+    await codexRow.hover();
+    await codexRow.getByRole("button", { name: /^Session actions for/ }).click();
+    await page.getByRole("menu").waitFor();
+    assert.equal(
+      await page.getByRole("menuitem", { name: "Copy session link", exact: true }).count(),
+      0,
+      "isolated Codex has no shared Thread link action",
+    );
+    await page.keyboard.press("Escape");
     await textbox.fill("Second turn after draft binding");
     await page.getByRole("button", { name: "Send message", exact: true }).click();
     await page.getByText("echo: Second turn after draft binding", { exact: true }).waitFor();

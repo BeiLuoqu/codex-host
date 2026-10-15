@@ -52,7 +52,7 @@ it(
             "--node",
             process.execPath,
             "--host-runtime",
-            path.join(moved, "host-runtime.mjs"),
+            path.join(moved, "app/host-runtime.mjs"),
             "--data",
             data,
           ],
@@ -129,7 +129,7 @@ it(
     await t.test(
       "first Web starts the service; closing Web does not stop an accepted Turn",
       async (viewer) => {
-        const url = await startServer(viewer, root, [path.join(moved, "server.mjs")], args, {
+        const url = await startServer(viewer, root, [path.join(moved, "app/server.mjs")], args, {
           authenticated: true,
           environment: env,
         });
@@ -161,7 +161,7 @@ it(
     await t.test(
       "a later Web receives the latest state without another Adapter or command",
       async (viewer) => {
-        const url = await startServer(viewer, root, [path.join(moved, "server.mjs")], args, {
+        const url = await startServer(viewer, root, [path.join(moved, "app/server.mjs")], args, {
           authenticated: true,
           environment: env,
         });

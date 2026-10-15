@@ -41,13 +41,14 @@ import { WebFiles } from "./web-files.ts";
 import { serveFileUpload } from "./ch-file-upload-http.ts";
 import { assertDefaultWebDataReady, defaultWebDataDirectory } from "./data-paths.ts";
 
-/** Packed distribution: `server.mjs` sits next to `web/plugins.json`. */
-const PACKED_WEB = resolve(import.meta.dirname, "web");
+/** Packed distribution: app/server.mjs shares a root with web/, adapters/ and native/. */
+const DISTRIBUTION_ROOT = resolve(import.meta.dirname, "..");
+const PACKED_WEB = join(DISTRIBUTION_ROOT, "web");
 const PACKED = existsSync(join(PACKED_WEB, "plugins.json"));
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 function defaultAdapterRoots(): string {
   return PACKED
-    ? resolve(import.meta.dirname, "adapters")
+    ? join(DISTRIBUTION_ROOT, "adapters")
     : resolve(REPO_ROOT, "packages/host-runtime/dist/plugins");
 }
 
@@ -169,7 +170,7 @@ const chHost =
             values["ch-launcher"] ??
               (PACKED
                 ? join(
-                    import.meta.dirname,
+                    DISTRIBUTION_ROOT,
                     "native",
                     process.platform === "win32" ? "codexhost.exe" : "codexhost",
                   )

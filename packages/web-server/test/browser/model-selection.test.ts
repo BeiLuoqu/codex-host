@@ -63,6 +63,35 @@ async function assertClosedWithFocus(page: Page): Promise<void> {
 
 for (const width of [390, 1280]) {
   it(
+    `model search pointer interaction keeps the menu open at ${width}px`,
+    { timeout: 60_000 },
+    async (t) => {
+      const page = await startPicker(t, width);
+      await openModels(page, "Other Model");
+      const search = page.getByRole("searchbox", { name: "Search models…", exact: true });
+      await search.click();
+      assert.equal(await trigger(page).getAttribute("aria-expanded"), "true");
+      // The visible search field includes padding outside the native input.
+      await search.locator("..").click({ position: { x: 2, y: 2 } });
+      assert.equal(await trigger(page).getAttribute("aria-expanded"), "true");
+      assert.equal(await search.evaluate((element) => element === document.activeElement), true);
+      const panel = page.getByRole("group", { name: "Model", exact: true });
+      await panel.getByText("Model", { exact: true }).click();
+      await panel.click({ position: { x: 4, y: 40 } });
+      if (width >= 600) {
+        await page.getByText("Thinking", { exact: true }).click();
+      }
+      assert.equal(await trigger(page).getAttribute("aria-expanded"), "true");
+      assert.equal(await search.evaluate((element) => element === document.activeElement), true);
+      await page.keyboard.type("Other Alternate");
+      assert.equal(await search.inputValue(), "Other Alternate");
+      await page.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).waitFor();
+      await page.mouse.click(2, 2);
+      assert.equal(await trigger(page).getAttribute("aria-expanded"), "false");
+    },
+  );
+
+  it(
     `model selection success, current value and rejection at ${width}px`,
     { timeout: 60_000 },
     async (t) => {

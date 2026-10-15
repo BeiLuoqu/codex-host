@@ -150,9 +150,11 @@ echo 'codexhost dev: stopped the running Codex Desktop'
 export function usage() {
   return `usage: npm start [version] [-- --no-build]
        npm start web [-- --port 3181]
+       npm start host
 
 Stop any running Codex Desktop, then build and run the current codexhost worktree.
 The web subcommand builds and starts the Web preview without stopping Desktop.
+The host subcommand builds and restarts the shared Host after confirmation, interrupting its tasks.
 
 arguments:
   version            set the runtime version, e.g. npm start 0.12.0
@@ -391,6 +393,16 @@ export async function runDevelopmentDesktop({
   nodePath = process.execPath,
   spawnImplementation = spawn,
 } = {}) {
+  if (arguments_[0] === "host") {
+    const { runDevelopmentHost } = await import("./host.mjs");
+    return runDevelopmentHost(arguments_.slice(1), {
+      root,
+      environment,
+      platform,
+      nodePath,
+      run: (invocation, env) => runChild(invocation, root, spawnImplementation, env),
+    });
+  }
   if (arguments_[0] === "web") {
     const webArguments = arguments_.slice(1);
     if (!webArguments.includes("--no-build")) {

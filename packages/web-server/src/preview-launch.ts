@@ -24,7 +24,7 @@ export interface PreviewOptions {
 
 /**
  * Build the child process arguments and environment without Desktop routing state.
- * @param distribution Directory containing server.mjs and bundled adapters.
+ * @param distribution Directory containing app/server.mjs and bundled adapters.
  * @param options Preview storage, workspace and port overrides.
  * @param environment Parent environment; credentials and PATH are preserved.
  * @returns Explicit server arguments and a new environment with Host variables and Node injection removed.
@@ -55,7 +55,7 @@ export function previewLaunch(
   return {
     env,
     args: [
-      resolve(distribution, "server.mjs"),
+      resolve(distribution, "app/server.mjs"),
       "--session-source",
       options["session-source"] ?? "codexhost",
       ...(["codex-command", "codex-home"] as const).flatMap((key) =>

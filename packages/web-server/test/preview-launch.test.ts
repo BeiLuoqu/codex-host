@@ -1,7 +1,7 @@
 /** Preview process isolation without executing any real Harness or Desktop entry point. */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
@@ -113,8 +113,9 @@ it("passes only isolated settings to the actual child process", async (t) => {
   t.after(() => {
     rmSync(root, { recursive: true, force: true });
   });
+  mkdirSync(join(root, "app"));
   writeFileSync(
-    join(root, "server.mjs"),
+    join(root, "app/server.mjs"),
     "console.log(JSON.stringify({args:process.argv.slice(2),env:process.env}))\n",
   );
   const launch = previewLaunch(

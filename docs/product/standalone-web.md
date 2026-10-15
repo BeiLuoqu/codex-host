@@ -24,7 +24,7 @@ Web 默认端口为 **4400**，控制台默认端口为 **4399**；可用 `--por
 
 `build:web` 编译当前工作树的 CH 包并调用已有插件构建器，构建原生 Launcher，随后编译前端和打包。插件输入为 `packages/host-runtime/dist/plugins`，不是已安装的 CH.app 或另一个仓库。用量统计专用插件不作为聊天 Harness；Web 另行打包同仓库的 Codex Adapter。
 
-发行目录为 `packages/web-server/dist/codexhost-web`，包含 Node 网关、Web 界面、同一 Host bundle、当前平台的原生 Launcher 和自包含插件；会话与用量插件在后台显式启用，Codex Adapter 仅由独立 Web 执行作用域加载，不进入共享 Host 的 external 注册表。整体目录可以移动到仓库外运行，无需源码目录或仓库的 node_modules，但原生 Launcher 不能跨 OS/CPU 使用。默认共享模式也不要求 Desktop 运行：Web、Desktop 均可独立使用，同时开启时共享后台，晚开启的一端读取最新事实；关闭任意界面不停止另一端或后台任务。需要本机受支持的 Node，Harness CLI 和其认证仍由用户安装、配置。
+发行目录为 `packages/web-server/dist/codexhost-web`，包含 Node 网关、Web 界面、同一 Host bundle、当前平台的原生 Launcher 和自包含插件；网关与 Host bundle 使用既有安装资源布局 `app/server.mjs`、`app/host-runtime.mjs`，原生 CLI 无须 Web 专用路径回退，根目录 `preview.mjs` 仍为隔离启动入口；会话与用量插件在后台显式启用，Codex Adapter 仅由独立 Web 执行作用域加载，不进入共享 Host 的 external 注册表。整体目录可以移动到仓库外运行，无需源码目录或仓库的 node_modules，但原生 Launcher 不能跨 OS/CPU 使用。默认共享模式也不要求 Desktop 运行：Web、Desktop 均可独立使用，同时开启时共享后台，晚开启的一端读取最新事实；关闭任意界面不停止另一端或后台任务。需要本机受支持的 Node，Harness CLI 和其认证仍由用户安装、配置。
 
 ## Web 数据目录
 
@@ -134,6 +134,18 @@ Host 在原生确认首轮开始后，将首条用户消息的文本规范化并
 Web 编辑排队文本消息时，先请求 Shared Host 删除原条目，确认删除成功后回填当前浏览器中该会话的输入框；已有草稿、引用和附件保留，删除期间新增的输入也不覆盖。编辑期间消息不在共享队列中，GUI 和其他 Web 客户端同步撤下旧条目，草稿不跨端同步；用户重新发送后才生成新的排队条目。条目已被取走或删除结果未知时不回填、不自动重试；删除已确认后，投影刷新失败不改变删除结果。含非文本内容的排队消息仍不开放编辑。发往 Host 的 Web 文本输入，以及 Host 返回给 Desktop 的队列文本条目，均补齐原生 `text_elements` 数组；已有原生文本标注保持不变，避免 GUI 解析队列时失败。Web 连接建立新代次时重新创建队列控制流并读取初始状态，避免服务重启期间已经终止的旧流无法恢复、只能刷新页面才能看到后续队列变化。
 
 通用 App 可通过 Web 原有认证访问 `/api/ch/v1/{events,rpc,snapshot,respond}`，不需要理解 DSH 渲染日志，也拿不到 Host 私有 token。协议、恢复顺序和部署边界见[客户端通道](../architecture/host-client-channel.md)。本地草稿、滚动位置和当前选中会话不共享。旧 CDP 模式的审批仍在 GUI 处理；共享 Web 的通用文件预览/下载、完整子会话/后台任务投影仍有边界。公开远程 Host 通道、原生 App、真机后台与推送生命周期不在本次接入内。
+
+### 会话引用
+
+侧栏已创建的本地共享 CH external Thread 可拖入整个聊天主区域，包括正文、留白与 Composer。悬停时整个可接收区域有浅蓝色覆盖，明确显示“松开以引用聊天”及会话图标、标题预览；覆盖层不参与鼠标命中，跨内部元素移动不闪烁，离开、取消、拖动结束、窗口失焦或目标切换后撤下。只有当前 Composer 可编辑且来源受支持时才显示和接收，文件拖放沿用原有入口。
+
+松开后仅向当前 Composer 插入一次蓝色「会话图标 + 标题」行内引用，在保留的当前编辑位置后插入；没有有效编辑位置时追加到末尾。引用可与正文混排、整体删除和撤销，不替换已有正文或附件。项目、置顶和“最近”均可提供引用拖动；拖入聊天区域不会打开目标、读取历史、自动发送或提交排序，“最近”仍固定按更新时间排列。
+
+同一会话的「···」菜单提供“复制会话链接”，复制 `thread://<canonical Thread ID>?hostId=local`，等待剪贴板写入后提示“已复制”或失败。拖入引用的剪贴板、草稿与发送文本均为 `[@标题](thread://<canonical Thread ID>?hostId=local)`；标题仅供展示并转义 Markdown 特殊字符，身份与来源不按标题猜测。同名会话保留不同 ID。已发送用户消息与队列预览中的显式 `[@标题](thread://<id>?hostId=...)` 也显示蓝色会话图标与标题，悬停可见原始引用文本；消息复制、历史原文及队列编辑仍保留完整链接，不增加点击跳转或自动读取。队列编辑沿用文本链接回填，不要求重新装饰；发送拒绝保留草稿，结果未知不自动重发。
+
+手工粘贴裸 ID、`codex://threads/<id>`、`thread://<id>?hostId=...` 或 Markdown 链接仍是普通文本，不自动生成蓝色引用、不补充或改写来源。只有共享 external 目录确认归属的条目提供拖入和菜单复制；未创建草稿、隔离 Web Codex、官方 Codex、standalone 与远程来源不提供冒充共享 CH Thread 的入口。蓝色只表示引用，不表示已读取。
+
+读取仍由当前 Agent 在用户明确要求时使用已有 Skill 和 `codexhost thread read`，遵循既有 CLI 的权限与错误语义；Web 不预读历史、不追加工具教程或调用指令，也不向目标启动 Turn。没有 `@` 会话候选菜单、预览面板或新 RPC。浏览器自动化使用隔离 Host 验证输入与提交，不能替代真实 Harness/CLI 的端到端读取验收。
 
 ### 普通会话 Fork
 

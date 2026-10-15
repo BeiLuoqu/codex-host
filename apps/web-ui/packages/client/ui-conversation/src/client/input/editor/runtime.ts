@@ -11,6 +11,8 @@ import {
   BLUR_COMMAND,
   CLEAR_HISTORY_COMMAND,
   COMMAND_PRIORITY_CRITICAL,
+  DRAGOVER_COMMAND,
+  DROP_COMMAND,
   createEditor,
   HISTORY_MERGE_TAG,
   PASTE_TAG,
@@ -22,6 +24,11 @@ import { registerPlainText } from "@lexical/plain-text";
 import { createEmptyHistoryState, registerHistory } from "@lexical/history";
 import { mergeRegister } from "@lexical/utils";
 import type { DraftReference, ReferenceInsert } from "../../contract/draft-editor.ts";
+import {
+  THREAD_REFERENCE_MIME,
+  parseThreadReferenceDrag,
+  threadReferenceInsert,
+} from "../../thread-reference.ts";
 import { registerReferenceActivation } from "./reference-activation.ts";
 import { ReferenceChipNode, $createReferenceChipNode } from "./chip-node.tsx";
 import { refreshClaimDecoration, registerClaimDecoration } from "./claim-decor.ts";
@@ -100,6 +107,42 @@ export class DraftEditorRuntime {
     };
     const unregister = mergeRegister(
       registerPlainText(this.editor),
+      this.editor.registerCommand(
+        DRAGOVER_COMMAND,
+        (event) => {
+          if (
+            !this.editor.isEditable() ||
+            !event.dataTransfer?.types.includes(THREAD_REFERENCE_MIME) ||
+            event.dataTransfer.types.includes("Files")
+          )
+            return false;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "copy";
+          return true;
+        },
+        COMMAND_PRIORITY_CRITICAL,
+      ),
+      this.editor.registerCommand(
+        DROP_COMMAND,
+        (event) => {
+          if (
+            !this.editor.isEditable() ||
+            !event.dataTransfer ||
+            event.dataTransfer.types.includes("Files")
+          )
+            return false;
+          const reference = parseThreadReferenceDrag(
+            event.dataTransfer.getData(THREAD_REFERENCE_MIME),
+          );
+          if (reference === undefined) return false;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "copy";
+          return this.insertFileReferences([threadReferenceInsert(reference)]);
+        },
+        COMMAND_PRIORITY_CRITICAL,
+      ),
       this.editor.registerCommand(
         BLUR_COMMAND,
         () => {

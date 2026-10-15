@@ -34,6 +34,10 @@ import type { StateDotState } from "@deepseek-ai/dsh-client-ui-primitives";
 import { abbreviateHomePath } from "@deepseek-ai/dsh-util-workspace-path";
 import type { MenuOpenState, WorkspaceBrowserProps } from "../contract/slots.ts";
 import type { GroupNode, SearchResultNode, SessionNode } from "../tree.ts";
+import {
+  THREAD_REFERENCE_MIME,
+  threadReferenceInsert,
+} from "@deepseek-ai/dsh-client-ui-conversation/thread-reference";
 import css from "./Rows.module.css";
 
 /** The standard locale seat, prop-passed from the browser root. */
@@ -117,7 +121,7 @@ export interface RowDragProps {
   /** Report the hovered half while a compatible drag passes over this row. */
   hover: (half: "before" | "after") => void;
   drop: (half: "before" | "after") => void;
-  end: () => void;
+  end: (copied?: boolean) => void;
 }
 
 /** Drag lifecycle owned by a workspace row; its enclosing group owns hit testing. */
@@ -577,7 +581,10 @@ export function SessionNodeItem({
   // Archived rows hold their in-place grayed slot, so manual reorder cannot
   // move them. Pinned rows drag within the pinned block: the browser gates
   // their drop targets to fellow pinned rows.
-  const draggable = drag !== undefined && !row.blank && !row.archived;
+  const reorderable = drag !== undefined && !row.blank && !row.archived;
+  const reference = !row.blank ? row.reference : undefined;
+  const draggable = reorderable || reference !== undefined;
+  const dragged = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [contextPoint, setContextPoint] = useState<DOMRect | null>(null);
   // The menu's open state, bound into the row entries' `useMenuOpenState` hook.
@@ -613,6 +620,7 @@ export function SessionNodeItem({
       }}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget || row.blank) return;
+        dragged.current = false;
         if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
           e.preventDefault();
           setContextPoint(null);
@@ -623,20 +631,30 @@ export function SessionNodeItem({
         }
       }}
       aria-description={row.archived ? t("toast.archivedNotOpenable") : undefined}
+      onPointerDown={() => {
+        dragged.current = false;
+      }}
       onClick={() => {
-        onOpen(node.id);
+        if (!dragged.current) onOpen(node.id);
       }}
       draggable={draggable}
       onDragStart={
         !draggable
           ? undefined
           : (e) => {
-              e.dataTransfer.effectAllowed = "move";
-              e.dataTransfer.setData("text/plain", node.id);
-              drag.start();
+              dragged.current = true;
+              e.dataTransfer.effectAllowed =
+                reference === undefined ? "move" : reorderable ? "copyMove" : "copy";
+              e.dataTransfer.setData(
+                "text/plain",
+                reference === undefined ? node.id : threadReferenceInsert(reference).clipboardText,
+              );
+              if (reference !== undefined)
+                e.dataTransfer.setData(THREAD_REFERENCE_MIME, JSON.stringify(reference));
+              if (reorderable) drag?.start();
             }
       }
-      onDragEnd={!draggable ? undefined : drag.end}
+      onDragEnd={!draggable ? undefined : (e) => drag?.end(e.dataTransfer.dropEffect === "copy")}
       onDragOver={
         drag === undefined
           ? undefined

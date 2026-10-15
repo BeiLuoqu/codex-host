@@ -334,6 +334,8 @@ export type RowToast =
   | { kind: "unpinFailed"; message: string }
   | { kind: "archivedNotOpenable" }
   | { kind: "defaultWorkspaceFailed" }
+  | { kind: "sessionLinkCopied" }
+  | { kind: "sessionLinkCopyFailed" }
   /**
    * An explicit New Session request that failed. `message` is untranslated:
    * a Host refusal as `code: message` — the stable code stays in the copy so
@@ -417,6 +419,11 @@ export interface SessionArchiveConfirmInjected {
    * raises the stopped-and-archived notice.
    */
   stopAndArchiveSession: (sessionId: SessionId) => Promise<void>;
+}
+
+/** Clipboard action uses list metadata only. */
+export interface CopySessionLinkInjected {
+  copySessionLink: (sessionId: SessionId) => void;
 }
 
 /** Fork action share. */

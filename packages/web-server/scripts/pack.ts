@@ -2,9 +2,9 @@
  * Pack a self-contained CodexHost Web distribution:
  *
  *   dist/codexhost-web/
- *     server.mjs              bundled server (ws, web-push, qrcode-terminal inlined)
- *     preview.mjs             isolated localhost launcher (Codex opt-in; excludes Pi)
- *     host-runtime.mjs        the same independent Host implementation
+ *     app/server.mjs          bundled server (ws, web-push, qrcode-terminal inlined)
+ *     preview.mjs             environment-isolated launcher
+ *     app/host-runtime.mjs    the same independent Host implementation
  *     native/codexhost[.exe]   current-platform service lifecycle Launcher
  *     web/                    Vite shell + composed client plugins + plugins.json
  *     adapters/codex/         bundled Codex Harness adapter
@@ -108,7 +108,7 @@ const banner =
   "import { createRequire as __codexhostCreateRequire } from 'node:module'; const require = __codexhostCreateRequire(import.meta.url);";
 await build({
   entryPoints: [join(serverRoot, "src/main.ts")],
-  outfile: join(out, "server.mjs"),
+  outfile: join(out, "app/server.mjs"),
   bundle: true,
   platform: "node",
   format: "esm",
@@ -136,7 +136,7 @@ execFileSync(
   [
     join(repoRoot, "packages/host-runtime/scripts/build-release.mjs"),
     "--output",
-    join(out, "host-runtime.mjs"),
+    join(out, "app/host-runtime.mjs"),
   ],
   { cwd: repoRoot, stdio: "inherit" },
 );
@@ -195,7 +195,7 @@ writeFileSync(
       version,
       description: "Run Claude Code, Codex, Pi and other coding agents from any browser or phone.",
       type: "module",
-      bin: { "codexhost-web": "./server.mjs" },
+      bin: { "codexhost-web": "./app/server.mjs" },
       engines: { node: ">=22.19" },
       os: [process.platform],
       cpu: [process.arch],
@@ -209,11 +209,12 @@ writeFileSync(
   join(out, "README.md"),
   `# CodexHost Web ${version}
 
-    node server.mjs [--host 0.0.0.0] [--port 4400] [--adapters <dir>[,<dir>...]]
+    node app/server.mjs [--host 0.0.0.0] [--port 4400] [--adapters <dir>[,<dir>...]]
 
 Default shared mode starts or connects to one independent local CH service. Desktop need not be open;
 closing either UI leaves the service and its tasks running. Both use the same CH data directory.
 This bundle contains the current-platform native Launcher and the same Host runtime, not Node or Harness CLIs.
+Server and Host runtime bundles live in app/, matching the Launcher's standard installed-resource layout.
 Use --ch-data <dir> to select Host data separately from Web's --data, and --ch-codex-home for native metadata.
 A running old Desktop-owned Host is never taken over; arrange its update/restart separately.
 Explicit --ch-cdp selects the legacy Desktop path. Pin writes still require Desktop's native service.
@@ -231,7 +232,7 @@ Using a Harness requires an installed/authenticated native CLI; default enableme
 Optional preview flags: --port, --data, --workspace, --harness, --ch-data, --ch-codex-home, --codex-command, --codex-home.
 Ctrl+C stops Web only. Explicit backend maintenance: native/codexhost host stop --node <absolute-node> --host-runtime <absolute-host-runtime.mjs> --data <absolute-ch-data>.
 Close clients first to prevent their on-demand restart; stopping the backend also stops its tasks.
-Do not launch server.mjs directly from a CodexHost-managed session with inherited Desktop settings.
+Do not launch app/server.mjs directly from a CodexHost-managed session with inherited Desktop settings.
 The preview launcher finds the Codex CLI through native installation inspection or PATH. \`--codex-command /absolute/path/to/codex\` is an optional override.
 The Web Codex home defaults to \`<web-data>/codex-home\`; --codex-home can select another isolated home.
 Authenticate/configure that home explicitly using the native CLI with CODEX_HOME set to it.

@@ -114,12 +114,7 @@ export class ChSessions {
       : undefined;
     this.realtime = host.realtime
       ? new ChRealtime(host.realtime, {
-          thread: async (id) => {
-            const view = await this.view(id);
-            // Thread snapshots own the live status. Forward it directly instead
-            // of waiting for the heavier catalog refresh to catch up.
-            this.events.emit("api-session/status", id, view.thread.status.type === "active");
-          },
+          thread: (id) => this.view(id),
           catalog: () => this.refresh(),
           connection: (online) => {
             this.hostOnline = online;
@@ -338,6 +333,7 @@ export class ChSessions {
           ? (content) => this.attachments?.project(id, content) ?? content
           : undefined,
       );
+      view.log.setProjection("threadReference", { hostId: "local" });
       if (this.images) {
         view.log.setProjection("attachmentInput", this.files ? WEB_FILE_INPUT : WEB_IMAGE_INPUT);
         view.log.setProjection("imageLimits", WEB_IMAGE_LIMITS);
@@ -383,6 +379,10 @@ export class ChSessions {
     view.log.setProjection("harnessIdentity", { id: harnessId, name });
     this.loadControls(view, harnessId, force);
     this.loadUsage(view, force);
+    // History and running state must converge even when a live status notification
+    // was missed. Use the Host status, not the last Turn's completion state.
+    if (!this.closed)
+      this.events.emit("api-session/status", id, view.thread.status.type === "active");
     return view;
   }
   private loadUsage(view: ChThreadHistory, force: boolean): void {
@@ -466,6 +466,7 @@ export class ChSessions {
             imageLimits: WEB_IMAGE_LIMITS,
           }
         : {}),
+      threadReference: { hostId: "local" },
       title: threadListTitle(row),
       harnessIdentity: { id: harnessId, name: await this.catalog.name(harnessId) },
       sessionListMetadata: { blank: false, lastPromptAt: row.updatedAt * 1000 },
@@ -866,8 +867,7 @@ export class ChSessions {
       }
       this.fileInputs?.accepted(threadId, request.content);
       try {
-        const view = await this.view(threadId);
-        this.events.emit("api-session/status", threadId, view.thread.status.type === "active");
+        await this.view(threadId);
       } catch {
         // A failed read cannot turn an acknowledged write into a rejected send.
         if (this.realtime) {

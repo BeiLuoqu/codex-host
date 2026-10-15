@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { ChThreadHistory } from "../src/ch-thread-history.ts";
 import { FakeChHost } from "./support/ch-host.ts";
+import { defined } from "./support/defined.ts";
 import type { ChTurn } from "../src/ch-thread-view.ts";
 
 function turns(count: number, start = 0): ChTurn[] {
@@ -10,6 +11,8 @@ function turns(count: number, start = 0): ChTurn[] {
     return {
       id: `turn-${i}`,
       status: "completed",
+      startedAt: 1_700_000_000 + i * 120,
+      completedAt: 1_700_000_045 + i * 120,
       items: [
         {
           id: `user-${i}`,
@@ -76,6 +79,66 @@ it("opens only the latest five full Turns, then pages backwards without renumber
         "tool references survive prepend",
       );
   assert.ok(host.requests.every((r) => ["thread/read", "thread/turns/list"].includes(r.method)));
+});
+
+it("preserves native message times across paging, refreshes and reopening", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const { host, row, view } = fixture(12);
+  for (const turn of row.turns)
+    turn.items = turn.items.filter((item) => ["userMessage", "agentMessage"].includes(item.type));
+  const times = (type: string) =>
+    view.log.events.filter((event) => event.type === type).map((event) => event.time);
+  const expected = (key: "startedAt" | "completedAt", count: number) =>
+    row.turns.slice(-count).map((turn) => Number(turn[key]) * 1000);
+
+  await view.refresh();
+  assert.deepEqual(times("user/message"), expected("startedAt", 5));
+  assert.deepEqual(times("assistant/message"), expected("completedAt", 5));
+  assert.deepEqual(times("turn/start"), expected("startedAt", 5));
+  assert.deepEqual(times("turn/end"), expected("completedAt", 5));
+  assert.equal(view.log.clock, undefined);
+
+  const tail = structuredClone(view.log.events);
+  t.mock.timers.tick(60_000);
+  await view.prefetchOlder();
+  await view.loadOlder();
+  await view.refresh(true);
+  assert.deepEqual(times("user/message"), expected("startedAt", 12));
+  assert.deepEqual(times("assistant/message"), expected("completedAt", 12));
+  assert.deepEqual(view.log.events.slice(-tail.length), tail);
+
+  const reopened = new ChThreadHistory(host, row, "fake", () => {});
+  await reopened.refresh();
+  for (const type of ["user/message", "assistant/message"])
+    assert.deepEqual(
+      reopened.log.events.filter((event) => event.type === type).map((event) => event.time),
+      times(type).slice(-5),
+    );
+  assert.equal(view.log.append("test/notice", {}).time, Date.now());
+});
+
+it("uses stable historical fallbacks when native timing is missing or invalid", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const { row, view } = fixture(5);
+  Object.assign(defined(row.turns[0]), { startedAt: 0, completedAt: 10 });
+  Object.assign(defined(row.turns[1]), { startedAt: null, completedAt: null });
+  Object.assign(defined(row.turns[2]), { startedAt: undefined, completedAt: undefined });
+  Object.assign(defined(row.turns[3]), { startedAt: NaN, completedAt: -1 });
+  Object.assign(defined(row.turns[4]), { startedAt: 20, completedAt: 15 });
+  await view.refresh();
+  assert.deepEqual(
+    view.log.events.filter((event) => event.type === "user/message").map((event) => event.time),
+    [0, 10_000, 10_000, 10_000, 20_000],
+  );
+  assert.deepEqual(
+    view.log.events.filter((event) => event.type === "turn/end").map((event) => event.time),
+    [10_000, 10_000, 10_000, 10_000, 20_000],
+  );
+
+  const untimed = fixture(1);
+  Object.assign(defined(untimed.row.turns[0]), { startedAt: null, completedAt: null });
+  await untimed.view.refresh();
+  assert.ok(untimed.view.log.events.every((event) => event.time === untimed.row.createdAt * 1000));
 });
 
 it("does not drain history on refresh and fills new-Turn gaps beyond five Turns", async () => {
@@ -156,6 +219,42 @@ it("keeps one Turn and message identity while active output becomes complete", a
   assert.ok(JSON.stringify(view.log.events).includes("hello world"));
 });
 
+it("uses native boundaries for live Turns without applying the replay clock to live updates", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const { row, view } = fixture(1);
+  const turn = defined(row.turns[0]);
+  turn.status = "inProgress";
+  turn.completedAt = null;
+  turn.items = [
+    { id: "user", type: "userMessage", content: [{ type: "text", text: "Live question" }] },
+    { id: "answer", type: "agentMessage", text: "Live answer" },
+  ];
+  row.status.type = "active";
+  await view.refresh();
+  assert.equal(
+    view.log.events.find((event) => event.type === "user/message")?.time,
+    Number(turn.startedAt) * 1000,
+  );
+  assert.equal(view.log.clock, undefined);
+
+  t.mock.timers.tick(5000);
+  turn.items.push({ id: "tool", type: "commandExecution", command: "pwd" });
+  await view.refresh();
+  assert.equal(view.log.events.find((event) => event.type === "tool/call")?.time, Date.now());
+
+  turn.items.push({ id: "final", type: "agentMessage", text: "Final answer" });
+  turn.status = "completed";
+  turn.completedAt = 1_800_000_004;
+  row.status.type = "idle";
+  await view.refresh();
+  assert.equal(
+    view.log.events.findLast((event) => event.type === "assistant/message")?.time,
+    turn.completedAt * 1000,
+  );
+  assert.equal(view.log.events.at(-1)?.time, turn.completedAt * 1000);
+  assert.equal(view.log.clock, undefined);
+});
+
 it("handles empty history and new Turns without rereading an unavailable older prefix", async () => {
   const { row, view } = fixture(0);
   await view.refresh();
@@ -180,6 +279,22 @@ it("rejects replaced live Items before appending any replacement output", async 
   row.status.type = "idle";
   await assert.rejects(view.refresh(), { code: "host/items-replaced" });
   assert.deepEqual(view.log.events, events);
+});
+
+it("clears the historical clock when projecting a changed transcript fails", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const { row, view } = fixture(1);
+  const turn = defined(row.turns[0]);
+  turn.status = "inProgress";
+  turn.items = [{ id: "answer", type: "agentMessage", text: "Original answer" }];
+  row.status.type = "active";
+  await view.refresh();
+  defined(turn.items[0]).text = "Rewritten answer";
+  turn.status = "completed";
+  row.status.type = "idle";
+  await assert.rejects(view.refresh(), { code: "host/history-changed" });
+  assert.equal(view.log.clock, undefined);
+  assert.equal(view.log.append("test/notice", {}).time, Date.now());
 });
 
 it("preserves identical text from distinct Items when neither Item was replaced", async () => {

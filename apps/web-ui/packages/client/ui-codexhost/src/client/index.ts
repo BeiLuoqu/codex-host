@@ -17,6 +17,8 @@ import { SessionHarnessIcon } from "./SessionHarnessIcon.tsx";
 import { HostConnectionStatus } from "./HostConnectionStatus.tsx";
 import { HostUsageDock } from "./HostUsageDock.tsx";
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";
+import type {} from "@deepseek-ai/dsh-client-ui-input-trigger/client";
+import { THREAD_REFERENCE_SOURCE } from "@deepseek-ai/dsh-client-ui-conversation/thread-reference";
 import type {} from "@deepseek-ai/dsh-api-remotes/client";
 import { ensureServiceWorker } from "./notifications.ts";
 import { NotificationsRow } from "./NotificationsRow.tsx";
@@ -38,7 +40,15 @@ export const NS = "codexhostImport";
 export const PANEL_ID = "codexhost-import" as MainPanelId;
 
 /** Services used by the panel. */
-export const inject = ["slots", "locale", "layout", "uiWorkspace", "sessions", "remote"];
+export const inject = [
+  "slots",
+  "locale",
+  "layout",
+  "uiWorkspace",
+  "sessions",
+  "remote",
+  "inputTriggers",
+];
 
 /**
  * Contribute the sidebar entry and its main-column page.
@@ -47,6 +57,20 @@ export const inject = ["slots", "locale", "layout", "uiWorkspace", "sessions", "
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), "ui-codexhost: dictionaries");
   const t = ctx.locale.bind(NS);
+  ctx.effect(
+    () =>
+      ctx.inputTriggers.registerSource({
+        trigger: "@",
+        name: THREAD_REFERENCE_SOURCE,
+        candidates: async () => [],
+        onPick: () => undefined,
+        codec: {
+          clipboardText: (ref) => ref,
+          serialize: async (ref) => ref,
+        },
+      }),
+    "ui-codexhost: Thread reference text codec",
+  );
   const face: ImportPageFace = {
     openSession: (sessionId: string) => {
       ctx.uiWorkspace.openSession(sessionId as SessionId);
