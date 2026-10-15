@@ -1,7 +1,7 @@
 /**
  * codexhost Web server entry point.
  *
- *   node --import tsx src/main.ts [--port 3180] [--host 127.0.0.1] [--data <dir>]
+ *   node --import tsx src/main.ts [--port 4400] [--host 127.0.0.1] [--data <dir>]
  *        [--adapters <dir>[,<dir>...]] [--harness <id>[,<id>...]]
  *        [--token <value>] [--rotate-token] [--no-auth]
  */
@@ -38,6 +38,7 @@ import { Workspaces } from "./workspaces.ts";
 import { WebImages } from "./web-images.ts";
 import { WebFiles } from "./web-files.ts";
 import { serveFileUpload } from "./ch-file-upload-http.ts";
+import { assertDefaultWebDataReady, defaultWebDataDirectory } from "./data-paths.ts";
 
 /** Packed distribution: `server.mjs` sits next to `web/plugins.json`. */
 const PACKED_WEB = resolve(import.meta.dirname, "web");
@@ -63,11 +64,11 @@ const { values } = parseArgs({
     "web-codex-migrate-source": { type: "string" },
     "web-codex-legacy-stopped": { type: "boolean", default: false },
     "ch-plugins": { type: "string" },
-    port: { type: "string", default: process.env.CODEXHOST_WEB_PORT ?? "3180" },
+    port: { type: "string", default: process.env.CODEXHOST_WEB_PORT ?? "4400" },
     host: { type: "string", default: process.env.CODEXHOST_WEB_HOST ?? "127.0.0.1" },
     data: {
       type: "string",
-      default: process.env.CODEXHOST_WEB_DATA ?? join(homedir(), ".codexhost-web"),
+      default: process.env.CODEXHOST_WEB_DATA,
     },
     adapters: { type: "string", default: process.env.CODEXHOST_ADAPTERS },
     harness: { type: "string", default: process.env.CODEXHOST_HARNESSES },
@@ -83,7 +84,18 @@ const { values } = parseArgs({
   allowPositionals: false,
 });
 
-const data = new DataDir(resolve(values.data as string));
+const dataRoot = resolve(
+  values.data ??
+    defaultWebDataDirectory(
+      values["ch-data"] ??
+        (values["ch-control-directory"]
+          ? dirname(resolve(values["ch-control-directory"]))
+          : undefined),
+    ),
+);
+if (values.data === undefined && !values["ch-data"] && !values["ch-control-directory"])
+  assertDefaultWebDataReady(dataRoot);
+const data = new DataDir(dataRoot);
 const auth =
   values["no-auth"] === true
     ? undefined

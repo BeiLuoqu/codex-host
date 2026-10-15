@@ -209,7 +209,7 @@ writeFileSync(
   join(out, "README.md"),
   `# CodexHost Web ${version}
 
-    node server.mjs [--host 0.0.0.0] [--port 3180] [--adapters <dir>[,<dir>...]]
+    node server.mjs [--host 0.0.0.0] [--port 4400] [--adapters <dir>[,<dir>...]]
 
 Default shared mode starts or connects to one independent local CH service. Desktop need not be open;
 closing either UI leaves the service and its tasks running. Both use the same CH data directory.
@@ -222,7 +222,9 @@ Recovery reconnects and reloads history; it does not resend uncertain commands.
 For an authenticated localhost preview, use \`node preview.mjs\`.
 This launcher removes inherited CODEXHOST_* variables, CODEX_CLI_PATH, NODE_OPTIONS and NODE_PATH from the server environment.
 It defaults to every bundled session Harness (including Codex and Pi), listens on 127.0.0.1, keeps authentication enabled,
-and uses ~/.codexhost-web-preview and ~/codexhost-web-preview-workspace.
+and uses ~/.codexhost/web and ~/codexhost-web-preview-workspace.
+Without --data, a custom --ch-data <root> also selects <root>/web.
+Existing legacy data must be migrated offline or selected explicitly; profiles are never merged automatically.
 No Harness selection is needed; \`--harness <id,...>\` remains an optional advanced subset override.
 Missing CLIs and connection failures are normal unavailable states, not Web startup failures.
 Using a Harness requires an installed/authenticated native CLI; default enablement does not imply full Web capability verification.
@@ -245,7 +247,7 @@ The packed server uses only its bundled plugins unless --adapters is supplied.
 Install and authenticate each Harness CLI separately on the server machine.
 \`--adapters\` overrides the plugin directories (comma-separated); it does not install Harness CLIs.
 
-Web data lives in \`~/.codexhost-web\` (settings, access token, push keys and explicit standalone sessions).
+Web data lives in \`~/.codexhost/web\` (settings, access token, push keys, uploaded attachments and explicit standalone sessions).
 Shared canonical metadata remains in the Host's \`~/.codexhost\` and history remains native to each Harness.
 The default listener is localhost. For phones, use an HTTPS reverse proxy such as Tailscale Serve;
 PWA installation and Web Push need HTTPS. Do not expose \`--no-auth\` to a network.

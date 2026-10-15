@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
 import { promisify } from "node:util";
@@ -38,13 +38,31 @@ it("removes inherited Host routing and Node injection without changing the paren
   assert.equal(args[args.indexOf("--harness") + 1], "all");
   assert.equal(args[args.indexOf("--adapters") + 1], join(bundle, "adapters"));
   assert.equal(args[args.indexOf("--host") + 1], "127.0.0.1");
-  assert.match(args[args.indexOf("--data") + 1] as string, /\.codexhost-web-preview$/u);
+  assert.equal(args[args.indexOf("--port") + 1], "4400");
+  assert.equal(args[args.indexOf("--data") + 1], join(homedir(), ".codexhost", "web"));
   assert.match(
     args[args.indexOf("--workspace") + 1] as string,
     /codexhost-web-preview-workspace$/u,
   );
   assert.equal(args.includes("--no-auth"), false);
   assert.equal(args.includes("--import-recent"), false);
+});
+
+it("keeps Web data under the selected Host unless explicitly overridden", () => {
+  for (const options of [
+    { "ch-data": resolve("custom-host") },
+    { "ch-control-directory": resolve("custom-host", "client-hosts") },
+  ]) {
+    const launch = previewLaunch("/packed", options, {});
+    assert.equal(launch.args[launch.args.indexOf("--data") + 1], resolve("custom-host", "web"));
+    const explicit = previewLaunch("/packed", { ...options, data: resolve("separate-web") }, {});
+    assert.equal(explicit.args[explicit.args.indexOf("--data") + 1], resolve("separate-web"));
+  }
+});
+
+it("accepts an explicit port instead of the default", () => {
+  const { args } = previewLaunch("/packed", { port: "4401" }, {});
+  assert.equal(args[args.indexOf("--port") + 1], "4401");
 });
 
 it("accepts explicit Harness ids without relaxing isolation", () => {
