@@ -1,10 +1,4 @@
-import type { ModelSelection } from "./ch-harness-catalog.ts";
-
-/** Configuration captured by a draft, independent of later preference changes. */
-export interface DraftConfiguration {
-  selection: ModelSelection;
-  permissionModeId?: string;
-}
+export type { DraftConfiguration } from "@codexhost/session-runtime";
 
 export function draftPermissionMode(
   inspection: {

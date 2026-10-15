@@ -16,7 +16,6 @@ import {
   harnessPluginManifestSchema,
   isHarnessPluginInScope,
   type HarnessPluginScope,
-  type HarnessCommandCatalog,
   type HarnessPluginManifest,
   type HarnessDisplayEntries,
 } from "@codexhost/shared-contracts";
@@ -29,98 +28,13 @@ export type HarnessManifest = Pick<
   "id" | "name" | "entry" | "icon" | "iconStyle" | "kind"
 >;
 
-interface ModelRef {
-  id: string;
-}
-
-interface CatalogModel {
-  ref: ModelRef;
-  label: string;
-  resolvedModelLabel?: string;
-  supportedThinkingOptionIds?: string[];
-}
-
-interface ModelCatalog {
-  models: CatalogModel[];
-  defaultModel?: ModelRef;
-  thinkingOptions: Array<{ id: string; label: string }>;
-  defaultThinkingOptionId?: string;
-}
-
-export interface PermissionModeCatalog {
-  modes: Array<{ id: string; label: string; description?: string; dangerous?: boolean }>;
-  defaultModeId: string;
-}
-
-export type Inspection =
-  | {
-      status: "ready";
-      catalog: ModelCatalog;
-      permissionModes?: PermissionModeCatalog;
-      capabilities: {
-        configuration: {
-          selectModel: boolean;
-          selectThinkingOption: boolean;
-          selectPermissionMode: boolean;
-          permissionModeScope?: "live" | "atCreate";
-        };
-        history: { fork: boolean; forkAcrossCwd: boolean; rollbackLastTurn: boolean };
-      };
-    }
-  | { status: "notInstalled" | "unavailable" | "error"; error: { code?: string; message: string } };
-
-/** Structural subset of the codexhost HarnessAdapter used by the server. */
-export interface Adapter {
-  readonly harnessId: string;
-  readonly commandCatalog?: HarnessCommandCatalog;
-  inspect(input?: { cwd?: string; refresh?: boolean }): Promise<Inspection>;
-  open(
-    input: Record<string, unknown> & { kind: string; cwd: string },
-  ): Promise<
-    | { ok: true; value: HarnessSessionLike }
-    | { ok: false; error: { code: string; message: string } }
-  >;
-  close(): Promise<void>;
-}
-
-export interface HarnessSessionLike {
-  readonly harnessId: string;
-  readonly capabilities: {
-    configuration?: { selectPermissionMode: boolean; permissionModeScope?: "live" | "atCreate" };
-    steering?: { native?: boolean };
-  };
-  readonly initialState: {
-    nativeRef?: unknown;
-    effectiveModel?: ModelRef;
-    effectiveThinkingOptionId?: string;
-    effectivePermissionModeId?: string;
-    resolvedModelLabel?: string;
-  };
-  readonly initialUsage: unknown;
-  readonly outputs: AsyncIterable<
-    | { kind: "event"; event: Record<string, unknown> & { type: string } }
-    | { kind: "interaction"; interaction: Record<string, unknown> & { type: string } }
-  >;
-  readonly commands?: {
-    list(): Promise<unknown>;
-    execute(command: {
-      turnId: string;
-      commandId: string;
-      arguments?: unknown;
-    }): Promise<{ ok: boolean; error?: { message: string } }>;
-  };
-  hasBackgroundWork?(): boolean;
-  readSnapshot(): Promise<
-    | { ok: true; value: { turns: unknown[]; state?: unknown } }
-    | { ok: false; error: { code: string; message: string } }
-  >;
-  execute(
-    command: Record<string, unknown>,
-  ): Promise<
-    { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } }
-  >;
-  close(): Promise<void>;
-}
+import type { Adapter, Inspection } from "@codexhost/session-runtime";
+export type {
+  Adapter,
+  Inspection,
+  HarnessSessionLike,
+  PermissionModeCatalog,
+} from "@codexhost/session-runtime";
 
 interface HarnessEntry {
   manifest: HarnessManifest;

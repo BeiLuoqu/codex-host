@@ -7,15 +7,8 @@
 import { randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
 
-export class RpcError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly details: object = {},
-  ) {
-    super(message);
-  }
-}
+export { SessionRuntimeError as RpcError } from "@codexhost/session-runtime";
+import { SessionRuntimeError as RpcError } from "@codexhost/session-runtime";
 
 export interface RpcContext {
   /** Connection-scoped identity, when the browser supplied one. */
