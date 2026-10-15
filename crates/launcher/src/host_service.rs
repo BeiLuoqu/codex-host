@@ -20,6 +20,14 @@ struct ReadyOwner {
     started_at_micros: u64,
     executable: PathBuf,
 }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeExitProof {
+    version: u8,
+    pid: u32,
+    generation: String,
+    data_root: PathBuf,
+}
 fn owner_snapshot(data: &Path) -> Option<codexhost_platform::ProcessSnapshot> {
     let record = fs::read(data.join("shared-host-ready.json"))
         .ok()
@@ -235,6 +243,11 @@ fn serve(mut options: Options) -> Result<(), Box<dyn Error>> {
     }
     let _independent = codexhost_platform::register_independent_service()?;
     let node_ready = ready.with_extension("node");
+    let generation = format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    );
     let mut command = Command::new(&options.node);
     clean(&mut command);
     command
@@ -247,6 +260,7 @@ fn serve(mut options: Options) -> Result<(), Box<dyn Error>> {
         .arg(&node_ready)
         .args(options.extras)
         .env("CODEXHOST_DATA_DIR", &options.data)
+        .env("CODEXHOST_SHARED_HOST_GENERATION", &generation)
         .env("CODEXHOST_HOST_RUNTIME_PATH", &options.runtime)
         .env("CODEXHOST_CLI_NODE_PATH", &options.node)
         .env("CODEXHOST_HOST_NODE_PATH", &options.node)
@@ -285,6 +299,19 @@ fn serve(mut options: Options) -> Result<(), Box<dyn Error>> {
         let _ = child.force_terminate();
         thread::sleep(Duration::from_millis(100));
     }
+    // Only this supervisor, while retaining native admission, publishes proof.
+    // A replacement Node cannot infer descendant exit from a dead root PID.
+    let data_root = node_entrypoint_path(&fs::canonicalize(&options.data)?);
+    let proof = NativeExitProof {
+        version: 1,
+        pid: child.id(),
+        generation,
+        data_root,
+    };
+    publish_status(
+        &options.data.join("shared-host-exit-v1.json"),
+        &serde_json::to_string(&proof)?,
+    )?;
     let _ = fs::remove_file(options.data.join("shared-host-ready.json"));
     FileExt::unlock(&lock)?;
     result

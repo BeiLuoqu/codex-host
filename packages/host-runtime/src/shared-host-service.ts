@@ -12,6 +12,7 @@ import { prepareLocalCodex } from "./native-account-host.js";
 import { startClientChannelServer } from "./client-channel-server.js";
 import { startConsoleControlServer } from "./console-control-server.js";
 import { SharedThreadOwner } from "./shared-thread-owner.js";
+import { SharedWebCodexOwner } from "./web-codex-owner.js";
 import { sharedHostDesktop } from "./shared-host-desktop.js";
 import type { DelegationControlRegistration } from "./delegation-types.js";
 import { watchRemoteListenerSupervisor } from "./remote-listener-supervisor.js";
@@ -149,6 +150,17 @@ export async function runSharedHostService(
           },
         });
         const running = host.run();
+        const webCodex = new SharedWebCodexOwner(
+          hostEnvironment,
+          host.clientEvents,
+          async (id) =>
+            (await store.getThread(id as Parameters<typeof store.getThread>[0])) !== null,
+          async (method, params) => {
+            const reply = await host.handleClientRequest(method, params);
+            if ("error" in reply) throw new Error(reply.error.message);
+            return reply.result;
+          },
+        );
         let stopping = false;
         const stop = () => {
           stopping = true;
@@ -180,6 +192,7 @@ export async function runSharedHostService(
         process.once("SIGTERM", stop);
         process.once("SIGINT", stop);
         try {
+          await webCodex.initialize();
           channel = await startClientChannelServer({
             environment: env,
             owner: "service",
@@ -193,6 +206,7 @@ export async function runSharedHostService(
               handleClientRequest: (method, params) => host.handleClientRequest(method, params),
               clientSnapshot: (id) => host.clientSnapshot(id),
               respondClient: (input) => host.respondClient(input),
+              webCodex,
             },
           });
           console = await startConsoleControlServer({
@@ -219,6 +233,7 @@ export async function runSharedHostService(
           process.removeListener("SIGTERM", stop);
           process.removeListener("SIGINT", stop);
           stop();
+          await webCodex.close();
           await Promise.allSettled([channel?.close(), console?.close(), remoteListener?.close()]);
           try {
             await running;

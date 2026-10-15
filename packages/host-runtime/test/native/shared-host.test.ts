@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, chmod, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -143,6 +143,26 @@ for (const first of ["Web", "Desktop"])
         return client;
       };
       const web = await connect();
+      // Cold isolated configuration acquires a separate home lock without starting native Codex.
+      const isolatedCommand = path.join(root, "isolated-native-agent");
+      const isolatedHome = path.join(root, "isolated-codex-home");
+      const isolatedConfiguration = {
+        home: isolatedHome,
+        command: isolatedCommand,
+        pluginRoots: [path.join(repository, "packages/adapters")],
+      };
+      let isolatedScope: string | undefined;
+      if (process.platform !== "win32") {
+        await writeFile(isolatedCommand, `#!${process.execPath}\nprocess.exit(0);\n`);
+        await chmod(isolatedCommand, 0o700);
+        const configured = await web.configureWebCodex(isolatedConfiguration);
+        isolatedScope = configured.scope;
+        const lock = JSON.parse(
+          await readFile(path.join(isolatedHome, ".codexhost-source-owner-v1.lock"), "utf8"),
+        );
+        assert.equal(lock.pid, endpoint.pid);
+        assert.match(lock.generation, /^\d+-\d+$/u);
+      }
       const desktop = await connectLocalSharedHost({ launcher, runtime, dataDirectory: data });
       t.after(() => desktop.close());
       const id =
@@ -233,6 +253,25 @@ for (const first of ["Web", "Desktop"])
       const newOwner = await discoverHostClientChannel(path.join(data, "client-hosts"));
       assert.ok(newOwner);
       assert.notEqual(newOwner.epoch, endpoint.epoch);
+      const exitProof = JSON.parse(
+        await readFile(path.join(data, "shared-host-exit-v1.json"), "utf8"),
+      );
+      assert.equal(exitProof.pid, endpoint.pid);
+      assert.equal(exitProof.dataRoot, await realpath(data));
+      if (isolatedScope) {
+        const configuration = await recovered.configureWebCodex(isolatedConfiguration);
+        assert.equal(configuration.scope, isolatedScope);
+        assert.deepEqual(configuration.sessionIds, []);
+        const lock = JSON.parse(
+          await readFile(path.join(isolatedHome, ".codexhost-source-owner-v1.lock"), "utf8"),
+        );
+        assert.equal(
+          lock.pid,
+          newOwner.pid,
+          "exact prior native proof admits the replacement isolated owner",
+        );
+        assert.notEqual(lock.generation, exitProof.generation);
+      }
       const list = await recovered.request<{ data: Array<{ id: string }> }>("thread/list", {});
       assert.equal(list.data.filter((thread) => thread.id === id).length, 1);
       assert.ok(

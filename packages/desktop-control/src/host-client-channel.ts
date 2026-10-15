@@ -10,6 +10,11 @@ import {
   type ClientChannelEvent,
   type ClientChannelResponse,
   type ClientThreadSnapshot,
+  webCodexConfigurationReplySchema,
+  type WebCodexConfiguration,
+  type WebCodexConfigurationReply,
+  type WebCodexRequest,
+  type WebCodexStreamRequest,
 } from "@codexhost/shared-contracts";
 
 export type HostClientUpdate = ClientChannelEvent | { type: "connection"; online: boolean };
@@ -228,6 +233,95 @@ export class HostClientChannel {
   }
   request<T>(method: string, params: Record<string, unknown>): Promise<T> {
     return this.post("/v1/rpc", { method, params });
+  }
+  get epoch(): string {
+    return this.descriptor.epoch;
+  }
+  async configureWebCodex(
+    configuration: WebCodexConfiguration,
+  ): Promise<WebCodexConfigurationReply> {
+    const value = webCodexConfigurationReplySchema.parse(
+      await this.post("/v1/web-codex/configure", configuration),
+    );
+    if (value.cursor.epoch !== this.descriptor.epoch)
+      throw new Error("Obsolete isolated owner configuration");
+    return value;
+  }
+  webCodexRequest<T>(request: WebCodexRequest): Promise<T> {
+    return this.post("/v1/web-codex/request", request);
+  }
+  /** Existing owner journal stream. Each attachment begins with an absolute baseline. */
+  async webCodexStream(
+    request: WebCodexStreamRequest,
+    options: {
+      signal: AbortSignal;
+      item(value: unknown): void;
+      fail(error: Error): void;
+    },
+  ): Promise<void> {
+    if (this.stopped || !this.online) throw new Error("owner-offline");
+    const generation = this.generation;
+    const response = await fetch(`http://127.0.0.1:${this.descriptor.port}/v1/web-codex/stream`, {
+      method: "POST",
+      redirect: "error",
+      signal: options.signal,
+      headers: {
+        authorization: `Bearer ${this.descriptor.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+    if (
+      !response.ok ||
+      !response.body ||
+      response.headers.get("x-codexhost-epoch") !== request.epoch
+    ) {
+      await response.body?.cancel();
+      throw new Error("Owner stream unavailable or obsolete");
+    }
+    const ready = Promise.withResolvers<undefined>();
+    const body = response.body;
+    let started = false;
+    void (async () => {
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (!options.signal.aborted) {
+          const chunk = await reader.read();
+          if (chunk.done) throw new Error("Owner stream ended; reconnect to read a fresh baseline");
+          buffer += decoder.decode(chunk.value, { stream: true });
+          if (buffer.length > 16 * 1024 * 1024) throw new Error("Owner stream frame too large");
+          let newline: number;
+          while ((newline = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, newline);
+            buffer = buffer.slice(newline + 1);
+            if (!line.trim()) continue;
+            if (
+              this.stopped ||
+              generation !== this.generation ||
+              this.descriptor.epoch !== request.epoch
+            )
+              throw new Error("Obsolete owner stream; reconnect to read a fresh baseline");
+            const value = JSON.parse(line) as { type: string; value?: unknown; message?: string };
+            if (value.type !== "item") throw new Error(value.message ?? "Owner stream ended");
+            options.item(value.value);
+            if (!started) {
+              started = true;
+              ready.resolve(undefined);
+            }
+          }
+        }
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        if (!started) ready.reject(failure);
+        if (!options.signal.aborted) options.fail(failure);
+      } finally {
+        if (!started) ready.reject(new Error("Owner stream closed before baseline"));
+        await reader.cancel().catch(() => {});
+      }
+    })();
+    await ready.promise;
   }
   async snapshot(threadId: string): Promise<ClientThreadSnapshot> {
     const generation = this.generation;
