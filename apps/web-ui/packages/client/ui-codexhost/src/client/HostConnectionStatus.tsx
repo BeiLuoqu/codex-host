@@ -35,14 +35,16 @@ export function HostConnectionStatus({
   if (!state) return null;
   return (
     <>
-      <span
-        className={css.status}
-        role="status"
-        data-native-connection={state}
-        title={state === "connected" ? t("connection.liveHint") : t("connection.reconnectingHint")}
-      >
-        {state === "connected" ? t("connection.live") : t("connection.reconnecting")}
-      </span>
+      {state === "reconnecting" ? (
+        <span
+          className={css.status}
+          role="status"
+          data-native-connection={state}
+          title={t("connection.reconnectingHint")}
+        >
+          {t("connection.reconnecting")}
+        </span>
+      ) : null}
       {error && dismissed !== key ? (
         <Toast key={key} text={error} holdMs={8000} onDone={() => setDismissed(key)} />
       ) : null}
