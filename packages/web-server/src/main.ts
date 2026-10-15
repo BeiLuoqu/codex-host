@@ -31,6 +31,7 @@ import { createChHostClient } from "./ch-host-client.ts";
 import { serveChClientGateway } from "./ch-client-gateway.ts";
 import { harnessIconStyles } from "./harness-icon-styles.ts";
 import { Settings } from "./settings.ts";
+import { formatWebStartup, type NetworkAccessUrl } from "./startup-display.ts";
 import { DataDir } from "./store.ts";
 import { EventHub, RpcRegistry, StreamRegistry } from "./transport.ts";
 import { WebAssets, contentTypeOf, type AssetResponse } from "./web-assets.ts";
@@ -498,16 +499,14 @@ server.listen(Number(values.port), values.host, () => {
   const port = (server.address() as { port: number }).port;
   const query = auth === undefined ? "" : `?token=${auth.token}`;
   const wildcard = values.host === "0.0.0.0" || values.host === "::";
-  console.log(
-    `codexhost web: http://${wildcard ? "127.0.0.1" : (values.host as string)}:${String(port)}/${query}`,
-  );
+  const localUrl = `http://${wildcard ? "127.0.0.1" : (values.host as string)}:${String(port)}/${query}`;
+  const urls: NetworkAccessUrl[] = [];
   if (wildcard) {
     // Tailscale hands out CGNAT addresses (100.64.0.0/10): reachable from the phone on any network.
     const isTailscale = (ip: string): boolean => {
       const [a, b] = ip.split(".").map(Number);
       return a === 100 && b !== undefined && b >= 64 && b <= 127;
     };
-    const urls: Array<{ kind: "tailscale" | "lan"; url: string }> = [];
     for (const addresses of Object.values(networkInterfaces())) {
       for (const address of addresses ?? []) {
         if (address.family !== "IPv4" || address.internal) continue;
@@ -518,22 +517,22 @@ server.listen(Number(values.port), values.host, () => {
       }
     }
     urls.sort((a, b) => Number(b.kind === "tailscale") - Number(a.kind === "tailscale"));
-    for (const entry of urls)
-      console.log(`  ${entry.kind === "tailscale" ? "tailscale" : "lan"}: ${entry.url}`);
-    const preferred = urls[0];
-    if (preferred !== undefined && process.stdout.isTTY) {
-      console.log(
-        preferred.kind === "tailscale"
-          ? "  Scan with your phone (any network with Tailscale on):"
-          : "  Scan with your phone (same Wi-Fi):",
-      );
-      qrcode.generate(preferred.url, { small: true }, (code: string) =>
-        console.log(code.replace(/^/gmu, "  ")),
-      );
-    }
   }
-  console.log(`  data: ${data.root}`);
-  console.log(`  harnesses: ${harnesses.ids().join(", ") || "(none found)"}`);
+  const printStartup = (qrCode?: string) =>
+    console.log(
+      formatWebStartup({
+        localUrl,
+        networkUrls: urls,
+        dataDirectory: data.root,
+        ...(qrCode === undefined ? {} : { qrCode }),
+      }),
+    );
+  const preferred = urls[0];
+  if (preferred !== undefined && process.stdout.isTTY) {
+    qrcode.generate(preferred.url, { small: true }, printStartup);
+  } else {
+    printStartup();
+  }
   // Warm Harness inspection so the first composer render already has models.
   if (values["import-recent"] !== undefined) {
     void sessions.importRecent(Number(values["import-recent"])).then((count) => {
@@ -546,19 +545,9 @@ server.listen(Number(values.port), values.host, () => {
     sessions instanceof ChSessions || sessions instanceof MixedSessions
       ? sessions.catalog.models()
       : (codexHarnesses ?? harnesses).modelCatalog()
-  )
-    .then((catalog) => {
-      console.log(
-        `  ready: ${catalog.groups.map((group) => `${group.name} (${String(group.models.length)} models)`).join(", ") || "none"}`,
-      );
-      for (const failure of catalog.failures)
-        console.log(`  unavailable: ${failure.name}: ${failure.message}`);
-    })
-    .catch((error: unknown) => {
-      console.log(
-        `  catalog unavailable: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
+  ).catch((error: unknown) => {
+    console.log(`  catalog unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  });
 });
 
 async function shutdown(): Promise<void> {

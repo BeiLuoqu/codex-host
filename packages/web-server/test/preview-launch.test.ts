@@ -37,7 +37,7 @@ it("removes inherited Host routing and Node injection without changing the paren
   assert.deepEqual(parent, original);
   assert.equal(args[args.indexOf("--harness") + 1], "all");
   assert.equal(args[args.indexOf("--adapters") + 1], join(bundle, "adapters"));
-  assert.equal(args[args.indexOf("--host") + 1], "127.0.0.1");
+  assert.equal(args[args.indexOf("--host") + 1], "0.0.0.0");
   assert.equal(args[args.indexOf("--port") + 1], "4400");
   assert.equal(args[args.indexOf("--data") + 1], join(homedir(), ".codexhost", "web"));
   assert.match(
@@ -57,6 +57,14 @@ it("keeps Web data under the selected Host unless explicitly overridden", () => 
     assert.equal(launch.args[launch.args.indexOf("--data") + 1], resolve("custom-host", "web"));
     const explicit = previewLaunch("/packed", { ...options, data: resolve("separate-web") }, {});
     assert.equal(explicit.args[explicit.args.indexOf("--data") + 1], resolve("separate-web"));
+  }
+});
+
+it("allows an explicit loopback or interface binding without disabling authentication", () => {
+  for (const host of ["127.0.0.1", "100.64.0.1"]) {
+    const { args } = previewLaunch("/packed", { host }, {});
+    assert.equal(args[args.indexOf("--host") + 1], host);
+    assert.equal(args.includes("--no-auth"), false);
   }
 });
 

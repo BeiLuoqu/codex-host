@@ -1,4 +1,4 @@
-/** Isolated, localhost-only preview of the packed Web application. */
+/** Environment-isolated, authenticated preview of the packed Web application. */
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { defaultWebDataDirectory } from "./data-paths.ts";
@@ -7,6 +7,7 @@ import { defaultWebDataDirectory } from "./data-paths.ts";
 export interface PreviewOptions {
   "codex-command"?: string;
   "codex-home"?: string;
+  host?: string;
   port?: string;
   data?: string;
   workspace?: string;
@@ -68,7 +69,7 @@ export function previewLaunch(
         ["ch-launcher", "ch-host-runtime", "ch-data", "ch-codex-home", "ch-plugins"] as const
       ).flatMap((key) => (options[key] ? [`--${key}`, options[key] as string] : [])),
       "--host",
-      "127.0.0.1",
+      options.host ?? "0.0.0.0",
       "--port",
       options.port ?? "4400",
       "--adapters",

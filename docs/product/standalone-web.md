@@ -18,9 +18,9 @@ npm start web
 npm start web -- --port 4401
 ```
 
-Web 默认端口为 **4400**，控制台默认端口为 **4399**；可用 `--port` 显式覆盖 Web 端口。
+Web 默认端口为 **4400**，控制台默认端口为 **4399**；可用 `--port` 显式覆盖 Web 端口。`npm start web` 默认监听所有 IPv4 网卡；手机可使用终端输出的带令牌局域网或 Tailscale 地址。需要相应网络可达且防火墙允许入站，不会自动配置穿透或公网端口转发。不要将明文 HTTP 直接暴露到不可信网络；跨网络优先使用 Tailscale，或配置 HTTPS 反向代理。
 
-`npm start web` 复用已构建的 Web 发行目录，不触发 Desktop 清理或重启；不带 `web` 的 `npm start` 仍启动 Desktop。Desktop 启动前只清理旧 Desktop 及已核实的 Controller，不按 `codexhost` 进程名清理运行时；Desktop 原生 Launcher 负责自身进程树退出，并保留已经独立运行的共享 Host。因此先启动 Web 再启动 Desktop 不应停止共享后台或其任务。原 `npm run start:web` 保留兼容。
+`npm start web` 默认先执行 `build:web`，完整构建并打包当前工作树后启动；成功时仅显示构建进度和耗时，不刷依赖构建明细。构建失败则不启动旧产物，显示末尾最多 64,000 字符的诊断；完整输出可通过 `npm run build:web` 查看。`npm start web -- --no-build` 显式复用已有 Web 发行目录。两种方式都不触发 Desktop 清理或重启；不带 `web` 的 `npm start` 仍启动 Desktop。Desktop 启动前只清理旧 Desktop 及已核实的 Controller，不按 `codexhost` 进程名清理运行时；Desktop 原生 Launcher 负责自身进程树退出，并保留已经独立运行的共享 Host。因此先启动 Web 再启动 Desktop 不应停止共享后台或其任务。原 `npm run start:web` 保留兼容。
 
 `build:web` 编译当前工作树的 CH 包并调用已有插件构建器，构建原生 Launcher，随后编译前端和打包。插件输入为 `packages/host-runtime/dist/plugins`，不是已安装的 CH.app 或另一个仓库。用量统计专用插件不作为聊天 Harness；Web 另行打包同仓库的 Codex Adapter。
 
@@ -215,7 +215,7 @@ Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 
 
 ## 并发运行与预览
 
-`npm start web` 固定监听 localhost 并保留访问令牌认证，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。独立模式通过 `--session-source standalone` 显式选择；其预览仍默认只启用 Claude Code。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost/web/`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认与 `--harness all` 一样选择全部打包的会话插件（包括 Codex、Pi，不包括用量统计专用插件）。显式选择缺失插件或用量统计插件仍会在启动前报错；机器没有安装 CLI 或检查连接失败则是正常的不可用状态，不阻止 Web 启动，也不自动安装、登录或发送模型请求。
+`npm start web` 默认监听 `0.0.0.0:4400`，允许局域网及 Tailscale IPv4 地址访问，并保留访问令牌认证与同源校验；可通过 `npm start web -- --host 127.0.0.1` 限制为仅本机访问，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。独立模式通过 `--session-source standalone` 显式选择；其预览仍默认只启用 Claude Code。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost/web/`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认与 `--harness all` 一样选择全部打包的会话插件（包括 Codex、Pi，不包括用量统计专用插件）。显式选择缺失插件或用量统计插件仍会在启动前报错；机器没有安装 CLI 或检查连接失败则是正常的不可用状态，不阻止 Web 启动，也不自动安装、登录或发送模型请求。
 
 启用插件不等于机器已安装、认证对应 CLI，也不等于所有能力已完成 Web 验收。模型菜单只列检查就绪的 Harness；未安装的不会列为可用，检查失败由目录接口报告。Pi 不再被预览入口排除，但其独立启动能力仍需专项验收；Codex 的加载/路由及隔离由假原生协议和浏览器回归覆盖，真实模型与高级能力仍需专项验收；其他插件所需的可选 Host 上下文以及完整界面能力也需逐项验收。不要从 CH 承载的 Agent 会话直接启动继承原环境的 `server.mjs`，也不要把 Desktop 的环境变量恢复到预览进程。
 

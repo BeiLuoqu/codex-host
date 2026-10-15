@@ -39,7 +39,10 @@ function materializeArtifacts(root, platform, nodePath) {
 
 function exitingChild(code = 0, signal = null) {
   const child = new EventEmitter();
-  queueMicrotask(() => child.emit("exit", code, signal));
+  queueMicrotask(() => {
+    child.emit("exit", code, signal);
+    child.emit("close", code, signal);
+  });
   return child;
 }
 
@@ -62,7 +65,7 @@ afterEach(() => {
 
 describe("development Desktop start", () => {
   it.each([0, 7])(
-    "routes web to the preview without Desktop cleanup or build (exit %s)",
+    "routes web --no-build to the preview without Desktop cleanup or build (exit %s)",
     async (code) => {
       const root = temporaryDirectory();
       const nodePath = path.join(root, "node");
@@ -70,7 +73,7 @@ describe("development Desktop start", () => {
       const spawnImplementation = vi.fn(() => exitingChild(code));
       expect(
         await runDevelopmentDesktop({
-          arguments_: ["web", "--port", "3181", "--session-source", "standalone"],
+          arguments_: ["web", "--no-build", "--port", "3181", "--session-source", "standalone"],
           root,
           nodePath,
           platform: "darwin",
@@ -91,6 +94,51 @@ describe("development Desktop start", () => {
         ],
         expect.objectContaining({ cwd: root, env: environment, stdio: "inherit" }),
       );
+    },
+  );
+
+  it.each([0, 7])(
+    "builds Web before preview and stops on build failure (exit %s)",
+    async (code) => {
+      vi.spyOn(console, "log").mockImplementation(() => undefined);
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const root = temporaryDirectory();
+      const nodePath = path.join(root, "node");
+      const environment = { npm_execpath: "/fixture/npm-cli.js" };
+      const spawnImplementation = vi
+        .fn()
+        .mockImplementationOnce(() => exitingChild(code))
+        .mockImplementation(() => exitingChild());
+      expect(
+        await runDevelopmentDesktop({
+          arguments_: ["web", "--port", "3181"],
+          root,
+          nodePath,
+          environment,
+          spawnImplementation,
+        }),
+      ).toBe(code);
+      expect(spawnImplementation).toHaveBeenNthCalledWith(
+        1,
+        nodePath,
+        [environment.npm_execpath, "run", "build:web"],
+        expect.objectContaining({ cwd: root, env: environment, stdio: ["ignore", "pipe", "pipe"] }),
+      );
+      expect(spawnImplementation).toHaveBeenCalledTimes(code === 0 ? 2 : 1);
+      if (code === 0) {
+        expect(spawnImplementation).toHaveBeenNthCalledWith(
+          2,
+          nodePath,
+          [
+            "--import",
+            "tsx",
+            path.join(root, "packages/web-server/scripts/preview.ts"),
+            "--port",
+            "3181",
+          ],
+          expect.objectContaining({ cwd: root, env: environment, stdio: "inherit" }),
+        );
+      }
     },
   );
 

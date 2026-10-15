@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { constants, accessSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { runQuietWebBuild } from "./build.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
@@ -151,7 +152,7 @@ export function usage() {
        npm start web [-- --port 3181]
 
 Stop any running Codex Desktop, then build and run the current codexhost worktree.
-The web subcommand starts the built Web preview without stopping Desktop.
+The web subcommand builds and starts the Web preview without stopping Desktop.
 
 arguments:
   version            set the runtime version, e.g. npm start 0.12.0
@@ -279,11 +280,12 @@ export function npmBuildInvocation(
   environment = process.env,
   platform = process.platform,
   nodePath = process.execPath,
+  script = "build",
 ) {
   const npmExecPath = environment.npm_execpath;
   return npmExecPath
-    ? { command: nodePath, arguments: [npmExecPath, "run", "build"] }
-    : { command: platform === "win32" ? "npm.cmd" : "npm", arguments: ["run", "build"] };
+    ? { command: nodePath, arguments: [npmExecPath, "run", script] }
+    : { command: platform === "win32" ? "npm.cmd" : "npm", arguments: ["run", script] };
 }
 
 export function runningDesktopCleanupInvocation(platform = process.platform) {
@@ -390,6 +392,14 @@ export async function runDevelopmentDesktop({
   spawnImplementation = spawn,
 } = {}) {
   if (arguments_[0] === "web") {
+    const webArguments = arguments_.slice(1);
+    if (!webArguments.includes("--no-build")) {
+      const buildResult = await runQuietWebBuild(
+        npmBuildInvocation(environment, platform, nodePath, "build:web"),
+        { root, spawnImplementation, environment },
+      );
+      if (buildResult.code !== 0) return buildResult.code ?? 1;
+    }
     const result = await runChild(
       {
         command: nodePath,
@@ -397,7 +407,7 @@ export async function runDevelopmentDesktop({
           "--import",
           "tsx",
           path.join(root, "packages/web-server/scripts/preview.ts"),
-          ...arguments_.slice(1),
+          ...webArguments.filter((argument) => argument !== "--no-build"),
         ],
       },
       root,
