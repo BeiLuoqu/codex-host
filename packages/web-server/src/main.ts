@@ -215,6 +215,14 @@ const remoteCodex =
               ...(values["web-codex-legacy-stopped"] ? { legacyWriterStopped: true as const } : {}),
             }
           : {}),
+      }).catch((error: unknown) => {
+        // A missing or disconnected optional Harness must not prevent Web from starting.
+        if (values["web-codex-migrate-source"]) throw error;
+        console.warn(
+          "[codex] unavailable:",
+          error instanceof Error ? error.message : String(error),
+        );
+        return undefined;
       })
     : undefined;
 let standaloneOwnership: SessionOwnership | undefined;

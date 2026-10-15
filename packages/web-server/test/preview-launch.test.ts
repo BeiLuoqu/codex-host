@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { it } from "node:test";
 import { promisify } from "node:util";
 
-import { PREVIEW_EXCLUDED_HARNESSES, previewLaunch } from "../src/preview-launch.ts";
+import { previewLaunch } from "../src/preview-launch.ts";
 
 const exec = promisify(execFile);
 
@@ -35,7 +35,7 @@ it("removes inherited Host routing and Node injection without changing the paren
     ANTHROPIC_API_KEY: "test-credential",
   });
   assert.deepEqual(parent, original);
-  assert.equal(args[args.indexOf("--harness") + 1], "claude-code");
+  assert.equal(args[args.indexOf("--harness") + 1], "all");
   assert.equal(args[args.indexOf("--adapters") + 1], join(bundle, "adapters"));
   assert.equal(args[args.indexOf("--host") + 1], "127.0.0.1");
   assert.match(args[args.indexOf("--data") + 1] as string, /\.codexhost-web-preview$/u);
@@ -69,19 +69,15 @@ it("allows explicit Codex selection and CLI/home configuration without inheritin
   assert.equal(launch.args[launch.args.indexOf("--codex-command") + 1], "/native/codex");
   assert.equal(launch.args[launch.args.indexOf("--codex-home") + 1], "/web/home");
   assert.deepEqual(launch.env, {});
-  assert.equal(PREVIEW_EXCLUDED_HARNESSES.includes("codex"), true);
 });
 
-it("rejects Pi, empty ids and unsafe selection syntax before spawning", () => {
-  for (const harness of [
-    "pi",
-    "claude-code,pi",
-    "",
-    "claude-code,",
-    "../other",
-    "--no-auth",
-    "PI",
-  ]) {
+it("allows Pi like every other session Harness", () => {
+  const { args } = previewLaunch("/packed", { harness: "pi,codex" }, {});
+  assert.equal(args[args.indexOf("--harness") + 1], "pi,codex");
+});
+
+it("rejects empty ids and unsafe selection syntax before spawning", () => {
+  for (const harness of ["", "claude-code,", "../other", "--no-auth", "PI"]) {
     assert.throws(() => previewLaunch("/packed", { harness }, {}), /not allowed/u);
   }
 });

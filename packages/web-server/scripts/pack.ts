@@ -219,26 +219,25 @@ A running old Desktop-owned Host is never taken over; arrange its update/restart
 Explicit --ch-cdp selects the legacy Desktop path. Pin writes still require Desktop's native service.
 Recovery reconnects and reloads history; it does not resend uncertain commands.
 
-For an authenticated localhost preview, use \`node preview.mjs\` (requires bundled Claude Code).
+For an authenticated localhost preview, use \`node preview.mjs\`.
 This launcher removes inherited CODEXHOST_* variables, CODEX_CLI_PATH, NODE_OPTIONS and NODE_PATH from the server environment.
-It defaults to Claude Code, listens on 127.0.0.1, keeps authentication enabled,
+It defaults to every bundled session Harness (including Codex and Pi), listens on 127.0.0.1, keeps authentication enabled,
 and uses ~/.codexhost-web-preview and ~/codexhost-web-preview-workspace.
-Use \`--harness all\` for every bundled session plugin except Codex/Pi, or \`--harness <id,...>\` for a subset.
-Selection requires installed/authenticated native CLIs and does not imply full Web capability verification.
+No Harness selection is needed; \`--harness <id,...>\` remains an optional advanced subset override.
+Missing CLIs and connection failures are normal unavailable states, not Web startup failures.
+Using a Harness requires an installed/authenticated native CLI; default enablement does not imply full Web capability verification.
 Optional preview flags: --port, --data, --workspace, --harness, --ch-data, --ch-codex-home, --codex-command, --codex-home.
 Ctrl+C stops Web only. Explicit backend maintenance: native/codexhost host stop --node <absolute-node> --host-runtime <absolute-host-runtime.mjs> --data <absolute-ch-data>.
 Close clients first to prevent their on-demand restart; stopping the backend also stops its tasks.
 Do not launch server.mjs directly from a CodexHost-managed session with inherited Desktop settings.
-Pi remains excluded from preview. Codex requires explicit selection and an absolute native CLI path:
-\`node preview.mjs --harness codex --codex-command /absolute/path/to/codex\`.
-Use \`--harness claude-code,codex\` to show both CH external sessions and isolated Web Codex sessions.
+The preview launcher finds the Codex CLI through native installation inspection or PATH. \`--codex-command /absolute/path/to/codex\` is an optional override.
 The Web Codex home defaults to \`<web-data>/codex-home\`; --codex-home can select another isolated home.
 Authenticate/configure that home explicitly using the native CLI with CODEX_HOME set to it.
 No Desktop credentials or history are copied, and the GUI home and proxy/shim entrypoints are rejected.
 Codex is never added to the shared Host's enabled.json; GUI native Codex requests keep their official route.
 
 Included Harness plugins: ${["codex", ...extraAdapters.map((plugin) => plugin.id)].join(", ")}.
-External plugins load in the canonical Host in shared mode. Explicitly enabled Codex loads only in the Web registry.
+External plugins load in the canonical Host in shared mode. Codex loads only in the isolated Web execution scope.
 Standalone mode can load explicitly selected external plugins directly from \`adapters/\`.
 Codex Desktop and CodexHost.app are not required for Web external Threads.
 Default plugin input is the build of this checkout, not an installed CodexHost.app.

@@ -34,11 +34,9 @@ npm run start:web -- --port 3181
 
 ## Web Codex 加载隔离与路由
 
-默认不启用 Codex 执行插件。构建后通过独立的原生 CLI 路径显式启用：
+`npm start web` 默认启用所有打包的会话 Harness，包括 Codex 与 Pi，无需指定 `--harness` 或 `--codex-command`。需要更换端口时只传 `--port`。启动入口通过原生 Launcher 的安装检查或 PATH 为现有 Codex 连接补齐 CLI 路径。Codex 连接失败时记录日志并继续启动 Web；显式迁移失败仍报错。Adapter、模型目录、会话及登录行为保持不变。
 
-```sh
-npm run start:web -- --harness codex --codex-command /absolute/path/to/codex --port 3181
-```
+高级诊断仍可指定 `--harness <id,...>`、`--codex-command /absolute/path/to/codex` 等覆盖项，但它们不再是常规启动的前提。
 
 共享模式中 CH 外部会话目录继续由后台提供，Host 额外拥有隔离 Codex，不把该插件加入 Desktop 预装清单或共享 `enabled.json`。插件 Manifest 的安装身份允许 `codex`，但 GUI/CH 的 external 路由、目录和会话导入契约继续拒绝这个身份。Loader/Registry 默认 `external`，在 import、工厂和 warmup 前过滤 Codex；只有显式配置的 `web-codex` scope 可以加载它：shared 由 Host 装配，standalone 由独立 composition 装配。`codex-usage` 仍是独立用量插件。
 
@@ -203,9 +201,9 @@ Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 
 
 ## 并发运行与预览
 
-`start:web` 固定监听 localhost 并保留访问令牌认证，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。独立模式通过 `--session-source standalone` 显式选择；其预览默认只启用 Claude Code。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost-web-preview`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认仅 Claude Code；`npm run start:web -- --harness all` 启用本发行包除 Codex、Pi 和用量统计专用插件外的所有会话插件。显式选择 Pi、缺失插件或用量统计插件会在启动前报错；Codex 通过上述显式配置启用。
+`npm start web` 固定监听 localhost 并保留访问令牌认证，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。独立模式通过 `--session-source standalone` 显式选择；其预览仍默认只启用 Claude Code。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost-web-preview`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认与 `--harness all` 一样选择全部打包的会话插件（包括 Codex、Pi，不包括用量统计专用插件）。显式选择缺失插件或用量统计插件仍会在启动前报错；机器没有安装 CLI 或检查连接失败则是正常的不可用状态，不阻止 Web 启动，也不自动安装、登录或发送模型请求。
 
-启用插件不等于机器已安装、认证对应 CLI，也不等于所有能力已完成 Web 验收。模型菜单只列检查就绪的 Harness；未安装的不会列为可用，检查失败由目录接口报告。Pi 的独立启动入口仍未验证，隔离预览拒绝启用；Codex 的加载/路由及隔离由假原生协议和浏览器回归覆盖，真实模型与高级能力仍需专项验收；其他插件所需的可选 Host 上下文以及完整界面能力也需逐项验收。不要从 CH 承载的 Agent 会话直接启动继承原环境的 `server.mjs`，也不要把 Desktop 的环境变量恢复到预览进程。
+启用插件不等于机器已安装、认证对应 CLI，也不等于所有能力已完成 Web 验收。模型菜单只列检查就绪的 Harness；未安装的不会列为可用，检查失败由目录接口报告。Pi 不再被预览入口排除，但其独立启动能力仍需专项验收；Codex 的加载/路由及隔离由假原生协议和浏览器回归覆盖，真实模型与高级能力仍需专项验收；其他插件所需的可选 Host 上下文以及完整界面能力也需逐项验收。不要从 CH 承载的 Agent 会话直接启动继承原环境的 `server.mjs`，也不要把 Desktop 的环境变量恢复到预览进程。
 
 共享来源由唯一后台恢复/写入 Native Session；两个界面同时打开不是两个执行所有者。显式 standalone 则独立管理会话，不能同时恢复并写入共享后台正在使用的 Native Session；数据目录隔离不等于原生文件、CLI 账号或额度隔离。不同任务也不应同时修改同一工作目录。
 

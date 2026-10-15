@@ -2,9 +2,6 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-/** Never auto-enable these with `--harness all`; Codex needs explicit native CLI setup. */
-export const PREVIEW_EXCLUDED_HARNESSES: readonly string[] = ["codex", "pi"];
-
 /** Optional preview paths, port and comma-separated Harness ids. */
 export interface PreviewOptions {
   "codex-command"?: string;
@@ -38,14 +35,9 @@ export function previewLaunch(
   args: string[];
   env: NodeJS.ProcessEnv;
 } {
-  const harnesses = [
-    ...new Set((options.harness ?? "claude-code").split(",").map((id) => id.trim())),
-  ];
+  const harnesses = [...new Set((options.harness ?? "all").split(",").map((id) => id.trim()))];
   for (const id of harnesses) {
-    if (
-      !/^[a-z0-9][a-z0-9-]*$/u.test(id) ||
-      (id !== "codex" && PREVIEW_EXCLUDED_HARNESSES.includes(id))
-    ) {
+    if (!/^[a-z0-9][a-z0-9-]*$/u.test(id)) {
       throw new Error(`Harness ${id || "(empty)"} is not allowed in the isolated preview`);
     }
   }

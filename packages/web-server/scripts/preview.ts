@@ -1,10 +1,10 @@
 /** Launch the packed preview without inheriting CodexHost routing. */
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
 
-import { PREVIEW_EXCLUDED_HARNESSES, previewLaunch } from "../src/preview-launch.ts";
+import { previewLaunch } from "../src/preview-launch.ts";
 
 const { values } = parseArgs({
   options: {
@@ -39,17 +39,20 @@ const available = readdirSync(adapters, { withFileTypes: true })
       kind?: string;
     },
   }));
+const requested =
+  values.harness ?? (values["session-source"] === "standalone" ? "claude-code" : "all");
 const harness =
-  values.harness === "all"
+  requested === "all"
     ? available
         .filter(
           ({ manifest }) =>
-            manifest.kind !== "usage" && !PREVIEW_EXCLUDED_HARNESSES.includes(manifest.id),
+            manifest.kind !== "usage" &&
+            !(values["session-source"] === "standalone" && manifest.id === "codex"),
         )
         .map(({ manifest }) => manifest.id)
         .sort()
         .join(",")
-    : values.harness;
+    : requested;
 const launch = previewLaunch(
   distribution,
   { ...values, ...(harness === undefined ? {} : { harness }) },
@@ -64,6 +67,31 @@ for (const id of selected.split(",")) {
     )
   ) {
     throw new Error(`Preview requires a bundled session Adapter for ${id}`);
+  }
+}
+// Supply the existing Codex connection's CLI path; no Adapter or owner contract changes.
+if (selected.split(",").includes("codex") && !values["codex-command"]) {
+  const launcher =
+    values["ch-launcher"] ??
+    resolve(distribution, "native", process.platform === "win32" ? "codexhost.exe" : "codexhost");
+  for (const [command, args, pattern] of [
+    [launcher, ["inspect"], /^executable_codex_cli=(.+)$/mu],
+    [process.platform === "win32" ? "where.exe" : "which", ["codex"], /^(.+)$/mu],
+  ] as const) {
+    try {
+      const { stdout } = await promisify(execFile)(command, [...args], {
+        env: launch.env,
+        timeout: 5000,
+        windowsHide: true,
+      });
+      const cli = pattern.exec(stdout)?.[1]?.trim();
+      if (cli) {
+        launch.args.push("--codex-command", cli);
+        break;
+      }
+    } catch {
+      // Not installed is normal; the server reports a failed Codex connection and continues.
+    }
   }
 }
 const child = spawn(process.execPath, launch.args, {

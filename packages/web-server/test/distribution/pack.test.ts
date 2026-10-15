@@ -175,7 +175,12 @@ it(
       { cwd: root, env: previewEnv },
     );
     const all = JSON.parse(allStdout) as { args: string[]; env: NodeJS.ProcessEnv };
-    assert.equal(all.args[all.args.indexOf("--harness") + 1], "claude-code,opencode");
+    assert.equal(all.args[all.args.indexOf("--harness") + 1], "claude-code,codex,opencode,pi");
+    const { stdout: defaultStdout } = await exec(process.execPath, [join(preview, "preview.mjs")], {
+      cwd: root,
+      env: previewEnv,
+    });
+    assert.deepEqual(JSON.parse(defaultStdout).args, all.args);
     assert.equal(all.args[all.args.indexOf("--host") + 1], "127.0.0.1");
     assert.equal(all.env.CODEXHOST_RUNTIME_TOKEN, undefined);
     assert.equal(all.args.includes("--no-auth"), false);
@@ -197,15 +202,6 @@ it(
     assert.equal(codex.args[codex.args.indexOf("--harness") + 1], "codex");
     assert.equal(codex.args[codex.args.indexOf("--codex-command") + 1], "/native/codex");
     assert.equal(codex.args[codex.args.indexOf("--codex-home") + 1], join(preview, "codex-home"));
-    for (const id of ["pi"]) {
-      await assert.rejects(
-        exec(process.execPath, [join(preview, "preview.mjs"), "--harness", id], {
-          cwd: root,
-          env: previewEnv,
-        }),
-        /not allowed/u,
-      );
-    }
     for (const id of ["missing", "usage"]) {
       await assert.rejects(
         exec(process.execPath, [join(preview, "preview.mjs"), "--harness", id], {
