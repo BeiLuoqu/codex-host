@@ -1,5 +1,6 @@
 /** Quiet Web builds: live terminal progress and bounded failure diagnostics. */
 import { spawn } from "node:child_process";
+import { runBuildProcess } from "./build-process.mjs";
 
 const buildStages = {
   "build:typescript": "TypeScript",
@@ -30,19 +31,14 @@ export async function runQuietWebBuild(
   let pendingLine = "";
   let result;
   try {
-    result = await new Promise((resolve, reject) => {
-      const child = spawnImplementation(invocation.command, invocation.arguments, {
-        cwd: root,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: environment,
-        windowsHide: false,
-      });
-      const capture = (chunk) => {
-        output = (output + String(chunk)).slice(-64_000);
-      };
-      child.stdout?.setEncoding("utf8");
-      child.stderr?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk) => {
+    const capture = (chunk) => {
+      output = (output + String(chunk)).slice(-64_000);
+    };
+    result = await runBuildProcess(invocation, {
+      root,
+      environment,
+      spawnImplementation,
+      onStdout: (chunk) => {
         capture(chunk);
         const previousStage = stage;
         const lines = (pendingLine + String(chunk)).split(/\r?\n/u);
@@ -58,11 +54,8 @@ export async function runQuietWebBuild(
           if (line === "codexhost web: building browser shell") stage = "Browser shell";
         }
         if (interactive && stage !== previousStage) renderProgress();
-      });
-      child.stderr?.on("data", capture);
-      child.once("error", reject);
-      // Drain pipes before displaying the final status and diagnostics.
-      child.once("close", (code, signal) => resolve({ code, signal }));
+      },
+      onStderr: capture,
     });
   } finally {
     clearInterval(timer);
