@@ -12,6 +12,7 @@ import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
+import { acquireSourceOwnerLock, type SessionOwnership } from "@codexhost/session-runtime";
 import qrcode from "qrcode-terminal";
 import { WebSocketServer } from "ws";
 
@@ -23,6 +24,7 @@ import { CLIENT_GLOBALS, CLIENT_PLUGINS } from "./plugins.ts";
 import { Sessions } from "./sessions.ts";
 import { ChSessions } from "./ch-sessions.ts";
 import { MixedSessions } from "./mixed-sessions.ts";
+import { RemoteCodexSessions } from "./remote-codex-sessions.ts";
 import { WebHarnessDisplaySettings } from "./harness-display-settings.ts";
 import { WebHarnessPreferences } from "./harness-preferences.ts";
 import { createChHostClient } from "./ch-host-client.ts";
@@ -58,6 +60,8 @@ const { values } = parseArgs({
     "ch-codex-home": { type: "string" },
     "codex-command": { type: "string" },
     "codex-home": { type: "string" },
+    "web-codex-migrate-source": { type: "string" },
+    "web-codex-legacy-stopped": { type: "boolean", default: false },
     "ch-plugins": { type: "string" },
     port: { type: "string", default: process.env.CODEXHOST_WEB_PORT ?? "3180" },
     host: { type: "string", default: process.env.CODEXHOST_WEB_HOST ?? "127.0.0.1" },
@@ -114,27 +118,29 @@ const harnesses = new HarnessRegistry(adapterRoots, enabledHarnesses, {
   displayEntries,
   preferences: () => preferences,
 });
-const codexHarnesses = enabledHarnesses?.has("codex")
-  ? new HarnessRegistry(
-      values.adapters === undefined && !PACKED
-        ? [join(REPO_ROOT, "packages/adapters")]
-        : adapterRoots,
-      new Set(["codex"]),
-      {
-        scope: "web-codex",
-        displayEntries,
-        preferences: () => preferences,
-        environment: {
-          ...process.env,
-          CODEXHOST_CODEX_HOME: resolve(values["codex-home"] ?? join(data.root, "codex-home")),
-          CODEXHOST_CODEX_COMMAND: values["codex-command"],
-          ...(values["ch-codex-home"]
-            ? { CODEXHOST_GUI_CODEX_HOME: resolve(values["ch-codex-home"]) }
-            : {}),
+const codexEnabled = enabledHarnesses?.has("codex") === true;
+const codexHarnesses =
+  codexEnabled && values["session-source"] === "standalone"
+    ? new HarnessRegistry(
+        values.adapters === undefined && !PACKED
+          ? [join(REPO_ROOT, "packages/adapters")]
+          : adapterRoots,
+        new Set(["codex"]),
+        {
+          scope: "web-codex",
+          displayEntries,
+          preferences: () => preferences,
+          environment: {
+            ...process.env,
+            CODEXHOST_CODEX_HOME: resolve(values["codex-home"] ?? join(data.root, "codex-home")),
+            CODEXHOST_CODEX_COMMAND: values["codex-command"],
+            ...(values["ch-codex-home"]
+              ? { CODEXHOST_GUI_CODEX_HOME: resolve(values["ch-codex-home"]) }
+              : {}),
+          },
         },
-      },
-    )
-  : undefined;
+      )
+    : undefined;
 const workspaces = new Workspaces(
   data,
   resolve(values.workspace as string),
@@ -191,8 +197,36 @@ const preferences: WebHarnessPreferences = new WebHarnessPreferences(
   chHost,
   data,
   events,
-  codexHarnesses ? resolve(values["codex-home"] ?? join(data.root, "codex-home")) : undefined,
+  codexEnabled ? resolve(values["codex-home"] ?? join(data.root, "codex-home")) : undefined,
 );
+const remoteCodex =
+  chHost && codexEnabled
+    ? await RemoteCodexSessions.connect(chHost, events, {
+        home: resolve(values["codex-home"] ?? join(data.root, "codex-home")),
+        legacySource: data.root,
+        command: values["codex-command"] ? resolve(values["codex-command"]) : "",
+        pluginRoots:
+          values.adapters === undefined && !PACKED
+            ? [join(REPO_ROOT, "packages/adapters")]
+            : adapterRoots,
+        ...(values["web-codex-migrate-source"]
+          ? {
+              migrateSource: resolve(values["web-codex-migrate-source"]),
+              ...(values["web-codex-legacy-stopped"] ? { legacyWriterStopped: true as const } : {}),
+            }
+          : {}),
+      })
+    : undefined;
+let standaloneOwnership: SessionOwnership | undefined;
+if (!chHost && codexHarnesses) {
+  // Factory verifies home isolation before writing a lock into that home; it does not start a Turn.
+  await codexHarnesses.adapter("codex");
+  standaloneOwnership = await acquireSourceOwnerLock({
+    root: join(data.root, "codex-sessions"),
+    home: resolve(values["codex-home"] ?? join(data.root, "codex-home")),
+  });
+}
+if (remoteCodex) await remoteCodex.attachOrganization(workspaces);
 const sessions = chHost
   ? (() => {
       const shared = new ChSessions(
@@ -204,23 +238,12 @@ const sessions = chHost
         displayEntries,
         preferences,
       );
-      return codexHarnesses
-        ? new MixedSessions(
-            shared,
-            new Sessions(
-              new DataDir(join(data.root, "codex-sessions")),
-              codexHarnesses,
-              workspaces,
-              events,
-            ),
-            codexHarnesses,
-            workspaces,
-            events,
-          )
+      return remoteCodex
+        ? new MixedSessions(shared, remoteCodex, remoteCodex.harnesses, workspaces, events)
         : shared;
     })()
   : new Sessions(
-      codexHarnesses ? new DataDir(join(data.root, "codex-sessions")) : data,
+      standaloneOwnership?.data ?? data,
       codexHarnesses ?? harnesses,
       workspaces,
       events,
@@ -525,6 +548,7 @@ async function shutdown(): Promise<void> {
   displaySettings.close();
   await harnesses.close();
   if (!(sessions instanceof MixedSessions)) await codexHarnesses?.close();
+  await standaloneOwnership?.release();
   process.exit(0);
 }
 process.on("SIGINT", () => void shutdown());

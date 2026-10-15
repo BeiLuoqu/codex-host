@@ -5,6 +5,7 @@ import type { ModelSelection } from "./ch-harness-catalog.ts";
 import type { HarnessRegistry, Inspection, HarnessManifest } from "./harnesses.ts";
 import { MixedDrafts, type MixedDraft } from "./mixed-drafts.ts";
 import { SourceEndpoints, mergeSessionControls } from "./session-source-endpoints.ts";
+import type { RemoteCodexSessions } from "./remote-codex-sessions.ts";
 import type { Sessions, SessionNotification } from "./sessions.ts";
 import { requestOf } from "./store.ts";
 import {
@@ -76,8 +77,23 @@ export class MixedSessions {
 
   constructor(
     private readonly shared: ChSessions,
-    private readonly local: Sessions,
-    private readonly localHarnesses: HarnessRegistry,
+    private readonly local:
+      | Pick<
+          Sessions,
+          | "register"
+          | "registerCommands"
+          | "registerImport"
+          | "owns"
+          | "ids"
+          | "prepareDraft"
+          | "close"
+          | "notifier"
+        >
+      | RemoteCodexSessions,
+    private readonly localHarnesses: Pick<
+      HarnessRegistry,
+      "ids" | "manifest" | "iconPath" | "inspect" | "modelCatalog" | "close"
+    >,
     private readonly workspaces: Workspaces,
     private readonly events: EventHub,
   ) {

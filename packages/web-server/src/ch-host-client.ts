@@ -20,6 +20,10 @@ import type {
   ClientWorkspaceSnapshot,
   ClientChannelResponse,
   ClientChannelCursor,
+  WebCodexConfiguration,
+  WebCodexConfigurationReply,
+  WebCodexRequest,
+  WebCodexStreamRequest,
 } from "@codexhost/shared-contracts";
 import { RpcError } from "./transport.ts";
 
@@ -29,6 +33,20 @@ export interface ChHostClient {
   /** Native Desktop pin service; a change returns the confirmed complete local pin order. */
   pins(change?: ChPinChange): Promise<string[]>;
   close(): void;
+  /** Private gateway composition only; never exposed by serveChClientGateway. */
+  readonly webCodex?: {
+    readonly epoch: string;
+    configure(input: WebCodexConfiguration): Promise<WebCodexConfigurationReply>;
+    request<T>(input: WebCodexRequest): Promise<T>;
+    stream(
+      input: WebCodexStreamRequest,
+      options: {
+        signal: AbortSignal;
+        item(value: unknown): void;
+        fail(error: Error): void;
+      },
+    ): Promise<void>;
+  };
   readonly realtime?: {
     subscribe(listener: (event: HostClientUpdate) => void, after?: ClientChannelCursor): () => void;
     request<T = unknown>(method: string, params: Record<string, unknown>): Promise<T>;
@@ -299,6 +317,25 @@ export async function createChHostClient(
   }
   return {
     realtime: channel,
+    ...(endpoint.owner === "service"
+      ? {
+          webCodex: {
+            get epoch() {
+              return channel.epoch;
+            },
+            configure: (input: WebCodexConfiguration) => channel.configureWebCodex(input),
+            request: <T>(input: WebCodexRequest) => channel.webCodexRequest<T>(input),
+            stream: (
+              input: WebCodexStreamRequest,
+              streamOptions: {
+                signal: AbortSignal;
+                item(value: unknown): void;
+                fail(error: Error): void;
+              },
+            ) => channel.webCodexStream(input, streamOptions),
+          },
+        }
+      : {}),
     async request<T>(method: string, params: Record<string, unknown>): Promise<T> {
       try {
         return await channel.request<T>(method, params);

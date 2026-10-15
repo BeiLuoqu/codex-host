@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { it } from "node:test";
 import { chromium } from "playwright";
-import { startFakeChDebugger } from "../support/ch-host.ts";
+import { startMixedSharedHost } from "../support/shared-mixed-host.ts";
 import { startServer } from "../support/server.ts";
 import { MixedChHost, writeWebCodexPlugin } from "../support/web-codex.ts";
 
 it(
-  "switches an unsent draft between CH and Codex, sends locally, and reopens a shared Thread",
+  "switches an unsent draft between CH and owned Codex and reopens a shared Thread",
   { timeout: 60_000 },
   async (t) => {
     const root = mkdtempSync(join(tmpdir(), "mixed-browser-"));
@@ -19,22 +19,12 @@ it(
     const host = new MixedChHost();
     host.add("shared", root, "Shared GUI conversation");
     host.add("official", root, "Official GUI conversation").modelProvider = "openai";
-    const debug = await startFakeChDebugger(host);
-    t.after(() => debug.close());
+    const shared = await startMixedSharedHost(t, root, plugins, host);
     const url = await startServer(
       t,
       resolve(import.meta.dirname, "../.."),
       ["--import", "tsx", "src/main.ts"],
-      [
-        "--session-source",
-        "codexhost",
-        "--ch-cdp",
-        debug.endpoint,
-        "--adapters",
-        plugins,
-        "--harness",
-        "codex",
-      ],
+      shared.args,
     );
     const browser = await chromium.launch();
     t.after(() => browser.close());

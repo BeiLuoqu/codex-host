@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 
 import { type DataDir, requestOf } from "./store.ts";
 import { RpcError, type RpcRegistry, type StreamRegistry, type StreamSink } from "./transport.ts";
+import type { LocalOrganizationState } from "@codexhost/session-runtime";
 
 export interface WorkspaceView {
   workspaceId: string;
@@ -33,6 +34,55 @@ export class Workspaces {
   private referenceProjectless: ReadonlySet<string> = new Set();
   private referencePins: string[] | undefined;
   private localSessionIds: ReadonlySet<string> = new Set();
+  private remoteOrganization:
+    | {
+        request(action: string, input: Record<string, unknown>): Promise<unknown>;
+        owns(id: string): boolean;
+        refresh(): Promise<void>;
+      }
+    | undefined;
+  private localOrganization: LocalOrganizationState | undefined;
+  private remoteWorkspaceIds = new Set<string>();
+
+  /** Confirmed Host projection only; enabling this removes Web's organization file writer. */
+  useLocalOrganizationRemote(port: {
+    request(action: string, input: Record<string, unknown>): Promise<unknown>;
+    owns(id: string): boolean;
+    refresh(): Promise<void>;
+  }): void {
+    this.remoteOrganization = port;
+  }
+
+  setLocalOrganization(snapshot: LocalOrganizationState): void {
+    const previous = this.localOrganization?.items ?? [];
+    this.localOrganization = structuredClone(snapshot);
+    for (const item of snapshot.items) this.remoteWorkspaceIds.add(item.workspaceId);
+    this.localSessionIds = new Set(snapshot.items.flatMap((item) => item.sessionIds));
+    for (const item of previous)
+      if (!snapshot.items.some((next) => next.workspaceId === item.workspaceId))
+        this.broadcast({ type: "remove", workspaceId: item.workspaceId });
+    for (const workspace of this.list()) this.broadcast({ type: "upsert", workspace });
+    if (
+      JSON.stringify(previous.map((item) => item.workspaceId)) !==
+      JSON.stringify(snapshot.items.map((item) => item.workspaceId))
+    )
+      this.broadcast({ type: "order", workspaceIds: this.list().map((item) => item.workspaceId) });
+    this.broadcast({ type: "pinned", pinnedSessionIds: this.pinnedSessionIds() });
+    this.broadcast({ type: "archived", archivedSessionIds: this.archivedSessionIds() });
+  }
+
+  private async remoteMutation(action: string, input: Record<string, unknown>): Promise<unknown> {
+    const remote = this.remoteOrganization;
+    if (!remote) throw new RpcError("owner/offline", "Local organization owner is disconnected");
+    const result = await remote.request(action, input);
+    // Never retry the mutation if this follow-up read fails: the owner may have saved it.
+    try {
+      await remote.refresh();
+    } catch {
+      /* An acknowledged write remains successful; owner invalidation will reconcile. */
+    }
+    return result;
+  }
 
   constructor(
     private readonly data: DataDir,
@@ -47,7 +97,7 @@ export class Workspaces {
   }
 
   private save(): void {
-    this.data.writeJson(FILE, this.state);
+    if (!this.remoteOrganization) this.data.writeJson(FILE, this.state);
   }
 
   private broadcast(frame: unknown): void {
@@ -63,11 +113,30 @@ export class Workspaces {
 
   list(): readonly WorkspaceView[] {
     const references = this.referenceGroups;
-    if (!references) return this.state.items;
+    const items = [
+      ...this.state.items
+        .filter(
+          (item) =>
+            !this.remoteWorkspaceIds.has(item.workspaceId) &&
+            (!this.remoteOrganization ||
+              item.origin !== "web" ||
+              item.sessionIds.some((id) => references?.has(id))),
+        )
+        .map((item) =>
+          this.remoteOrganization
+            ? {
+                ...item,
+                sessionIds: item.sessionIds.filter((id) => !this.remoteOrganization?.owns(id)),
+              }
+            : item,
+        ),
+      ...(this.localOrganization?.items ?? []),
+    ];
+    if (!references) return items;
     const allowedRoots = new Set(
       [...references.values()].filter((path): path is string => path !== undefined),
     );
-    return this.state.items
+    return items
       .filter((workspace) => {
         // Legacy automatic rows from the previous build are hidden, not deleted.
         const legacyReference =
@@ -143,17 +212,23 @@ export class Workspaces {
 
   /** Authoritative visible pin list used by both the stream and mixed-source RPC replies. */
   pinnedSessionIds(): string[] {
-    if (this.referencePins === undefined) return this.state.pinnedSessionIds;
+    const localPins = this.localOrganization?.pinnedSessionIds ?? this.state.pinnedSessionIds;
+    if (this.referencePins === undefined) return localPins;
     return [
       ...new Set([
         ...this.referencePins,
-        ...this.state.pinnedSessionIds.filter((id) => this.localSessionIds.has(id)),
+        ...localPins.filter(
+          (id) => this.localSessionIds.has(id) || this.remoteOrganization?.owns(id),
+        ),
       ]),
     ];
   }
 
   get(workspaceId: string): WorkspaceView | undefined {
-    return this.state.items.find((item) => item.workspaceId === workspaceId);
+    return (
+      this.localOrganization?.items.find((item) => item.workspaceId === workspaceId) ??
+      this.state.items.find((item) => item.workspaceId === workspaceId)
+    );
   }
 
   byPath(path: string): WorkspaceView | undefined {
@@ -165,7 +240,17 @@ export class Workspaces {
   }
 
   isArchived(sessionId: string): boolean {
-    return this.state.archivedSessionIds.includes(sessionId);
+    return this.remoteOrganization?.owns(sessionId)
+      ? Boolean(this.localOrganization?.archivedSessionIds.includes(sessionId))
+      : this.state.archivedSessionIds.includes(sessionId);
+  }
+  private archivedSessionIds(): string[] {
+    return [
+      ...new Set([
+        ...this.state.archivedSessionIds.filter((id) => !this.remoteOrganization?.owns(id)),
+        ...(this.localOrganization?.archivedSessionIds ?? []),
+      ]),
+    ];
   }
 
   create(path: string, referenceOnly = false): { workspace: WorkspaceView; created: boolean } {
@@ -260,8 +345,16 @@ export class Workspaces {
   }
 
   register(rpc: RpcRegistry, streams: StreamRegistry): void {
-    rpc.register("workspace/create", (args) => this.create(requestOf<{ path: string }>(args).path));
-    rpc.register("workspace/initializeDefault", () => {
+    rpc.register("workspace/create", (args) =>
+      this.remoteOrganization
+        ? this.remoteMutation("create", requestOf<Record<string, unknown>>(args))
+        : this.create(requestOf<{ path: string }>(args).path),
+    );
+    rpc.register("workspace/initializeDefault", async () => {
+      if (this.remoteOrganization) {
+        if (this.list().length > 0) return undefined;
+        return this.remoteMutation("create", { path: this.defaultDirectory });
+      }
       if (this.state.items.length > 0) return undefined;
       if (!this.referenceOnlyDefault) mkdirSync(this.defaultDirectory, { recursive: true });
       return {
@@ -270,15 +363,24 @@ export class Workspaces {
           this.create(this.defaultDirectory, this.referenceOnlyDefault).workspace,
       };
     });
-    rpc.register("workspace/rename", (args) => {
+    rpc.register("workspace/rename", async (args) => {
       const request = requestOf<{ workspaceId: string; title: string }>(args);
+      if (this.localOrganization?.items.some((item) => item.workspaceId === request.workspaceId)) {
+        const workspace = await this.remoteMutation("rename", request);
+        return { workspace };
+      }
       const workspace = this.require(request.workspaceId);
       workspace.title = request.title;
       this.touch(workspace);
       return { workspace };
     });
-    rpc.register("workspace/delete", (args) => {
+    rpc.register("workspace/delete", async (args) => {
       const request = requestOf<{ workspaceId: string }>(args);
+      if (this.localOrganization?.items.some((item) => item.workspaceId === request.workspaceId)) {
+        await this.remoteMutation("delete", request);
+        this.broadcast({ type: "remove", workspaceId: request.workspaceId });
+        return { deleted: true };
+      }
       this.require(request.workspaceId);
       this.state.items = this.state.items.filter(
         (item) => item.workspaceId !== request.workspaceId,
@@ -287,8 +389,15 @@ export class Workspaces {
       this.broadcast({ type: "remove", workspaceId: request.workspaceId });
       return { deleted: true };
     });
-    rpc.register("workspace/insertBefore", (args) => {
+    rpc.register("workspace/insertBefore", async (args) => {
       const request = requestOf<{ workspaceId: string; beforeWorkspaceId?: string }>(args);
+      if (this.localOrganization?.items.some((item) => item.workspaceId === request.workspaceId)) {
+        const workspaceIds = await this.remoteMutation("insertBefore", {
+          workspaceId: request.workspaceId,
+          before: request.beforeWorkspaceId,
+        });
+        return { workspaceIds };
+      }
       const workspace = this.require(request.workspaceId);
       const rest = this.state.items.filter((item) => item !== workspace);
       const index =
@@ -302,12 +411,19 @@ export class Workspaces {
       this.broadcast({ type: "order", workspaceIds });
       return { workspaceIds };
     });
-    rpc.register("workspace/insertSessionBefore", (args) => {
+    rpc.register("workspace/insertSessionBefore", async (args) => {
       const request = requestOf<{
         workspaceId: string;
         sessionId: string;
         beforeSessionId?: string;
       }>(args);
+      if (this.remoteOrganization?.owns(request.sessionId)) {
+        const workspace = await this.remoteMutation("insertSessionBefore", {
+          ...request,
+          before: request.beforeSessionId,
+        });
+        return { workspace };
+      }
       const workspace = this.require(request.workspaceId);
       for (const other of this.state.items) {
         if (other !== workspace && other.sessionIds.includes(request.sessionId)) {
@@ -329,8 +445,17 @@ export class Workspaces {
         frame: "archived" | "pinned",
         add: boolean,
       ) =>
-      (args: Record<string, unknown>) => {
+      async (args: Record<string, unknown>) => {
         const { sessionId } = requestOf<{ sessionId: string }>(args);
+        if (this.remoteOrganization?.owns(sessionId)) {
+          await this.remoteMutation(
+            key === "pinnedSessionIds" ? (add ? "pin" : "unpin") : add ? "archive" : "unarchive",
+            { sessionId },
+          );
+          return {
+            [key]: key === "pinnedSessionIds" ? this.pinnedSessionIds() : this.archivedSessionIds(),
+          };
+        }
         const current = this.state[key].filter((id) => id !== sessionId);
         if (add) current.push(sessionId);
         this.state[key] = current;
@@ -355,6 +480,7 @@ export class Workspaces {
           ...this.state,
           items: this.list(),
           pinnedSessionIds: this.pinnedSessionIds(),
+          archivedSessionIds: this.archivedSessionIds(),
           ...(this.referenceOnlyDefault ? { canStartProjectless: true } : {}),
         },
       });

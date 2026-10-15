@@ -3,12 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
-import { startFakeChDebugger } from "./support/ch-host.ts";
+import { startMixedSharedHost } from "./support/shared-mixed-host.ts";
 import { startServer } from "./support/server.ts";
 import { MixedChHost, writeWebCodexPlugin } from "./support/web-codex.ts";
 
 it(
-  "the production Web entry routes Codex locally and shared Threads through CH",
+  "the production Web entry routes isolated Codex through the shared owner and external Threads through CH",
   { timeout: 20_000 },
   async (t) => {
     const root = mkdtempSync(join(tmpdir(), "mixed-http-"));
@@ -17,22 +17,12 @@ it(
     const host = new MixedChHost();
     host.add("shared", root, "GUI external Thread");
     host.add("official", root, "GUI native Codex").modelProvider = "openai";
-    const debug = await startFakeChDebugger(host);
-    t.after(() => debug.close());
+    const shared = await startMixedSharedHost(t, root, plugins, host);
     const url = await startServer(
       t,
       resolve(import.meta.dirname, ".."),
       ["--import", "tsx", "src/main.ts"],
-      [
-        "--session-source",
-        "codexhost",
-        "--ch-cdp",
-        debug.endpoint,
-        "--adapters",
-        plugins,
-        "--harness",
-        "codex",
-      ],
+      shared.args,
     );
     async function dispatch(method: string, args: Record<string, unknown> = {}) {
       const response = await fetch(new URL(`/api/${method}`, url), {
