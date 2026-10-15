@@ -104,7 +104,7 @@ export function inspectImage(bytes: Buffer, mediaType?: string): PreparedImage {
   };
 }
 
-/** Bounded, read-only local raster access. Only call after validating a native Thread reference. */
+/** Bounded, read-only local raster access for authenticated media or authorized Thread attachments. */
 export function readImageFile(path: string): Buffer {
   let fd: number | undefined;
   try {

@@ -36,7 +36,7 @@ import { DataDir } from "./store.ts";
 import { EventHub, RpcRegistry, StreamRegistry } from "./transport.ts";
 import { WebAssets, contentTypeOf, type AssetResponse } from "./web-assets.ts";
 import { Workspaces } from "./workspaces.ts";
-import { WebImages } from "./web-images.ts";
+import { inspectImage, readImageFile, WebImages } from "./web-images.ts";
 import { WebFiles } from "./web-files.ts";
 import { serveFileUpload } from "./ch-file-upload-http.ts";
 import { assertDefaultWebDataReady, defaultWebDataDirectory } from "./data-paths.ts";
@@ -399,6 +399,26 @@ const server = createServer((request, response) => {
           return;
         }
       }
+    }
+    if (pathname === "/api/file" && (request.method === "GET" || request.method === "HEAD")) {
+      const path = new URL(url, "http://localhost").searchParams.get("path");
+      response.setHeader("Cache-Control", "private, no-store");
+      response.setHeader("X-Content-Type-Options", "nosniff");
+      if (!path) {
+        response.writeHead(400).end(request.method === "HEAD" ? undefined : "missing path");
+        return;
+      }
+      try {
+        const image = inspectImage(readImageFile(path));
+        response.writeHead(200, {
+          "Content-Type": image.ref.mediaType,
+          "Content-Length": image.bytes.length,
+        });
+        response.end(request.method === "HEAD" ? undefined : image.bytes);
+      } catch {
+        response.writeHead(404).end(request.method === "HEAD" ? undefined : "image unavailable");
+      }
+      return;
     }
     if (pathname.startsWith("/api/ch/v1/")) {
       if (!sameOrigin(request)) {
