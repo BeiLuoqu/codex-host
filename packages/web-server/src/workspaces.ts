@@ -33,6 +33,7 @@ export class Workspaces {
   private referenceGroups: Map<string, string | undefined> | undefined;
   private referenceProjectless: ReadonlySet<string> = new Set();
   private referencePins: string[] | undefined;
+  private referenceArchives: string[] | undefined;
   private localSessionIds: ReadonlySet<string> = new Set();
   private remoteOrganization:
     | {
@@ -201,13 +202,25 @@ export class Workspaces {
     this.broadcast({ type: "pinned", pinnedSessionIds: this.pinnedSessionIds() });
   }
 
-  /** Mixed-source navigation includes only pins for Sessions owned by this Web runtime. */
+  /** Ephemeral Host archive projection; shared Threads never use legacy Web archive flags. */
+  setReferenceArchives(ids: readonly string[]): void {
+    const next = [...new Set(ids)];
+    if (JSON.stringify(next) === JSON.stringify(this.referenceArchives)) return;
+    this.referenceArchives = next;
+    this.broadcast({ type: "archived", archivedSessionIds: this.archivedSessionIds() });
+  }
+
+  /** Mixed-source navigation retains local pin/archive flags only for owned Sessions. */
   setLocalSessionIds(ids: ReadonlySet<string>): void {
     const before = this.pinnedSessionIds();
+    const archivedBefore = this.archivedSessionIds();
     this.localSessionIds = new Set(ids);
     const after = this.pinnedSessionIds();
     if (JSON.stringify(before) !== JSON.stringify(after))
       this.broadcast({ type: "pinned", pinnedSessionIds: after });
+    const archivedAfter = this.archivedSessionIds();
+    if (JSON.stringify(archivedBefore) !== JSON.stringify(archivedAfter))
+      this.broadcast({ type: "archived", archivedSessionIds: archivedAfter });
   }
 
   /** Authoritative visible pin list used by both the stream and mixed-source RPC replies. */
@@ -240,16 +253,24 @@ export class Workspaces {
   }
 
   isArchived(sessionId: string): boolean {
-    return this.remoteOrganization?.owns(sessionId)
-      ? Boolean(this.localOrganization?.archivedSessionIds.includes(sessionId))
-      : this.state.archivedSessionIds.includes(sessionId);
+    return this.archivedSessionIds().includes(sessionId);
   }
-  private archivedSessionIds(): string[] {
+  archivedSessionIds(): string[] {
+    const local = [
+      ...this.state.archivedSessionIds.filter((id) => !this.remoteOrganization?.owns(id)),
+      ...(this.localOrganization?.archivedSessionIds ?? []),
+    ];
     return [
-      ...new Set([
-        ...this.state.archivedSessionIds.filter((id) => !this.remoteOrganization?.owns(id)),
-        ...(this.localOrganization?.archivedSessionIds ?? []),
-      ]),
+      ...new Set(
+        this.referenceArchives === undefined
+          ? local
+          : [
+              ...this.referenceArchives,
+              ...local.filter(
+                (id) => this.localSessionIds.has(id) || this.remoteOrganization?.owns(id),
+              ),
+            ],
+      ),
     ];
   }
 
@@ -460,7 +481,8 @@ export class Workspaces {
         if (add) current.push(sessionId);
         this.state[key] = current;
         this.save();
-        const visible = key === "pinnedSessionIds" ? this.pinnedSessionIds() : current;
+        const visible =
+          key === "pinnedSessionIds" ? this.pinnedSessionIds() : this.archivedSessionIds();
         this.broadcast({ type: frame, [key]: visible });
         return { [key]: visible };
       };

@@ -106,6 +106,7 @@ export class ChSessions {
           })
         : undefined;
     this.pins = new ChPinnedThreads(host, workspaces, (id) => this.ownership.has(id));
+    workspaces.setReferenceArchives([]);
     this.interactions = host.realtime
       ? new ChInteractions(host.realtime, events, (id, message) => {
           this.views.get(id)?.log.setProjection("nativeInteractionError", message);
@@ -168,6 +169,7 @@ export class ChSessions {
   }
   private async listAll(): Promise<void> {
     const found = new Map<string, ChThread>();
+    const archivedIds = new Set<string>();
     for (const archived of [false, true]) {
       let cursor: string | null = null;
       const seen = new Set<string>();
@@ -179,6 +181,7 @@ export class ChSessions {
         for (const row of page.data)
           if (row.modelProvider === "codexhost") {
             found.set(row.id, row);
+            if (archived) archivedIds.add(row.id);
           }
         cursor = page.nextCursor;
         if (cursor && seen.has(cursor))
@@ -222,6 +225,7 @@ export class ChSessions {
       if (!draft.cwd) projectless.add(draft.id);
     }
     this.workspaces.setReferenceGroups(groups, projectless);
+    this.workspaces.setReferenceArchives([...archivedIds].filter((id) => ownership.has(id)));
     await this.publishCatalogChanges();
     // A missing Desktop pin service must not hide readable Threads. Retain the
     // last confirmed pins; a user command still reports its failure explicitly.
@@ -646,8 +650,35 @@ export class ChSessions {
     this.drafts.delete(id);
   }
 
+  private async setArchived(sessionId: string, archived: boolean): Promise<void> {
+    const id = this.id(sessionId);
+    if (this.drafts.has(id))
+      throw new RpcError(
+        "session/not-started",
+        "Send the first message before archiving this Thread.",
+      );
+    if (!this.ownership.has(id)) await this.refresh();
+    if (!this.ownership.has(id))
+      throw new RpcError("session/not-found", "This Thread is not in the shared catalog.");
+    await this.owner(id);
+    await this.host.request(archived ? "thread/archive" : "thread/unarchive", { threadId: id });
+    // Finish any pre-write catalog read before confirming from a fresh Host snapshot.
+    // A read failure cannot turn an acknowledged mutation into a rejected write.
+    await this.refreshing?.catch(() => undefined);
+    await this.refresh().catch(() => undefined);
+  }
+
   register(rpc: RpcRegistry, streams: StreamRegistry): void {
     this.fileInputs?.register(rpc);
+    for (const [method, archived] of [
+      ["workspace/archiveSession", true],
+      ["workspace/unarchiveSession", false],
+    ] as const)
+      rpc.register(method, async (args) => {
+        const { sessionId } = requestOf<{ sessionId: string }>(args);
+        await this.setArchived(sessionId, archived);
+        return { archivedSessionIds: this.workspaces.archivedSessionIds() };
+      });
     for (const [method, pinned] of [
       ["workspace/pinSession", true],
       ["workspace/unpinSession", false],
@@ -970,18 +1001,15 @@ export class ChSessions {
         "Opening computer paths is unavailable in Web.",
       );
     });
-    for (const [method, hostMethod] of [
-      ["session/archive", "thread/archive"],
-      ["session/unarchive", "thread/unarchive"],
-    ])
-      if (method && hostMethod)
-        rpc.register(method, async (args) => {
-          const req = requestOf<{ sessionId: string }>(args);
-          await this.owner(req.sessionId);
-          await this.host.request(hostMethod, { threadId: this.id(req.sessionId) });
-          await this.refresh();
-          return {};
-        });
+    for (const [method, archived] of [
+      ["session/archive", true],
+      ["session/unarchive", false],
+    ] as const)
+      rpc.register(method, async (args) => {
+        const { sessionId } = requestOf<{ sessionId: string }>(args);
+        await this.setArchived(sessionId, archived);
+        return {};
+      });
     streams.register("session/control", async (_args, sink) => {
       const projections: Record<string, unknown> = {};
       for (const draft of this.drafts.values())

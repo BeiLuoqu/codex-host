@@ -11,6 +11,7 @@ import { decodeHarnessPluginRoute } from "@codexhost/shared-contracts";
 export class FakeChHost implements ChHostClient {
   readonly requests: Array<{ method: string; params: Record<string, unknown> }> = [];
   readonly threads = new Map<string, ChThread>();
+  readonly archivedIds = new Set<string>();
   readonly modes = new Map<string, string>();
   readonly projectSnapshot: ChProjectSnapshot = { projects: [], assignments: {}, projectless: [] };
   async projects(): Promise<ChProjectSnapshot> {
@@ -102,7 +103,19 @@ export class FakeChHost implements ChHostClient {
           code: -32601,
         });
       case "thread/list":
-        value = { data: params.archived ? [] : [...this.threads.values()], nextCursor: null };
+        value = {
+          data: [...this.threads.values()].filter(
+            (thread) => this.archivedIds.has(thread.id) === Boolean(params.archived),
+          ),
+          nextCursor: null,
+        };
+        break;
+      case "thread/archive":
+      case "thread/unarchive":
+        if (!row) throw new Error("Missing CH Thread");
+        if (method === "thread/archive") this.archivedIds.add(row.id);
+        else this.archivedIds.delete(row.id);
+        value = method === "thread/archive" ? {} : { thread: structuredClone(row) };
         break;
       case "codexhost/harness/plugins/list":
         value = {

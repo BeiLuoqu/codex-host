@@ -26,7 +26,7 @@ type WorkspaceViewState = {
   groupExpansion: Record<string, boolean>;
   /** Saved manual order per Workspace group plus the browser-local flat-list account. */
   sessionOrderByAccount: Record<string, string[]>;
-  /** Archived-row visibility; omitted in pre-filter v5 snapshots and read as 'default'. */
+  /** Archived-row visibility for the current page; page startup resets it to 'default'. */
   archivedFilter?: ArchivedFilter;
 };
 

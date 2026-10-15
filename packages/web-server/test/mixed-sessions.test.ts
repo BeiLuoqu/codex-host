@@ -467,6 +467,42 @@ it("keeps local pins visible through CH refresh and never sends them to GUI pin 
   assert.equal(bench.host.pinWrites.length, 1);
 });
 
+it("merges Host archives with local Codex archives without writing shared flags into Web storage", async (t) => {
+  const bench = setup(t);
+  const id = await bench.create();
+  await bench.select(id, "codex");
+  await bench.prompt(id, "archive local");
+  await bench.call("session/list");
+  await bench.request("workspace/archiveSession", { sessionId: id });
+  const archived = await bench.request<{ archivedSessionIds: string[] }>(
+    "workspace/archiveSession",
+    { sessionId: "gui-external" },
+  );
+  assert.deepEqual(archived.archivedSessionIds.sort(), [id, "gui-external"].sort());
+  assert.equal(bench.host.archivedIds.has("gui-external"), true);
+  const saved = bench.data.readJson<{ archivedSessionIds: string[] }>("workspaces.json", {
+    archivedSessionIds: [],
+  });
+  assert.deepEqual(saved.archivedSessionIds, [id]);
+  await bench.call("session/list");
+  const observer = await bench.follow("workspace/follow");
+  assert.deepEqual(
+    (observer.frames[0]?.value as { archivedSessionIds: string[] }).archivedSessionIds.sort(),
+    [id, "gui-external"].sort(),
+  );
+  assert.deepEqual(
+    await bench.request("workspace/unarchiveSession", { sessionId: "gui-external" }),
+    { archivedSessionIds: [id] },
+  );
+  assert.deepEqual(await bench.request("workspace/unarchiveSession", { sessionId: id }), {
+    archivedSessionIds: [],
+  });
+  assert.deepEqual(
+    bench.host.requests.filter((r) => r.method === "thread/archive").map((r) => r.params.threadId),
+    ["gui-external"],
+  );
+});
+
 it("rejects Codex uploads and attached prompts while preserving shared draft uploads", async (t) => {
   const bench = setup(t);
   const id = await bench.create();

@@ -1152,8 +1152,6 @@ export function WorkspaceBrowser({
   const directoryFlowAvailable = useDirectoryFlow((occupied) => occupied);
   const groupBy = useStore((s) => s.groupBy);
   const orderBy = useStore((s) => s.orderBy);
-  // Persisted view blobs written before the archived filter existed rehydrate
-  // without the field; they read as the default hide-archived view.
   const archivedFilter = useStore((s) => s.archivedFilter ?? "default");
   const groupExpansion = useStore((s) => s.groupExpansion);
   const sessionOrderByAccount = useStore((s) => s.sessionOrderByAccount);
