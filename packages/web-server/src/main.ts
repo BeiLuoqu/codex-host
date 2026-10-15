@@ -523,7 +523,6 @@ server.listen(Number(values.port), values.host, () => {
       formatWebStartup({
         localUrl,
         networkUrls: urls,
-        dataDirectory: data.root,
         ...(qrCode === undefined ? {} : { qrCode }),
       }),
     );

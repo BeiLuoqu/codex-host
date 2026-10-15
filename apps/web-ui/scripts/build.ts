@@ -16,6 +16,8 @@ for (const file of globSync("packages/*/*/package.json", { cwd: root })) {
   const manifest = JSON.parse(readFileSync(resolve(root, file), "utf8")) as { name: string };
   directories.set(manifest.name, resolve(root, file, ".."));
 }
+let completedPlugins = 0;
+console.log(`codexhost web: client plugins ${completedPlugins}/${plugins.length}`);
 for (const name of plugins) {
   const directory = directories.get(name);
   if (directory === undefined) throw new Error(`Missing browser plugin ${name}`);
@@ -27,5 +29,8 @@ for (const name of plugins) {
     .filter((item) => item.platform === "browser" && item.format === "cjs");
   if (browser.length !== 1) throw new Error(`Expected one browser build for ${name}`);
   await build({ ...browser[0], cwd: directory, config: false });
+  completedPlugins++;
+  console.log(`codexhost web: client plugins ${completedPlugins}/${plugins.length}`);
 }
+console.log("codexhost web: building browser shell");
 await buildShell({ root: resolve(root, "apps/web") });
