@@ -172,40 +172,36 @@
 }
 
 .runningIcon {
-  position: relative;
   display: inline-flex;
   flex: none;
-  width: calc(14px + var(--dsh-content-font-delta, 0px));
-  height: calc(14px + var(--dsh-content-font-delta, 0px));
+  width: calc(16px + var(--dsh-content-font-delta, 0px));
+  height: calc(16px + var(--dsh-content-font-delta, 0px));
   /* The fixed footprint contains the animation's layout and paint. */
   contain: strict;
   overflow: hidden;
 }
 
-.runningWhaleAnimated {
-  display: none;
-  position: absolute;
-  inset: 0;
+.runningIconMotion {
+  display: inline-flex;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 60%;
 }
 
-.runningWhaleStill {
-  display: initial;
+@keyframes runningIconSway {
+  0%,
+  100% {
+    transform: translateY(0.5px) rotate(-20deg);
+  }
+
+  50% {
+    transform: translateY(-0.6px) rotate(20deg);
+  }
 }
 
-@supports (mask-mode: alpha) and (mask-image: url("")) {
-  @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
-    .runningWhaleAnimated {
-      display: block;
-      background: currentColor;
-      mask: url("./running-whale@2x.png") center / 100% 100% no-repeat;
-      mask-mode: alpha;
-      /* Keep animated-mask repaints on an icon-sized composited layer. */
-      will-change: transform;
-    }
-
-    .runningWhaleStill {
-      display: none;
-    }
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  .runningIconMotion {
+    animation: runningIconSway 1.6s ease-in-out infinite;
   }
 }
 
