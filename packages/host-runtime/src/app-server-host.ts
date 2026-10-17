@@ -2091,7 +2091,7 @@ export class AppServerHost {
       const location = await this.#locateExternalThread(request.params.threadId);
       if (await this.#writeResolutionError(request, location)) return;
       if (location.kind === "external") {
-        const emptyResult = externalThreadEmptyOfficialResult(request.method);
+        const emptyResult = externalThreadEmptyOfficialResult(request.method, request.params);
         await this.#writer.json(
           emptyResult
             ? rpcEnvelope(request, { result: emptyResult })
