@@ -236,9 +236,11 @@ Ctrl+C stops Web only. Explicit backend maintenance: native/codexhost host stop 
 Close clients first to prevent their on-demand restart; stopping the backend also stops its tasks.
 Do not launch app/server.mjs directly from a CodexHost-managed session with inherited Desktop settings.
 The preview launcher finds the Codex CLI through native installation inspection or PATH. \`--codex-command /absolute/path/to/codex\` is an optional override.
-The Web Codex home defaults to \`<web-data>/codex-home\`; --codex-home can select another isolated home.
-Authenticate/configure that home explicitly using the native CLI with CODEX_HOME set to it.
-No Desktop credentials or history are copied, and the GUI home and proxy/shim entrypoints are rejected.
+Web Codex uses --codex-home, inherited CODEX_HOME, or ~/.codex, in that order.
+The native CLI uses local credentials directly; GUI and Web may share the home without sharing execution routing.
+There is no authentication preflight or special queue pause; native failures use the ordinary error path.
+Existing Hosts keep their configured home; pass --codex-home explicitly for older deployments using <web-data>/codex-home.
+Credentials/history are not copied. Desktop proxy/shim entrypoints and routing environment remain excluded.
 Codex is never added to the shared Host's enabled.json; GUI native Codex requests keep their official route.
 
 Included Harness plugins: ${["codex", ...extraAdapters.map((plugin) => plugin.id)].join(", ")}.

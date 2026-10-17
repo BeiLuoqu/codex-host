@@ -134,7 +134,7 @@ export class RemoteCodexSessions {
     });
   }
   async prepareDraft(
-    request: { sessionId: string; cwd?: string },
+    request: { sessionId: string; cwd?: string; projectlessWorkspace?: { prompt?: string } },
     configuration: DraftConfiguration,
   ): Promise<void> {
     await this.call("prepareDraft", { ...request, configuration });

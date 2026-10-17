@@ -223,9 +223,7 @@ export class MixedSessions {
         "Submission already started; its outcome must be reconciled before retrying.",
       );
     const source = draft.selection.provider === "codex" ? "local" : "shared";
-    const request = requestOf<{ content?: Array<{ type: string }> }>(args);
-    if (source === "local" && !draft.cwd)
-      throw new RpcError("workspace/invalid-path", "Choose a workspace before sending to Codex.");
+    const request = requestOf<{ content?: Array<{ type: string; text?: string }> }>(args);
     if (source === "local" && request.content?.some((part) => part.type !== "text"))
       throw new RpcError(
         "session/attachment-invalid",
@@ -241,7 +239,19 @@ export class MixedSessions {
           this.preparedSharedDrafts.delete(draft.id);
         }
         await this.local.prepareDraft(
-          { sessionId: draft.id, ...(draft.cwd ? { cwd: draft.cwd } : {}) },
+          {
+            sessionId: draft.id,
+            ...(draft.cwd
+              ? { cwd: draft.cwd }
+              : {
+                  projectlessWorkspace: {
+                    prompt: (request.content ?? [])
+                      .map((part) => part.text ?? "")
+                      .join("\n")
+                      .slice(0, 16_384),
+                  },
+                }),
+          },
           {
             selection: { ...draft.selection },
             ...(draft.permissionModeId ? { permissionModeId: draft.permissionModeId } : {}),

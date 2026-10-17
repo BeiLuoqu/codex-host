@@ -6,8 +6,6 @@
  * approvals, `requestUserInput`) become Host interactions answered through `interaction.respond`.
  */
 
-import { randomUUID } from "node:crypto";
-
 import {
   displayCommand,
   itemOutcome,
@@ -19,15 +17,48 @@ import {
 } from "./items.ts";
 import { CodexAppServer, CodexRpcError } from "./rpc.ts";
 
-export const HARNESS_ID = "codex";
+export const HARNESS_ID = harnessIdSchema.parse("codex");
 
-type HostEvent = Record<string, unknown> & { type: string };
-type HostInteraction = Record<string, unknown> & { type: "approval" | "question" };
-type Output =
-  { kind: "event"; event: HostEvent } | { kind: "interaction"; interaction: HostInteraction };
-type Result<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: { code: string; message: string; retryable: boolean } };
+import {
+  HarnessOutputChannel,
+  type HarnessOutput,
+  type HostEvent,
+  type HarnessSession,
+  type HarnessSessionState,
+  type HarnessResult,
+  type HostCommand,
+  type HostThreadSnapshot,
+  type HostTurnSnapshot,
+  type HarnessCommandCapability,
+  type TurnStartCommand,
+  type TurnStartAccepted,
+  type TurnCancelCommand,
+  type TurnCancelAccepted,
+  type InteractionRespondCommand,
+  type InteractionRespondAccepted,
+  type ModelSelectCommand,
+  type ModelSelectCompleted,
+  type ThinkingSelectCommand,
+  type ThinkingSelectCompleted,
+  type PermissionModeSelectCommand,
+  type PermissionModeSelectCompleted,
+  type TurnOutcome,
+} from "@codexhost/harness-adapter";
+import {
+  harnessIdSchema,
+  harnessCommandCatalogSchema,
+  harnessModelRefSchema,
+  harnessThinkingOptionIdSchema,
+  harnessPermissionModeIdSchema,
+  hostTurnIdSchema,
+  hostInteractionIdSchema,
+  hostItemIdSchema,
+  nativeSessionRefSchema,
+  nativeTurnRefSchema,
+  type HostTurnId,
+  type HostInteractionId,
+} from "@codexhost/shared-contracts";
+type Result<T> = HarnessResult<T>;
 
 export interface PermissionMode {
   id: string;
@@ -66,22 +97,24 @@ export const PERMISSION_MODES: readonly PermissionMode[] = [
 
 export const DEFAULT_PERMISSION_MODE = "workspace-write";
 
-export const CODEX_COMMANDS = [
-  {
-    id: "compact",
-    invocation: "/compact",
-    label: "Compact",
-    description: "Summarize the conversation to free up context",
-    argumentMode: "none",
-  },
-  {
-    id: "review",
-    invocation: "/review",
-    label: "Review",
-    description: "Review uncommitted changes, or follow your review instructions",
-    argumentMode: "text",
-  },
-] as const;
+export const CODEX_COMMANDS = harnessCommandCatalogSchema.parse({
+  commands: [
+    {
+      id: "compact",
+      invocation: "/compact",
+      label: "Compact",
+      description: "Summarize the conversation to free up context",
+      argumentMode: "none",
+    },
+    {
+      id: "review",
+      invocation: "/review",
+      label: "Review",
+      description: "Review uncommitted changes, or follow your review instructions",
+      argumentMode: "text",
+    },
+  ],
+}).commands;
 
 function permissionMode(id: string | undefined): PermissionMode {
   return (
@@ -107,42 +140,11 @@ function sandboxPolicy(mode: PermissionMode, cwd: string): Record<string, unknow
   }
 }
 
-class OutputChannel {
-  private readonly values: Output[] = [];
-  private readonly waiters: Array<(result: IteratorResult<Output>) => void> = [];
-  private ended = false;
-
-  readonly outputs: AsyncIterable<Output> = {
-    [Symbol.asyncIterator]: () => ({
-      next: () => {
-        const value = this.values.shift();
-        if (value !== undefined) return Promise.resolve({ done: false, value });
-        if (this.ended) return Promise.resolve({ done: true, value: undefined });
-        return new Promise((resolve) => this.waiters.push(resolve));
-      },
-    }),
-  };
-
-  emit(value: Output): void {
-    if (this.ended) return;
-    const waiter = this.waiters.shift();
-    if (waiter !== undefined) waiter({ done: false, value });
-    else this.values.push(value);
-  }
-
-  end(): void {
-    if (this.ended) return;
-    this.ended = true;
-    if (this.values.length > 0) return;
-    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: undefined });
-  }
-}
-
 interface PendingRequest {
   rpcId: number | string;
   method: string;
   params: Record<string, unknown>;
-  turnId: string;
+  turnId: HostTurnId;
 }
 
 export interface CodexSessionOptions {
@@ -156,7 +158,7 @@ export interface CodexSessionOptions {
   permissionModeId?: string;
 }
 
-export class CodexSession {
+export class CodexSession implements HarnessSession {
   readonly harnessId = HARNESS_ID;
   readonly capabilities = {
     configuration: {
@@ -166,12 +168,10 @@ export class CodexSession {
       permissionModeScope: "live" as const,
     },
     history: { fork: false, forkAcrossCwd: false, rollbackLastTurn: false },
-    /** Codex accepts input into a running turn (`turn/steer`). */
-    steering: { native: true },
   };
-  initialState: Record<string, unknown> = {};
+  initialState: HarnessSessionState = {};
   readonly initialUsage = null;
-  private readonly channel = new OutputChannel();
+  private readonly channel = new HarnessOutputChannel<HarnessOutput>();
   readonly outputs = this.channel.outputs;
   private readonly server: CodexAppServer;
   private threadId = "";
@@ -179,8 +179,8 @@ export class CodexSession {
   private effort: string | undefined;
   private mode: PermissionMode;
   /** Codex turn id → Host turn id. */
-  private readonly turns = new Map<string, string>();
-  private pendingHostTurn: string | undefined;
+  private readonly turns = new Map<string, HostTurnId>();
+  private pendingHostTurn: HostTurnId | undefined;
   private activeCodexTurn: string | undefined;
   private readonly requests = new Map<string, PendingRequest>();
   private readonly reasoningParts = new Map<string, number>();
@@ -197,15 +197,15 @@ export class CodexSession {
     this.mode = permissionMode(options.permissionModeId);
   }
 
-  static async open(options: CodexSessionOptions): Promise<CodexSession> {
+  static async open(options: CodexSessionOptions): Promise<Result<CodexSession>> {
     const session = new CodexSession(options);
     try {
       await session.start();
     } catch (error) {
-      await session.server.close();
+      await session.close();
       throw error;
     }
-    return session;
+    return { ok: true, value: session };
   }
 
   private async start(): Promise<void> {
@@ -244,18 +244,24 @@ export class CodexSession {
     this.initialState = this.state();
   }
 
-  private state(): Record<string, unknown> {
+  private state(): HarnessSessionState {
     return {
-      nativeRef: {
+      nativeRef: nativeSessionRefSchema.parse({
+        formatVersion: 1,
         harnessId: HARNESS_ID,
         nativeSessionId: this.threadId,
         locator: { codexHome: this.options.codexHome },
-      },
+      }),
       ...(this.model === undefined
         ? {}
-        : { effectiveModel: { id: this.model }, resolvedModelLabel: this.model }),
-      ...(this.effort === undefined ? {} : { effectiveThinkingOptionId: this.effort }),
-      effectivePermissionModeId: this.mode.id,
+        : {
+            effectiveModel: harnessModelRefSchema.parse({ id: this.model }),
+            resolvedModelLabel: this.model,
+          }),
+      ...(this.effort === undefined
+        ? {}
+        : { effectiveThinkingOptionId: harnessThinkingOptionIdSchema.parse(this.effort) }),
+      effectivePermissionModeId: harnessPermissionModeIdSchema.parse(this.mode.id),
     };
   }
 
@@ -263,12 +269,12 @@ export class CodexSession {
     this.channel.emit({ kind: "event", event });
   }
 
-  private hostTurn(codexTurnId: string | undefined): string | undefined {
+  private hostTurn(codexTurnId: string | undefined): HostTurnId | undefined {
     if (codexTurnId === undefined) return undefined;
     const known = this.turns.get(codexTurnId);
     if (known !== undefined) return known;
     // A turn we started may announce itself before `turn/start` answers.
-    const hostTurnId = this.pendingHostTurn ?? `codex-turn-${codexTurnId}`;
+    const hostTurnId = this.pendingHostTurn ?? hostTurnIdSchema.parse(`codex-turn-${codexTurnId}`);
     const autonomous = this.pendingHostTurn === undefined;
     this.pendingHostTurn = undefined;
     this.turns.set(codexTurnId, hostTurnId);
@@ -323,7 +329,7 @@ export class CodexSession {
         this.emit({
           type: "item.updated",
           turnId,
-          itemId: params.itemId,
+          itemId: hostItemIdSchema.parse(params.itemId),
           update:
             method === "item/commandExecution/outputDelta"
               ? { type: "output.append", text: params.delta }
@@ -340,7 +346,7 @@ export class CodexSession {
           this.emit({
             type: "item.updated",
             turnId,
-            itemId: params.itemId,
+            itemId: hostItemIdSchema.parse(params.itemId),
             update: { type: "text.append", text: "\n\n" },
           });
         return;
@@ -356,9 +362,9 @@ export class CodexSession {
         if (usage?.total === undefined) return;
         this.emit({
           type: "session.usage.changed",
-          ...(codexTurnId === undefined || this.turns.get(codexTurnId) === undefined
+          ...(codexTurnId === undefined || !this.turns.has(codexTurnId)
             ? {}
-            : { observedForTurnId: this.turns.get(codexTurnId) }),
+            : { observedForTurnId: hostTurnIdSchema.parse(this.turns.get(codexTurnId)) }),
           usage: {
             inputTokens: usage.total.inputTokens ?? 0,
             cachedInputTokens: usage.total.cachedInputTokens ?? 0,
@@ -379,7 +385,7 @@ export class CodexSession {
         const turn = params.turn as {
           id: string;
           status: string;
-          error: { message?: string } | null;
+          error: { message?: string; codexErrorInfo?: unknown } | null;
         };
         const turnId = this.hostTurn(turn.id);
         if (this.activeCodexTurn === turn.id) this.activeCodexTurn = undefined;
@@ -388,14 +394,14 @@ export class CodexSession {
             this.requests.delete(key);
             this.emit({
               type: "interaction.closed",
-              interactionId: key,
+              interactionId: hostInteractionIdSchema.parse(key),
               turnId,
               reason: "cancelled",
             });
           }
         }
         if (turnId === undefined) return;
-        const outcome =
+        const outcome: TurnOutcome =
           turn.status === "completed"
             ? { status: "succeeded" }
             : turn.status === "interrupted"
@@ -411,11 +417,12 @@ export class CodexSession {
         this.emit({
           type: "turn.completed",
           turnId,
-          nativeTurnRef: {
+          nativeTurnRef: nativeTurnRefSchema.parse({
+            formatVersion: 1,
             harnessId: HARNESS_ID,
             nativeSessionId: this.threadId,
             nativeTurnKey: turn.id,
-          },
+          }),
           outcome,
         });
         return;
@@ -427,7 +434,7 @@ export class CodexSession {
         this.requests.delete(key);
         this.emit({
           type: "interaction.closed",
-          interactionId: key,
+          interactionId: hostInteractionIdSchema.parse(key),
           turnId: request.turnId,
           reason: "responded",
         });
@@ -451,7 +458,7 @@ export class CodexSession {
       this.server.respondError(rpcId, -32603, "No active turn");
       return;
     }
-    const interactionId = `codex-request-${String(rpcId)}`;
+    const interactionId = hostInteractionIdSchema.parse(`codex-request-${String(rpcId)}`);
     const reason =
       typeof params.reason === "string" && params.reason !== "" ? params.reason : undefined;
     if (
@@ -537,7 +544,7 @@ export class CodexSession {
   }
 
   private respondInteraction(
-    interactionId: string,
+    interactionId: HostInteractionId,
     response: {
       type: string;
       actionId?: string;
@@ -583,11 +590,60 @@ export class CodexSession {
     return { ok: true, value: { accepted: true } };
   }
 
-  async execute(command: Record<string, unknown> & { type: string }): Promise<Result<unknown>> {
+  async steer(
+    command: Pick<TurnStartCommand, "turnId" | "input">,
+  ): Promise<Result<InteractionRespondAccepted>> {
+    try {
+      const codexTurnId =
+        [...this.turns].find(([, host]) => host === command.turnId)?.[0] ?? this.activeCodexTurn;
+      if (codexTurnId === undefined)
+        return {
+          ok: false,
+          error: {
+            code: "invalidState",
+            message: "No running turn to steer",
+            retryable: false,
+          },
+        };
+      const input = (command.input as Array<{ type: string; text: string }>).map((part) => ({
+        type: "text",
+        text: part.text,
+        text_elements: [],
+      }));
+      await this.server.request("turn/steer", {
+        threadId: this.threadId,
+        input,
+        expectedTurnId: codexTurnId,
+      });
+      return { ok: true, value: { accepted: true } };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "nativeFailure",
+          message: error instanceof Error ? error.message : String(error),
+          retryable: false,
+        },
+      };
+    }
+  }
+  execute(command: TurnStartCommand): Promise<Result<TurnStartAccepted>>;
+  execute(command: TurnCancelCommand): Promise<Result<TurnCancelAccepted>>;
+  execute(command: InteractionRespondCommand): Promise<Result<InteractionRespondAccepted>>;
+  execute(command: ModelSelectCommand): Promise<Result<ModelSelectCompleted>>;
+  execute(command: ThinkingSelectCommand): Promise<Result<ThinkingSelectCompleted>>;
+  execute(command: PermissionModeSelectCommand): Promise<Result<PermissionModeSelectCompleted>>;
+  async execute(
+    command: HostCommand,
+  ): Promise<
+    Result<
+      TurnStartAccepted | TurnCancelAccepted | InteractionRespondAccepted | ModelSelectCompleted
+    >
+  > {
     try {
       switch (command.type) {
         case "turn.start": {
-          const hostTurnId = String(command.turnId);
+          const hostTurnId = command.turnId;
           const input = (command.input as Array<{ type: string; text: string }>).map((part) => ({
             type: "text",
             text: part.text,
@@ -609,31 +665,6 @@ export class CodexSession {
           this.activeCodexTurn = response.turn.id;
           return { ok: true, value: { turnId: hostTurnId } };
         }
-        case "turn.steer": {
-          const codexTurnId =
-            [...this.turns].find(([, host]) => host === command.turnId)?.[0] ??
-            this.activeCodexTurn;
-          if (codexTurnId === undefined)
-            return {
-              ok: false,
-              error: {
-                code: "invalidState",
-                message: "No running turn to steer",
-                retryable: false,
-              },
-            };
-          const input = (command.input as Array<{ type: string; text: string }>).map((part) => ({
-            type: "text",
-            text: part.text,
-            text_elements: [],
-          }));
-          await this.server.request("turn/steer", {
-            threadId: this.threadId,
-            input,
-            expectedTurnId: codexTurnId,
-          });
-          return { ok: true, value: { accepted: true } };
-        }
         case "turn.cancel": {
           const codexTurnId =
             [...this.turns].find(([, host]) => host === command.turnId)?.[0] ??
@@ -646,10 +677,7 @@ export class CodexSession {
           return { ok: true, value: { cancellationRequested: true } };
         }
         case "interaction.respond":
-          return this.respondInteraction(
-            String(command.interactionId),
-            command.response as { type: string },
-          );
+          return this.respondInteraction(command.interactionId, command.response);
         case "model.select":
           this.model = (command.model as { id: string }).id;
           this.emit({ type: "session.state.changed", state: this.state() });
@@ -667,7 +695,7 @@ export class CodexSession {
             ok: false,
             error: {
               code: "unsupported",
-              message: `Unsupported command ${command.type}`,
+              message: "Unsupported command",
               retryable: false,
             },
           };
@@ -680,11 +708,18 @@ export class CodexSession {
           : error instanceof Error
             ? error.message
             : String(error);
-      return { ok: false, error: { code: "nativeFailure", message, retryable: false } };
+      return {
+        ok: false,
+        error: {
+          code: "nativeFailure",
+          message,
+          retryable: false,
+        },
+      };
     }
   }
 
-  async readSnapshot(): Promise<Result<{ turns: unknown[]; state: Record<string, unknown> }>> {
+  async readSnapshot(): Promise<Result<HostThreadSnapshot>> {
     try {
       const response = await this.server.request<{
         thread: {
@@ -718,22 +753,16 @@ export class CodexSession {
   }
 
   /** Codex slash commands that run as turns: context compaction and inline code review. */
-  readonly commands = {
-    list: async (): Promise<Result<{ commands: readonly unknown[]; source: "static" }>> => ({
-      ok: true,
-      value: { commands: CODEX_COMMANDS, source: "static" },
-    }),
-    execute: async (command: {
-      turnId: string;
-      commandId: string;
-      arguments?: { text?: string };
-    }): Promise<Result<{ turnId: string }>> => {
+  readonly commands: HarnessCommandCapability = {
+    list: async () => ({ ok: true, value: { commands: [...CODEX_COMMANDS], source: "static" } }),
+    execute: async (command) => {
       try {
         this.pendingHostTurn = command.turnId;
         if (command.commandId === "compact") {
           await this.server.request("thread/compact/start", { threadId: this.threadId });
         } else if (command.commandId === "review") {
-          const instructions = command.arguments?.text?.trim();
+          const instructions =
+            typeof command.arguments?.text === "string" ? command.arguments.text.trim() : undefined;
           const response = await this.server.request<{ turn: { id: string } }>("review/start", {
             threadId: this.threadId,
             target:
@@ -795,10 +824,10 @@ export function snapshotTurn(
     startedAt: number | null;
     completedAt: number | null;
   },
-): Record<string, unknown> {
+): HostTurnSnapshot {
   const input = turn.items
     .filter((item) => item.type === "userMessage")
-    .map((item) => ({ type: "text", text: userText(item) }));
+    .map((item) => ({ type: "text" as const, text: userText(item) }));
   const items = turn.items
     .map((raw) => {
       const item: HostItem | undefined = toHostItem(raw);
@@ -811,7 +840,12 @@ export function snapshotTurn(
     })
     .filter((entry) => entry !== undefined);
   return {
-    nativeTurnRef: { harnessId: HARNESS_ID, nativeSessionId: threadId, nativeTurnKey: turn.id },
+    nativeTurnRef: nativeTurnRefSchema.parse({
+      formatVersion: 1,
+      harnessId: HARNESS_ID,
+      nativeSessionId: threadId,
+      nativeTurnKey: turn.id,
+    }),
     input: input.length > 0 ? input : [{ type: "text", text: "" }],
     items,
     outcome:
@@ -832,8 +866,4 @@ export function snapshotTurn(
     ...(turn.startedAt === null ? {} : { startedAtMs: turn.startedAt * 1000 }),
     ...(turn.completedAt === null ? {} : { completedAtMs: turn.completedAt * 1000 }),
   };
-}
-
-export function newTurnId(): string {
-  return `turn-${randomUUID()}`;
 }

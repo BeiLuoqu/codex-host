@@ -1,77 +1,54 @@
-import { readFile, realpath } from "node:fs/promises";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-import type { HarnessPluginModule } from "@codexhost/harness-adapter/plugin";
-import { pluginResourcePath } from "@codexhost/harness-plugin-files";
 import {
-  HARNESS_PLUGIN_API_VERSION,
-  harnessPluginManifestSchema,
-  isHarnessPluginInScope,
+  harnessIdSchema,
   harnessPreferenceSnapshotSchema,
   type WebCodexConfiguration,
 } from "@codexhost/shared-contracts";
-import type { Adapter, Inspection, SessionHarnesses } from "@codexhost/session-runtime";
+import type { SessionHarnesses } from "@codexhost/session-runtime";
+import { loadHarnessPlugins, type HarnessPluginDiagnostic } from "./harness-plugin-loader.js";
 
-/** A single explicitly selected plugin, cold until inspect/open. No external registry changes. */
+/** One explicitly configured Web registry, separate from external execution. */
 export async function createWebCodexHarness(
   config: WebCodexConfiguration,
   environment: NodeJS.ProcessEnv,
   scope: string,
   preferencesRequest: (method: string, params: Record<string, unknown>) => Promise<unknown>,
 ) {
-  const candidates = [];
-  for (const root of config.pluginRoots) {
-    const directory = path.join(root, "codex");
-    try {
-      const manifest = harnessPluginManifestSchema.parse(
-        JSON.parse(await readFile(await pluginResourcePath(directory, "manifest.json"), "utf8")),
-      );
-      if (
-        manifest.id !== "codex" ||
-        !isHarnessPluginInScope(manifest.id, "web-codex") ||
-        manifest.kind === "usage" ||
-        manifest.adapterApiVersion !== HARNESS_PLUGIN_API_VERSION
-      )
-        throw new Error("Invalid isolated Codex plugin manifest");
-      candidates.push({ directory: await realpath(directory), manifest });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
-  if (candidates.length !== 1)
-    throw new Error("Select exactly one installed isolated Codex plugin");
-  const candidate = candidates[0];
-  if (!candidate) throw new Error("Isolated Codex plugin missing");
-  const module = (await import(
-    pathToFileURL(await pluginResourcePath(candidate.directory, candidate.manifest.entry)).href
-  )) as HarnessPluginModule;
-  const native = await module.createHarnessAdapter({
-    environment: Object.freeze({
-      ...environment,
-      CODEXHOST_CODEX_HOME: config.home,
-      CODEXHOST_CODEX_COMMAND: config.command,
-    }),
-    platform: process.platform,
-    managedRemoteHost: false,
+  const diagnostics: HarnessPluginDiagnostic[] = [];
+  const registry = await loadHarnessPlugins({
+    roots: config.pluginRoots,
+    scope: "web-codex",
+    enabledIds: new Set(["codex"]),
+    warmup: false,
+    context: {
+      environment: Object.freeze({
+        ...environment,
+        CODEXHOST_CODEX_HOME: config.home,
+        CODEXHOST_CODEX_COMMAND: config.command,
+      }),
+      platform: process.platform,
+      managedRemoteHost: false,
+    },
+    diagnose: (entry) => diagnostics.push(entry),
   });
-  if (native.harnessId !== "codex") {
-    await native.close();
-    throw new Error("Isolated Codex plugin identity mismatch");
+  const adapter = registry.adapters.get(harnessIdSchema.parse("codex"));
+  const manifest = registry.list().find((entry) => entry.id === "codex");
+  const failure = diagnostics.find((entry) => entry.id === "codex");
+  if (!adapter || !manifest || failure) {
+    await registry.close();
+    throw new Error(`Isolated Codex plugin unavailable: ${failure?.code ?? "notFound"}`);
   }
-  const adapter = native as unknown as Adapter;
   const preference = async (method: string, params: Record<string, unknown>) =>
     harnessPreferenceSnapshotSchema.parse(await preferencesRequest(method, params));
-  let inspection: Inspection | undefined;
   const harnesses: SessionHarnesses = {
     ids: () => ["codex"],
-    manifest: (id) => (id === "codex" ? candidate.manifest : undefined),
+    manifest: (id) => (id === "codex" ? manifest : undefined),
     adapter: async (id) => {
       if (id !== "codex") throw new Error("Harness is outside the isolated source");
       return adapter;
     },
     inspect: async (id) => {
       if (id !== "codex") throw new Error("Harness is outside the isolated source");
-      return (inspection ??= await adapter.inspect());
+      return adapter.inspect({ refresh: true });
     },
     preferredSelection: undefined,
     preferences: {
@@ -95,7 +72,7 @@ export async function createWebCodexHarness(
           default: { provider: "none", model: "none" },
           groups: [],
           routableProviders: [],
-          failures: [{ id: "codex", name: candidate.manifest.name, message: value.error.message }],
+          failures: [{ id: "codex", name: manifest.name, message: value.error.message }],
         };
       const options = new Map(
         value.catalog.thinkingOptions.map((option) => [option.id, option.label]),
@@ -129,7 +106,7 @@ export async function createWebCodexHarness(
           model: model?.id ?? "none",
           ...(effort ? { reasoningEffort: effort } : {}),
         },
-        groups: [{ id: "codex", name: candidate.manifest.name, models }],
+        groups: [{ id: "codex", name: manifest.name, models }],
         routableProviders: ["codex"],
         failures: [],
       };
@@ -137,9 +114,8 @@ export async function createWebCodexHarness(
   };
   return {
     harnesses,
-    manifest: candidate.manifest,
     close: async () => {
-      await adapter.close();
+      await registry.close();
     },
   };
 }

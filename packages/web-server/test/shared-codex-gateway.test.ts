@@ -86,6 +86,7 @@ const record=method=>appendFileSync(${JSON.stringify(log)},JSON.stringify({metho
 createInterface({input:process.stdin}).on('line',line=>{
  const request=JSON.parse(line); record(request.method); if(request.id===undefined) return;
  let result={};
+ if(request.method==='account/read') result={requiresOpenaiAuth:true,account:{type:'apiKey'}};
  if(request.method==='model/list') result={data:[{id:'test-model',displayName:'Test',description:'',hidden:false,isDefault:true,supportedReasoningEfforts:[],defaultReasoningEffort:'medium'}]};
  if(request.method==='thread/start') writeFileSync(file,'isolated-thread');
  if(request.method==='thread/start'||request.method==='thread/resume') result={thread:{id:'isolated-thread'},model:'test-model',reasoningEffort:null};

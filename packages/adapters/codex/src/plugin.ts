@@ -1,8 +1,8 @@
 /**
  * Codex Harness plugin for the codexhost Adapter contract.
  *
- * In codexhost (the Codex Desktop host) Codex is the host itself; the standalone Web server
- * treats it as one more Harness, driven through `codex app-server` over stdio.
+ * The shared Host loads this plugin for Web execution through `codex app-server`
+ * over stdio. Desktop's official Codex route remains native.
  */
 
 import { execFileSync } from "node:child_process";
@@ -21,13 +21,18 @@ import type { CodexItem } from "./items.ts";
 
 export { CODEX_COMMAND_ENV, CODEX_HOME_ENV } from "./native-launch.ts";
 
-type Result<T> =
-  | { ok: true; value: T }
-  | { ok: false; error: { code: string; message: string; retryable: boolean } };
-
-interface PluginContext {
-  environment: Readonly<Record<string, string | undefined>>;
-}
+import type {
+  HarnessAdapter,
+  HarnessInspection,
+  HarnessResult,
+  OpenSessionInput,
+  InspectHarnessInput,
+  HarnessSessionImportCapability,
+  HostThreadSnapshot,
+} from "@codexhost/harness-adapter";
+import type { HarnessPluginContext } from "@codexhost/harness-adapter/plugin";
+import { harnessInspectionSchema, nativeSessionRefSchema } from "@codexhost/shared-contracts";
+type Result<T> = HarnessResult<T>;
 
 const EFFORT_LABELS: Record<string, string> = {
   none: "None",
@@ -51,15 +56,18 @@ function installed(command: string, environment: NodeJS.ProcessEnv): boolean {
   }
 }
 
-class CodexAdapter {
+class CodexAdapter implements HarnessAdapter {
   readonly harnessId = HARNESS_ID;
   readonly commandCatalog = { commands: [...CODEX_COMMANDS], source: "static" as const };
   private control: Promise<CodexAppServer> | undefined;
+  private readonly inspections = new Set<CodexAppServer>();
+  private readonly inspectionInFlight = new Map<string | undefined, Promise<HarnessInspection>>();
+  private closed = false;
   private readonly command: string;
   private readonly home: string;
   private readonly environment: NodeJS.ProcessEnv;
 
-  constructor(context: PluginContext) {
+  constructor(context: HarnessPluginContext) {
     const launch = nativeCodexLaunch({ ...process.env, ...context.environment });
     this.environment = launch.environment;
     this.command = launch.command;
@@ -94,7 +102,7 @@ class CodexAdapter {
       return {
         ok: false,
         error: {
-          code: "sessionScopeMismatch",
+          code: "invalidRequest",
           message:
             "This Codex session reference is not bound to the configured Web home. Import a session from this home explicitly.",
           retryable: false,
@@ -104,29 +112,69 @@ class CodexAdapter {
     return { ok: true, value: ref.nativeSessionId };
   }
 
-  /** Shared process for read-only calls (models, thread listing). */
+  /** Shared process for read-only history and thread listing. */
   private async controlServer(): Promise<CodexAppServer> {
+    if (this.closed) throw new Error("Codex Adapter is closed");
     if (this.control !== undefined) {
-      const server = await this.control.catch(() => undefined);
+      const previous = this.control;
+      const server = await previous.catch(() => undefined);
+      if (this.closed) throw new Error("Codex Adapter is closed");
       if (server !== undefined && !server.closed) return server;
+      if (this.control !== previous) return this.controlServer();
     }
     this.control = (async () => {
-      const server = new CodexAppServer({ command: this.command, environment: this.environment });
-      await server.initialize();
+      const server = new CodexAppServer({
+        command: this.command,
+        environment: this.environment,
+        sensitive: true,
+        requestTimeoutMs: 15_000,
+      });
+      try {
+        await server.initialize();
+      } catch (error) {
+        await server.close();
+        throw error;
+      }
       return server;
     })();
     return this.control;
   }
 
-  async inspect(): Promise<Record<string, unknown>> {
+  async inspect(input: InspectHarnessInput = {}): Promise<HarnessInspection> {
+    const current = this.inspectionInFlight.get(input.cwd);
+    if (current) return current;
+    const pending = this.inspectNative(input);
+    this.inspectionInFlight.set(input.cwd, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.inspectionInFlight.get(input.cwd) === pending)
+        this.inspectionInFlight.delete(input.cwd);
+    }
+  }
+
+  private async inspectNative(input: InspectHarnessInput): Promise<HarnessInspection> {
+    if (this.closed)
+      return {
+        status: "unavailable",
+        error: { code: "invalidState", message: "Codex Adapter is closed", retryable: false },
+      };
     if (!installed(this.command, this.environment)) {
       return {
         status: "notInstalled",
-        error: { code: "notInstalled", message: "Codex CLI is not installed" },
+        error: { code: "notInstalled", message: "Codex CLI is not installed", retryable: false },
       };
     }
+    const server = new CodexAppServer({
+      command: this.command,
+      environment: this.environment,
+      ...(input.cwd ? { cwd: input.cwd } : {}),
+      sensitive: true,
+      requestTimeoutMs: 15_000,
+    });
+    this.inspections.add(server);
     try {
-      const server = await this.controlServer();
+      await server.initialize();
       const response = await server.request<{
         data: Array<{
           id: string;
@@ -148,7 +196,7 @@ class CodexAdapter {
         .sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b))
         .map((id) => ({ id, label: EFFORT_LABELS[id] ?? id }));
       const defaultModel = models.find((model) => model.isDefault) ?? models[0];
-      return {
+      return harnessInspectionSchema.parse({
         status: "ready",
         catalog: {
           models: models.map((model) => ({
@@ -182,21 +230,23 @@ class CodexAdapter {
           },
           history: { fork: false, forkAcrossCwd: false, rollbackLastTurn: false },
         },
-      };
+      });
     } catch (error) {
       return {
         status: "unavailable",
         error: {
           code: "unavailable",
+          retryable: true,
           message: error instanceof Error ? error.message : String(error),
         },
       };
+    } finally {
+      await server.close();
+      this.inspections.delete(server);
     }
   }
 
-  async open(
-    input: Record<string, unknown> & { kind: string; cwd: string },
-  ): Promise<Result<CodexSession>> {
+  async open(input: OpenSessionInput): Promise<Result<CodexSession>> {
     if (input.kind !== "create" && input.kind !== "resume") {
       return {
         ok: false,
@@ -210,7 +260,12 @@ class CodexAdapter {
     const threadId = input.kind === "resume" ? this.threadId(input.nativeRef) : undefined;
     if (threadId && !threadId.ok) return threadId;
     try {
-      const session = await CodexSession.open({
+      if (this.closed)
+        return {
+          ok: false,
+          error: { code: "invalidState", message: "Codex Adapter is closed", retryable: false },
+        };
+      const result = await CodexSession.open({
         command: this.command,
         codexHome: this.home,
         environment: this.environment,
@@ -224,7 +279,14 @@ class CodexAdapter {
           ? { permissionModeId: input.permissionModeId }
           : {}),
       });
-      return { ok: true, value: session };
+      if (this.closed && result.ok) {
+        await result.value.close();
+        return {
+          ok: false,
+          error: { code: "invalidState", message: "Codex Adapter is closed", retryable: false },
+        };
+      }
+      return result;
     } catch (error) {
       return {
         ok: false,
@@ -237,18 +299,8 @@ class CodexAdapter {
     }
   }
 
-  readonly sessionImport = {
-    listCandidates: async (): Promise<
-      Result<
-        Array<{
-          nativeSessionId: string;
-          title: string | null;
-          updatedAt: number;
-          cwd: string;
-          running: boolean | null;
-        }>
-      >
-    > => {
+  readonly sessionImport: Required<HarnessSessionImportCapability> = {
+    listCandidates: async () => {
       try {
         const server = await this.controlServer();
         const response = await server.request<{
@@ -294,11 +346,7 @@ class CodexAdapter {
         };
       }
     },
-    resolveCandidate: async (
-      nativeSessionId: string,
-    ): Promise<
-      Result<{ candidate: Record<string, unknown>; nativeRef: Record<string, unknown> }>
-    > => {
+    resolveCandidate: async (nativeSessionId: string) => {
       const list = await this.sessionImport.listCandidates();
       if (!list.ok) return list;
       const candidate = list.value.find((entry) => entry.nativeSessionId === nativeSessionId);
@@ -311,14 +359,19 @@ class CodexAdapter {
         ok: true,
         value: {
           candidate,
-          nativeRef: { harnessId: HARNESS_ID, nativeSessionId, locator: { codexHome: this.home } },
+          nativeRef: nativeSessionRefSchema.parse({
+            formatVersion: 1,
+            harnessId: HARNESS_ID,
+            nativeSessionId,
+            locator: { codexHome: this.home },
+          }),
         },
       };
     },
   };
 
-  /** Read a thread from the isolated Web home without loading it for execution. */
-  async readHistory(nativeRef: unknown): Promise<Result<{ turns: unknown[] }>> {
+  /** Read a thread from the configured native home without loading it for execution. */
+  async readHistory(nativeRef: unknown): Promise<Result<HostThreadSnapshot>> {
     const threadId = this.threadId(nativeRef);
     if (!threadId.ok) return threadId;
     try {
@@ -352,12 +405,16 @@ class CodexAdapter {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     const control = this.control;
     this.control = undefined;
-    if (control !== undefined) await (await control.catch(() => undefined))?.close();
+    await Promise.all([
+      ...[...this.inspections].map((server) => server.close()),
+      control?.catch(() => undefined).then((server) => server?.close()),
+    ]);
   }
 }
 
-export function createHarnessAdapter(context: PluginContext): CodexAdapter {
+export function createHarnessAdapter(context: HarnessPluginContext): CodexAdapter {
   return new CodexAdapter(context);
 }

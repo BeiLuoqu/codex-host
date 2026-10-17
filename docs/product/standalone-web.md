@@ -50,15 +50,23 @@ Web 网关自有数据默认位于 `~/.codexhost/web/`，源码入口与打包�
 
 高级诊断仍可指定 `--harness <id,...>`、`--codex-command /absolute/path/to/codex` 等覆盖项，但它们不再是常规启动的前提。
 
-共享模式中 CH 外部会话目录继续由后台提供，Host 额外拥有隔离 Codex，不把该插件加入 Desktop 预装清单或共享 `enabled.json`。插件 Manifest 的安装身份允许 `codex`，但 GUI/CH 的 external 路由、目录和会话导入契约继续拒绝这个身份。Loader/Registry 默认 `external`，在 import、工厂和 warmup 前过滤 Codex；只有 Host 装配的 `web-codex` scope 可以加载它。`codex-usage` 仍是独立用量插件。
+共享模式中 CH 外部会话目录继续由后台提供，Host 额外拥有隔离 Codex，不把该插件加入 Desktop 预装清单或共享 `enabled.json`。Codex 与外部 Harness 复用公共 Loader/Registry；隔离 owner 以服务端固定配置提供显式启用集合，不修改 external 的 `enabled.json`。插件 Manifest 的安装身份允许 `codex`，但 GUI/CH 的 external 路由、目录和会话导入契约继续拒绝这个身份。Loader/Registry 默认 `external`，在 import、工厂和 warmup 前过滤 Codex；只有 Host 装配的 `web-codex` scope 可以加载它。`codex-usage` 仍是独立用量插件。
 
-Web Codex 的原生 home 默认是 `<web-data>/codex-home`，可用 `--codex-home` 指定独立目录；CLI 默认自动发现，显式覆盖路径必须是绝对原生入口。插件拒绝已知代理/shim 和与 GUI home 重叠的路径，子进程清理 Desktop 路由及 Node 注入环境。需要自行在该明确的 `CODEX_HOME` 下配置原生 CLI/登录；不复制 GUI 的凭据、配置或历史。原生引用绑定 canonical home，换 home 后不能继续使用旧引用。后台只接受一个显式 Web Codex 配置；晚到客户端不能替换 home、CLI 或插件路径。隔离来源不使用 profile/home 所有权锁、恢复抢锁或退出证明，不提供不同 Host 共用同一 home 的互斥保护。关闭 Web server 仅断开 shared 来源，后台任务继续；正常停止 Host 时仍关闭原生会话并清理子进程。重启读取共享来源自身的配置和会话文件，不检查或清理旧锁及迁移标记，不保证监管者被强杀后的安全交接。
+Web Codex 的原生 home 优先使用 `--codex-home`，其次环境 `CODEX_HOME`，否则使用 `~/.codex`；允许与 GUI 共用 home，由原生 CLI 直接使用本地认证和配置。CLI 默认自动发现，显式覆盖路径必须是绝对原生入口。插件拒绝已知代理/shim，子进程清理 Desktop 路由及 Node 注入环境；不复制凭据、配置或历史。原生引用绑定 canonical home，换 home 后不能继续使用旧引用。后台只接受一个显式 Web Codex 配置；晚到客户端不能替换 home、CLI 或插件路径。隔离来源不使用 profile/home 所有权锁、恢复抢锁或退出证明，不提供不同 Host 共用同一 home 的互斥保护。关闭 Web server 仅断开 shared 来源，后台任务继续；正常停止 Host 时仍关闭原生会话并清理子进程。重启读取共享来源自身的配置和会话文件，不检查或清理旧锁及迁移标记，不保证监管者被强杀后的安全交接。
 
 列表、模型目录、搜索与 control baseline 合并两来源；所有会话操作按已绑定的来源分发，不按当前模型选择猜测。草稿只保存在内存，切换 Harness 保留浏览器输入；首次提交才建立所选来源，之后禁止跨来源切换。来源创建/提交在途或结果未知时不重试、不回落另一个来源。混合入口与隔离 Host owner 分别保留有界进程内提交回执；Host 按 Session/requestId 最多保留 256 个，相同输入跨 gateway 复用结果，不同输入拒绝。不承诺跨重启或回执淘汰后的 exactly-once。CH 上传占位草稿切到 Codex 时只清理未提交占位，不修改原生 Thread。shared Codex 的元数据与展示日志位于 `<ch-data>/web-codex`，保留现有 index/events/projections 和原生 checkpoint/backfill/children 格式，不写 CH Mapping Store，由 Host 使用 `session-runtime` 实现。外部 Thread 的身份、历史和操作继续归 CH。
 
-当前 Codex 来源要求发送前选择工作区，仅支持文本输入，附件入口关闭并在服务端拒绝；fork/回退仍按未支持能力处理。独立会话的显式停止先清除本地待发送队列，再取消活动轮，避免取消完成时自动启动下一条；CH 队列继续遵循后台自己的暂停规则。shared Codex 的 Web 自建 workspace、local 置顶/归档由 Host 持久化并按来源投影，不写 GUI 原生分区；CH 原生置顶与已绑定 Codex 的 local 置顶合并展示。官方 pin 离线不可写不阻止会话执行，local pin 不代表官方 GUI 分区已更新。此接入不共享或接管 GUI 原生 Codex Threads，也不声明所有原生工具、平台和高级能力已经完成验收。
+Codex 未选工作区的草稿在首次发送时复用 Host 的 `projectlessWorkspace` 分配，按既有 `~/Documents/Codex/日期/任务名` 规则创建执行目录，不登记为用户项目；显式选择工作区时直接使用所选目录。当前 Codex 来源仅支持文本输入，附件入口关闭并在服务端拒绝；fork/回退仍按未支持能力处理。独立会话的显式停止先清除本地待发送队列，再取消活动轮，避免取消完成时自动启动下一条；CH 队列继续遵循后台自己的暂停规则。shared Codex 的 Web 自建 workspace、local 置顶/归档由 Host 持久化并按来源投影，不写 GUI 原生分区；CH 原生置顶与已绑定 Codex 的 local 置顶合并展示。官方 pin 离线不可写不阻止会话执行，local pin 不代表官方 GUI 分区已更新。此接入不共享或接管 GUI 原生 Codex Threads，也不声明所有原生工具、平台和高级能力已经完成验收。
 
 不提供旧 standalone 数据迁移、回滚或交接入口，不移动用户数据。草稿不共享，不恢复内存队列，不保证跨重启 exactly-once；未知 prompt 结果不自动重发。
+
+## Web Codex 本地认证
+
+Web Codex 与其他 Harness 一样，由原生 CLI 使用本地认证，不提供登录、验证码或账号管理。插件不调用 `account/read`，也不在创建会话前预检查认证。模型检查只查询原生目录，不发送测试推理；目录可读不代表认证、额度或真实推理可用。
+
+原生执行失败通过普通会话错误返回并保留错误消息，不触发认证状态联动、额外队列暂停或自动重发失败消息；后续排队消息沿用普通失败后的执行规则。原生 CLI 负责凭据刷新，Host 不保证活动进程热加载配置。
+
+GUI 原生路由仍不使用 Codex 插件，standalone 保持禁用。共享 home 也会共享原生配置与历史，但不会自动导入或恢复 GUI Thread；显式导入原生会话不提供跨进程写入互斥。已有 Host 保留固定来源和 home 绑定；旧部署使用 `<web-data>/codex-home` 时应继续显式传入该 `--codex-home`，不自动切换或迁移已有会话。
 
 ## 共享 CH 会话来源
 

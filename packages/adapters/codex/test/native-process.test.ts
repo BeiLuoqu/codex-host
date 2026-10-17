@@ -1,3 +1,4 @@
+import { nativeSessionRefSchema } from "@codexhost/shared-contracts";
 /** A real synthetic stdio peer verifies launch/routing without using a model or Desktop. */
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -9,11 +10,11 @@ import { it } from "vitest";
 import { createHarnessAdapter } from "../src/plugin.ts";
 
 it.skipIf(process.platform === "win32")(
-  "sends every native operation only to the isolated home with Desktop routing removed",
+  "sends every native operation to the configured local home with Desktop routing removed",
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "web-codex-process-")));
     const command = join(root, "fake-codex");
-    const home = join(root, "web-codex-home");
+    const home = join(root, "gui-home");
     const log = join(root, "rpc.jsonl");
     writeFileSync(
       command,
@@ -46,6 +47,8 @@ createInterface({input: process.stdin}).on('line', line => {
     );
     chmodSync(command, 0o700);
     const adapter = createHarnessAdapter({
+      platform: process.platform,
+      managedRemoteHost: false,
       environment: {
         HOME: root,
         CODEXHOST_CODEX_COMMAND: command,
@@ -67,6 +70,7 @@ createInterface({input: process.stdin}).on('line', line => {
       assert.deepEqual(nativeRef, {
         harnessId: "codex",
         nativeSessionId: "isolated-thread",
+        formatVersion: 1,
         locator: { codexHome: home },
       });
       await created.value.close();
@@ -76,11 +80,12 @@ createInterface({input: process.stdin}).on('line', line => {
       const foreign = await adapter.open({
         kind: "resume",
         cwd: root,
-        nativeRef: {
+        nativeRef: nativeSessionRefSchema.parse({
+          formatVersion: 1,
           harnessId: "codex",
           nativeSessionId: "gui-thread",
           locator: { codexHome: home },
-        },
+        }),
       });
       assert.equal(foreign.ok, false);
       assert.equal((await adapter.readHistory(nativeRef)).ok, true);
@@ -91,6 +96,8 @@ createInterface({input: process.stdin}).on('line', line => {
         assert.equal((await adapter.readHistory(imported.value.nativeRef)).ok, true);
       }
       const other = createHarnessAdapter({
+        platform: process.platform,
+        managedRemoteHost: false,
         environment: {
           HOME: root,
           CODEXHOST_CODEX_COMMAND: command,
@@ -104,7 +111,7 @@ createInterface({input: process.stdin}).on('line', line => {
           await other.readHistory(nativeRef),
         ]) {
           assert.equal(result.ok, false);
-          if (!result.ok) assert.equal(result.error.code, "sessionScopeMismatch");
+          if (!result.ok) assert.equal(result.error.code, "invalidRequest");
         }
         assert.equal(readFileSync(log, "utf8"), before);
       } finally {
@@ -125,6 +132,10 @@ createInterface({input: process.stdin}).on('line', line => {
         .map((line) => JSON.parse(line) as { method: string; env: NodeJS.ProcessEnv });
       assert.equal(records.filter((record) => record.method === "thread/start").length, 1);
       assert.equal(records.filter((record) => record.method === "thread/resume").length, 2);
+      assert.equal(
+        records.some(({ method }) => method.startsWith("account/")),
+        false,
+      );
       for (const { env } of records) {
         assert.equal(env.CODEX_HOME, home);
         assert.equal(

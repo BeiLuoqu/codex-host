@@ -273,12 +273,28 @@ describe("production owner over private authenticated HTTP", () => {
           home: f.environment.CODEXHOST_GUI_CODEX_HOME,
         })
       ).body.error?.message,
-    ).toContain("GUI home overlap");
+    ).toContain("scope-conflict");
     for (const field of ["migrateSource", "legacySource", "legacyWriterStopped"]) {
       expect(
         (await f.post("configure", { ...f.configuration, [field]: true })).body.error,
       ).toBeDefined();
     }
+  });
+
+  it("accepts the GUI native home while rejecting official session addresses", async () => {
+    const f = await fixture();
+    const home = f.environment.CODEXHOST_GUI_CODEX_HOME;
+    mkdirSync(home, { recursive: true });
+    const configured = await f.post("configure", { ...f.configuration, home });
+    expect(configured.body.error).toBeUndefined();
+    const reply = configured.body.result as { scope: string };
+    const request = await f.post("request", {
+      epoch: f.events.epoch,
+      address: { scope: reply.scope, sessionId: "official-id" },
+      operation: "prompt",
+      input: { requestId: "forbidden", content: [{ type: "text", text: "no" }], mode: "queue" },
+    });
+    expect(request.body.error?.message).toContain("session-not-found");
   });
 
   it("scopes submission receipts to the complete session address and input", async () => {

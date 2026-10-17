@@ -141,7 +141,7 @@ export class MixedDrafts {
           (inspection.status === "ready"
             ? inspection.catalog.thinkingOptions.map((option) => option.id)
             : [])
-        ).includes(selection.reasoningEffort))
+        ).some((id) => id === selection.reasoningEffort))
     )
       throw new RpcError(
         "session/model-unavailable",

@@ -54,7 +54,10 @@ it("retire persisted queue views on restart without replaying or resuming native
       routableProviders: [],
       failures: [],
     }),
-    inspect: async () => ({ status: "unavailable", error: { message: "test" } }),
+    inspect: async () => ({
+      status: "unavailable",
+      error: { code: "unavailable", message: "test", retryable: false },
+    }),
     adapter: async () => {
       opens++;
       throw new Error("Read-only recovery must not open a native session");

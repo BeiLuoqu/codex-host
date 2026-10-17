@@ -24,8 +24,14 @@ export const harnessPluginIdSchema = installedHarnessPluginIdSchema.refine(
 /** Selected by the runtime owner, never by a browser request or plugin metadata. */
 export type HarnessPluginScope = "external" | "web-codex";
 
-export function isHarnessPluginInScope(id: string, scope: HarnessPluginScope): boolean {
-  return scope === "web-codex" ? id === "codex" : scope === "external" && id !== "codex";
+export function isHarnessPluginInScope(
+  id: string,
+  scope: HarnessPluginScope,
+  kind?: "usage",
+): boolean {
+  return scope === "web-codex"
+    ? id === "codex" && kind !== "usage"
+    : scope === "external" && id !== "codex";
 }
 
 const relativeResourceSchema = z

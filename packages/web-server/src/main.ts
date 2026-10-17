@@ -159,14 +159,17 @@ const displaySettings: WebHarnessDisplaySettings = new WebHarnessDisplaySettings
   displayDirectory,
   events,
 );
+const codexHome = resolve(
+  values["codex-home"] ?? process.env.CODEX_HOME ?? join(homedir(), ".codex"),
+);
 const preferences: WebHarnessPreferences = new WebHarnessPreferences(
   chHost,
   events,
-  codexEnabled ? resolve(values["codex-home"] ?? join(data.root, "codex-home")) : undefined,
+  codexEnabled ? codexHome : undefined,
 );
 const remoteCodex = codexEnabled
   ? await RemoteCodexSessions.connect(chHost, events, {
-      home: resolve(values["codex-home"] ?? join(data.root, "codex-home")),
+      home: codexHome,
       command: values["codex-command"] ? resolve(values["codex-command"]) : "",
       pluginRoots:
         values.adapters === undefined && !PACKED

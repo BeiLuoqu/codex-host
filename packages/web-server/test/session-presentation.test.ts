@@ -1,9 +1,10 @@
+import { harnessInspectionSchema } from "@codexhost/shared-contracts";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import type { Inspection } from "../src/harnesses.ts";
 import { nativePermissionView } from "../src/session-presentation.ts";
 
-const ready: Extract<Inspection, { status: "ready" }> = {
+const ready = harnessInspectionSchema.parse({
   status: "ready",
   catalog: { models: [], thinkingOptions: [] },
   permissionModes: {
@@ -16,7 +17,8 @@ const ready: Extract<Inspection, { status: "ready" }> = {
     configuration: { selectModel: false, selectThinkingOption: false, selectPermissionMode: true },
     history: { fork: false, forkAcrossCwd: false, rollbackLastTurn: false },
   },
-};
+});
+if (ready.status !== "ready") throw Error("Expected ready fixture");
 it("preserves native labels, descriptions and danger flags, not DSH auto semantics", () => {
   const view = nativePermissionView("harness", ready, true);
   assert.equal(view.catalog, ready.permissionModes);

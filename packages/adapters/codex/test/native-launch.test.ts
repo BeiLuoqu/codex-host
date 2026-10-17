@@ -1,9 +1,11 @@
+import type { NativeSessionRef } from "@codexhost/shared-contracts";
 import assert from "node:assert/strict";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -34,17 +36,17 @@ afterEach(() => {
 });
 
 describe("Web Codex native launch isolation", () => {
-  it("requires explicit absolute CLI and home paths without falling back to PATH or GUI settings", () => {
+  it("requires an absolute native CLI and validates an explicitly configured home", () => {
     for (const value of [undefined, "codex", "./codex"]) {
       assert.throws(
         () => nativeCodexLaunch({ ...environment, CODEXHOST_CODEX_COMMAND: value }),
         /absolute native CLI/u,
       );
     }
-    for (const value of [undefined, "./web-home"]) {
+    for (const value of ["", "./web-home"]) {
       assert.throws(
         () => nativeCodexLaunch({ ...environment, CODEXHOST_CODEX_HOME: value }),
-        /absolute isolated home/u,
+        /absolute native home/u,
       );
     }
     assert.equal(existsSync(join(root, "web-home")), false);
@@ -71,36 +73,35 @@ describe("Web Codex native launch isolation", () => {
     );
   });
 
-  it("rejects the default, inherited and explicitly identified GUI homes and overlapping ancestors", () => {
-    for (const home of [join(root, ".codex"), join(root, ".codex", "web"), root]) {
-      assert.throws(
-        () => nativeCodexLaunch({ ...environment, CODEXHOST_CODEX_HOME: home }),
-        /separate from the GUI/u,
-      );
-    }
-    for (const key of ["CODEX_HOME", "CODEXHOST_GUI_CODEX_HOME"]) {
-      assert.throws(
-        () => nativeCodexLaunch({ ...environment, [key]: environment.CODEXHOST_CODEX_HOME }),
-        /separate from the GUI/u,
-      );
-    }
-    assert.equal(existsSync(join(root, "web-home")), false);
+  it("uses the local default home or inherited CODEX_HOME without copying credentials", () => {
+    const local = join(root, ".codex");
+    mkdirSync(local);
+    writeFileSync(join(local, "auth.json"), "local-credential-fixture");
+    const defaults = { ...environment, CODEXHOST_CODEX_HOME: undefined };
+    assert.equal(nativeCodexLaunch(defaults).home, local);
+    assert.equal(readFileSync(join(local, "auth.json"), "utf8"), "local-credential-fixture");
+    const custom = join(root, "custom-home");
+    assert.equal(nativeCodexLaunch({ ...defaults, CODEX_HOME: custom }).home, custom);
+    assert.equal(
+      nativeCodexLaunch({ ...environment, CODEX_HOME: local }).home,
+      join(root, "web-home"),
+    );
   });
 
-  it("resolves symlinked homes and existing ancestors before validating isolation", () => {
-    mkdirSync(join(root, ".codex"));
-    symlinkSync(
-      join(root, ".codex"),
-      join(root, "alias"),
-      process.platform === "win32" ? "junction" : "dir",
-    );
-    for (const home of [join(root, "alias"), join(root, "alias", "not-created-yet")]) {
-      assert.throws(
-        () => nativeCodexLaunch({ ...environment, CODEXHOST_CODEX_HOME: home }),
-        /separate from the GUI/u,
-      );
+  it("allows GUI home sharing and canonicalizes symlinked homes", () => {
+    const local = join(root, ".codex");
+    mkdirSync(local);
+    symlinkSync(local, join(root, "alias"), process.platform === "win32" ? "junction" : "dir");
+    for (const configured of [local, join(root, "alias")]) {
+      const launch = nativeCodexLaunch({
+        ...environment,
+        CODEX_HOME: local,
+        CODEXHOST_GUI_CODEX_HOME: local,
+        CODEXHOST_CODEX_HOME: configured,
+      });
+      assert.equal(launch.home, local);
+      assert.equal(launch.environment.CODEX_HOME, local);
     }
-    assert.equal(existsSync(join(root, ".codex", "not-created-yet")), false);
   });
 
   it("uses an isolated home and removes Desktop routing without copying authentication", () => {
@@ -133,7 +134,11 @@ describe("Web Codex native launch isolation", () => {
   });
 
   it("rejects missing or non-Codex resume references instead of silently creating a session", async () => {
-    const adapter = createHarnessAdapter({ environment });
+    const adapter = createHarnessAdapter({
+      platform: process.platform,
+      managedRemoteHost: false,
+      environment,
+    });
     try {
       for (const nativeRef of [
         undefined,
@@ -142,7 +147,11 @@ describe("Web Codex native launch isolation", () => {
         { nativeSessionId: 1 },
         { nativeSessionId: "thread", harnessId: "pi" },
       ]) {
-        const result = await adapter.open({ kind: "resume", cwd: root, nativeRef });
+        const result = await adapter.open({
+          kind: "resume",
+          cwd: root,
+          nativeRef: nativeRef as NativeSessionRef,
+        });
         assert.equal(result.ok, false);
         if (!result.ok) assert.equal(result.error.code, "invalidRequest");
       }
@@ -153,7 +162,11 @@ describe("Web Codex native launch isolation", () => {
 
   it("refuses unbound and different-home references for both resume and read without spawning", async () => {
     // This fixture is not executable: a native spawn would fail with nativeFailure.
-    const adapter = createHarnessAdapter({ environment });
+    const adapter = createHarnessAdapter({
+      platform: process.platform,
+      managedRemoteHost: false,
+      environment,
+    });
     try {
       for (const locator of [
         undefined,
@@ -163,12 +176,16 @@ describe("Web Codex native launch isolation", () => {
       ]) {
         const nativeRef = { harnessId: "codex", nativeSessionId: "thread", locator };
         for (const result of [
-          await adapter.open({ kind: "resume", cwd: root, nativeRef }),
+          await adapter.open({
+            kind: "resume",
+            cwd: root,
+            nativeRef: nativeRef as NativeSessionRef,
+          }),
           await adapter.readHistory(nativeRef),
         ]) {
           assert.equal(result.ok, false);
           if (!result.ok) {
-            assert.equal(result.error.code, "sessionScopeMismatch");
+            assert.equal(result.error.code, "invalidRequest");
             assert.equal(result.error.retryable, false);
           }
         }

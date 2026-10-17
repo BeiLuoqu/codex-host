@@ -141,7 +141,10 @@ export class HarnessRegistry {
   async inspect(harnessId: string, refresh = false): Promise<Inspection> {
     const entry = this.entries.get(harnessId);
     if (entry === undefined)
-      return { status: "error", error: { message: `Unknown Harness ${harnessId}` } };
+      return {
+        status: "error",
+        error: { code: "unavailable", retryable: true, message: `Unknown Harness ${harnessId}` },
+      };
     if (
       !refresh &&
       entry.inspection !== undefined &&
@@ -162,7 +165,11 @@ export class HarnessRegistry {
     } catch (error) {
       const inspection: Inspection = {
         status: "error",
-        error: { message: error instanceof Error ? error.message : String(error) },
+        error: {
+          code: "unavailable",
+          retryable: true,
+          message: error instanceof Error ? error.message : String(error),
+        },
       };
       entry.inspection = inspection;
       entry.inspectedAt = Date.now();

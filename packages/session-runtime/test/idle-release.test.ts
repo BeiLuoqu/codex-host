@@ -1,3 +1,9 @@
+import {
+  harnessIdSchema,
+  nativeSessionRefSchema,
+  harnessSessionCapabilitiesSchema,
+} from "@codexhost/shared-contracts";
+import type { HostCommand } from "@codexhost/harness-adapter";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
@@ -30,14 +36,22 @@ test("unconfirmed idle close cannot resume or reuse the previous native writer",
   let starts = 0;
   let closes = 0;
   const session: HarnessSessionLike = {
-    harnessId: "codex",
-    capabilities: {},
+    harnessId: harnessIdSchema.parse("codex"),
+    capabilities: harnessSessionCapabilitiesSchema.parse({
+      configuration: {
+        selectModel: false,
+        selectThinkingOption: false,
+        selectPermissionMode: false,
+      },
+      history: { fork: false, forkAcrossCwd: false, rollbackLastTurn: false },
+    }),
     initialState: {
-      nativeRef: {
-        harnessId: "codex",
+      nativeRef: nativeSessionRefSchema.parse({
+        formatVersion: 1,
+        harnessId: harnessIdSchema.parse("codex"),
         nativeSessionId: "native",
         locator: { codexHome: "/isolated" },
-      },
+      }),
     },
     initialUsage: null,
     outputs: {
@@ -52,7 +66,7 @@ test("unconfirmed idle close cannot resume or reuse the previous native writer",
       },
     },
     readSnapshot: async () => ({ ok: true, value: { turns: [] } }),
-    execute: async (command) => {
+    execute: (async (command: HostCommand) => {
       if (command.type === "turn.start") {
         starts++;
         output.push({
@@ -60,13 +74,13 @@ test("unconfirmed idle close cannot resume or reuse the previous native writer",
           event: {
             type: "turn.completed",
             turnId: command.turnId,
-            outcome: { status: "completed" },
+            outcome: { status: "succeeded" },
           },
         });
         wake?.();
       }
       return { ok: true, value: {} };
-    },
+    }) as HarnessSessionLike["execute"],
     close: async () => {
       closes++;
       throw new Error("exit not confirmed");
@@ -76,7 +90,10 @@ test("unconfirmed idle close cannot resume or reuse the previous native writer",
     ids: () => ["codex"],
     manifest: () => ({ name: "Codex" }),
     preferredSelection: undefined,
-    inspect: async () => ({ status: "unavailable", error: { message: "test" } }),
+    inspect: async () => ({
+      status: "unavailable",
+      error: { code: "unavailable", message: "test", retryable: false },
+    }),
     modelCatalog: async () => ({
       default: { provider: "codex", model: "test" },
       groups: [{ id: "codex", models: [{ id: "test" }] }],
@@ -84,8 +101,11 @@ test("unconfirmed idle close cannot resume or reuse the previous native writer",
       failures: [],
     }),
     adapter: async () => ({
-      harnessId: "codex",
-      inspect: async () => ({ status: "unavailable", error: { message: "test" } }),
+      harnessId: harnessIdSchema.parse("codex"),
+      inspect: async () => ({
+        status: "unavailable",
+        error: { code: "unavailable", message: "test", retryable: false },
+      }),
       open: async () => {
         opens++;
         return { ok: true, value: session };
@@ -157,14 +177,22 @@ test("shutdown waits for a delayed native open and closes it without starting in
   let starts = 0;
   let closes = 0;
   const session: HarnessSessionLike = {
-    harnessId: "codex",
-    capabilities: {},
+    harnessId: harnessIdSchema.parse("codex"),
+    capabilities: harnessSessionCapabilitiesSchema.parse({
+      configuration: {
+        selectModel: false,
+        selectThinkingOption: false,
+        selectPermissionMode: false,
+      },
+      history: { fork: false, forkAcrossCwd: false, rollbackLastTurn: false },
+    }),
     initialState: {
-      nativeRef: {
-        harnessId: "codex",
+      nativeRef: nativeSessionRefSchema.parse({
+        formatVersion: 1,
+        harnessId: harnessIdSchema.parse("codex"),
         nativeSessionId: "late",
         locator: { codexHome: "/isolated" },
-      },
+      }),
     },
     initialUsage: null,
     outputs: {
@@ -174,7 +202,7 @@ test("shutdown waits for a delayed native open and closes it without starting in
     },
     execute: async () => {
       starts++;
-      return { ok: true, value: {} };
+      throw new Error("Unexpected execution after shutdown");
     },
     readSnapshot: async () => ({ ok: true, value: { turns: [] } }),
     close: async () => {
@@ -182,7 +210,10 @@ test("shutdown waits for a delayed native open and closes it without starting in
       closed.resolve(undefined);
     },
   };
-  const inspect = async () => ({ status: "unavailable" as const, error: { message: "test" } });
+  const inspect = async () => ({
+    status: "unavailable" as const,
+    error: { code: "unavailable", message: "test", retryable: false },
+  });
   const harnesses: SessionHarnesses = {
     ids: () => ["codex"],
     manifest: () => ({ name: "Codex" }),
@@ -195,7 +226,7 @@ test("shutdown waits for a delayed native open and closes it without starting in
       failures: [],
     }),
     adapter: async () => ({
-      harnessId: "codex",
+      harnessId: harnessIdSchema.parse("codex"),
       inspect,
       close: async () => {},
       open: async () => {

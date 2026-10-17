@@ -29,14 +29,22 @@ export interface AppServerOptions {
   command?: string;
   cwd?: string;
   environment?: NodeJS.ProcessEnv;
+  sensitive?: boolean;
+  requestTimeoutMs?: number;
 }
 
 export class CodexAppServer {
   private readonly child: ChildProcessWithoutNullStreams;
   private nextId = 0;
+  private readonly requestTimeoutMs: number | undefined;
   private readonly pending = new Map<
     number,
-    { method: string; resolve(value: unknown): void; reject(error: Error): void }
+    {
+      method: string;
+      resolve(value: unknown): void;
+      reject(error: Error): void;
+      timer: ReturnType<typeof setTimeout> | undefined;
+    }
   >();
   private readonly notificationListeners = new Set<NotificationListener>();
   private readonly requestListeners = new Set<ServerRequestListener>();
@@ -45,6 +53,7 @@ export class CodexAppServer {
   private stderrTail = "";
 
   constructor(options: AppServerOptions = {}) {
+    this.requestTimeoutMs = options.requestTimeoutMs;
     this.child = spawn(options.command ?? "codex", ["app-server"], {
       cwd: options.cwd,
       env: options.environment ?? process.env,
@@ -54,7 +63,8 @@ export class CodexAppServer {
       .createInterface({ input: this.child.stdout, crlfDelay: Infinity })
       .on("line", (line) => this.onLine(line));
     this.child.stderr.on("data", (chunk: Buffer) => {
-      this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-4000);
+      if (!options.sensitive)
+        this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-4000);
     });
     this.child.on("error", (error) => this.handleExit(error));
     this.child.on("exit", (code, signal) =>
@@ -69,7 +79,10 @@ export class CodexAppServer {
   private handleExit(error: Error): void {
     if (this.exited !== undefined) return;
     this.exited = error;
-    for (const entry of this.pending.values()) entry.reject(error);
+    for (const entry of this.pending.values()) {
+      clearTimeout(entry.timer);
+      entry.reject(error);
+    }
     this.pending.clear();
     for (const listener of this.exitListeners) listener(error);
   }
@@ -101,6 +114,7 @@ export class CodexAppServer {
       const entry = this.pending.get(message.id);
       if (entry === undefined) return;
       this.pending.delete(message.id);
+      clearTimeout(entry.timer);
       if (message.error !== undefined) entry.reject(new CodexRpcError(entry.method, message.error));
       else entry.resolve(message.result);
     }
@@ -115,11 +129,19 @@ export class CodexAppServer {
     if (this.exited !== undefined) return Promise.reject(this.exited);
     const id = ++this.nextId;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { method, resolve: resolve as (value: unknown) => void, reject });
+      const timer =
+        this.requestTimeoutMs === undefined
+          ? undefined
+          : setTimeout(() => {
+              this.pending.delete(id);
+              reject(new Error(`Codex RPC timed out: ${method}`));
+            }, this.requestTimeoutMs);
+      this.pending.set(id, { method, resolve: resolve as (value: unknown) => void, reject, timer });
       try {
         this.write({ jsonrpc: "2.0", id, method, params });
       } catch (error) {
         this.pending.delete(id);
+        clearTimeout(timer);
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });

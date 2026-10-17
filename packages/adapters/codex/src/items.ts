@@ -1,56 +1,8 @@
 /** Codex `ThreadItem` → codexhost Host Item mapping. */
 
-export type HostItem =
-  | { type: "agentMessage"; itemId: string; text: string; phase?: "commentary" | "final_answer" }
-  | { type: "reasoning"; itemId: string; text: string }
-  | { type: "contextCompaction"; itemId: string }
-  | {
-      type: "commandExecution";
-      itemId: string;
-      command: string;
-      cwd?: string;
-      output?: string;
-      exitCode?: number | null;
-      durationMs?: number;
-    }
-  | {
-      type: "toolExecution";
-      itemId: string;
-      toolName: string;
-      namespace?: string;
-      arguments: unknown;
-      output?: {
-        content: Array<
-          { type: "text"; text: string } | { type: "image"; mimeType: string; base64Data: string }
-        >;
-        truncated?: boolean;
-      };
-      durationMs?: number;
-    }
-  | {
-      type: "fileChange";
-      itemId: string;
-      changes: Array<{ path: string; kind: "add" | "update" | "delete"; unifiedDiff: string }>;
-    }
-  | {
-      type: "subagentDelegation";
-      itemId: string;
-      operation: "spawn" | "send";
-      prompt?: string;
-      subagents: Array<{
-        subagentId: string;
-        description: string;
-        background: boolean;
-        status: "pending" | "running" | "completed" | "failed" | "interrupted";
-        resultSummary?: string;
-        model?: string;
-      }>;
-    };
-
-export type HostItemOutcome =
-  | { status: "succeeded" }
-  | { status: "failed"; error: { code: string; message: string; retryable: boolean } }
-  | { status: "cancelled"; reason?: string };
+import type { HostItem, HostItemOutcome } from "@codexhost/harness-adapter";
+import { hostItemIdSchema, jsonValueSchema } from "@codexhost/shared-contracts";
+export type { HostItem, HostItemOutcome } from "@codexhost/harness-adapter";
 
 export type CodexItem = Record<string, unknown> & { type: string; id: string };
 
@@ -148,19 +100,23 @@ export function toHostItem(item: CodexItem): HostItem | undefined {
             : undefined;
       return {
         type: "agentMessage",
-        itemId: item.id,
+        itemId: hostItemIdSchema.parse(item.id),
         text: text(item.text),
         ...(phase === undefined ? {} : { phase }),
       };
     }
     case "reasoning":
-      return { type: "reasoning", itemId: item.id, text: reasoningText(item) };
+      return {
+        type: "reasoning",
+        itemId: hostItemIdSchema.parse(item.id),
+        text: reasoningText(item),
+      };
     case "contextCompaction":
-      return { type: "contextCompaction", itemId: item.id };
+      return { type: "contextCompaction", itemId: hostItemIdSchema.parse(item.id) };
     case "commandExecution":
       return {
         type: "commandExecution",
-        itemId: item.id,
+        itemId: hostItemIdSchema.parse(item.id),
         command: displayCommand(text(item.command)),
         ...(typeof item.cwd === "string" ? { cwd: item.cwd } : {}),
         ...(typeof item.aggregatedOutput === "string" ? { output: item.aggregatedOutput } : {}),
@@ -173,7 +129,7 @@ export function toHostItem(item: CodexItem): HostItem | undefined {
         : [];
       return {
         type: "fileChange",
-        itemId: item.id,
+        itemId: hostItemIdSchema.parse(item.id),
         changes: changes.map((change) => ({
           path: text(change.path),
           kind:
@@ -190,10 +146,10 @@ export function toHostItem(item: CodexItem): HostItem | undefined {
       const output = mcpOutput(item.result, item.error);
       return {
         type: "toolExecution",
-        itemId: item.id,
+        itemId: hostItemIdSchema.parse(item.id),
         toolName: text(item.tool),
         namespace: text(item.server),
-        arguments: item.arguments ?? {},
+        arguments: jsonValueSchema.parse(item.arguments ?? {}),
         ...(output === undefined ? {} : { output }),
         ...(typeof item.durationMs === "number" ? { durationMs: item.durationMs } : {}),
       };
@@ -204,10 +160,10 @@ export function toHostItem(item: CodexItem): HostItem | undefined {
         : undefined;
       return {
         type: "toolExecution",
-        itemId: item.id,
+        itemId: hostItemIdSchema.parse(item.id),
         toolName: text(item.tool),
         ...(typeof item.namespace === "string" ? { namespace: item.namespace } : {}),
-        arguments: item.arguments ?? {},
+        arguments: jsonValueSchema.parse(item.arguments ?? {}),
         ...(contentItems === undefined
           ? {}
           : {
@@ -225,7 +181,7 @@ export function toHostItem(item: CodexItem): HostItem | undefined {
         text(item.query) || text((item.action as { query?: unknown } | undefined)?.query);
       return {
         type: "toolExecution",
-        itemId: item.id,
+        itemId: hostItemIdSchema.parse(item.id),
         toolName: "web_search",
         arguments: { queries: query === "" ? [] : [query], query },
       };
@@ -233,7 +189,7 @@ export function toHostItem(item: CodexItem): HostItem | undefined {
     case "imageView":
       return {
         type: "toolExecution",
-        itemId: item.id,
+        itemId: hostItemIdSchema.parse(item.id),
         toolName: "read",
         arguments: { file_path: text(item.path) },
       };
@@ -247,7 +203,7 @@ export function toHostItem(item: CodexItem): HostItem | undefined {
         : [];
       return {
         type: "subagentDelegation",
-        itemId: item.id,
+        itemId: hostItemIdSchema.parse(item.id),
         operation: item.tool === "sendInput" || item.tool === "send_input" ? "send" : "spawn",
         ...(typeof item.prompt === "string" ? { prompt: item.prompt } : {}),
         subagents: receivers.map((threadId) => ({
@@ -280,7 +236,7 @@ export function itemOutcome(item: CodexItem): HostItemOutcome {
     return {
       status: "failed",
       error: {
-        code: status === "declined" ? "declined" : "nativeFailure",
+        code: "nativeFailure",
         message,
         retryable: false,
       },

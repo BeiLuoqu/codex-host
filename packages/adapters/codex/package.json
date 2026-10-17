@@ -18,6 +18,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@codexhost/harness-adapter": "0.0.0"
+    "@codexhost/harness-adapter": "0.0.0",
+    "@codexhost/shared-contracts": "0.0.0"
   }
 }

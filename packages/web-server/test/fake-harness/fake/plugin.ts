@@ -82,8 +82,21 @@ class FakeSession {
   private async play(turnId: string, steps: Step[]): Promise<void> {
     this.channel.emit({ kind: "event", event: { type: "turn.started", turnId } });
     for (const step of steps) {
-      if ("event" in step) this.channel.emit({ kind: "event", event: { turnId, ...step.event } });
-      else if ("interaction" in step) {
+      if ("event" in step) {
+        const event: Record<string, unknown> & { type: string } = { turnId, ...step.event };
+        const outcome = event.outcome as { checkpoint?: Record<string, unknown> } | undefined;
+        if (event.type === "turn.completed" && outcome?.checkpoint)
+          event.outcome = {
+            ...outcome,
+            checkpoint: {
+              harnessId: this.harnessId,
+              nativeSessionId: this.nativeId,
+              formatVersion: 1,
+              ...outcome.checkpoint,
+            },
+          };
+        this.channel.emit({ kind: "event", event });
+      } else if ("interaction" in step) {
         // Arm the response before publishing: the consumer may answer before
         // the next scripted step (and its timer) has run.
         let respond!: (value: unknown) => void;

@@ -44,11 +44,13 @@ export interface HarnessPluginDiagnostic {
 }
 
 export interface LoadHarnessPluginsOptions {
-  /** Absolute trusted roots only. Each root grants execution through enabled.json. */
+  /** Absolute trusted roots only. Default enablement comes from each root's enabled.json. */
   roots: readonly string[];
   context: HarnessPluginContext;
   /** Defaults to external. Codex execution requires a separate Web-owned registry. */
   scope?: HarnessPluginScope;
+  /** Server-owned explicit enablement instead of enabled.json, still bounded by scope. */
+  enabledIds?: ReadonlySet<string>;
   /** Local, persisted entrypoints; requested only for opted-in plugins. */
   launchCommandForPlugin?: (id: string) => Promise<string | undefined>;
   /** Prevent conflicts with explicitly injected Adapters, e.g. test fixtures. */
@@ -93,7 +95,7 @@ function isAdapter(value: unknown): value is HarnessAdapter {
   return (
     hasValidSessionUsage(value) &&
     ["inspect", "open", "close"].every((key) => typeof Reflect.get(value, key) === "function") &&
-    ["credits", "refreshCredits"].every(
+    ["credits", "refreshCredits", "readHistory"].every(
       (key) =>
         Reflect.get(value, key) === undefined || typeof Reflect.get(value, key) === "function",
     )
@@ -255,8 +257,10 @@ export async function loadHarnessPlugins(
       /* Diagnostics cannot change loading. */
     }
   };
-  const { plugins: candidates, enabledIds } = await discoverHarnessPlugins(options.roots, (code) =>
-    diagnose({ code }),
+  const { plugins: candidates, enabledIds } = await discoverHarnessPlugins(
+    options.roots,
+    (code) => diagnose({ code }),
+    options.enabledIds,
   );
   const counts = new Map<string, number>();
   for (const { manifest } of candidates)
@@ -274,7 +278,7 @@ export async function loadHarnessPlugins(
     const { manifest } = candidate;
     // Runtime ownership is checked before imports, factory calls, or warmup. An
     // enabled.json entry or onlyIds selection cannot widen the owner's scope.
-    if (!isHarnessPluginInScope(manifest.id, scope)) continue;
+    if (!isHarnessPluginInScope(manifest.id, scope, manifest.kind)) continue;
     if (!candidate.enabled || (options.onlyIds && !options.onlyIds.has(manifest.id))) continue;
     if (options.sessionPlugins === false && manifest.kind !== "usage") continue;
     if (counts.get(manifest.id) !== 1 || options.reservedIds?.has(manifest.id)) {

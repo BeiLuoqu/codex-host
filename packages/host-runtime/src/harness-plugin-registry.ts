@@ -26,7 +26,7 @@ export class HarnessPluginRegistry {
 
   register(descriptor: HarnessPluginDescriptor, adapter: PluginAdapter): Promise<void> {
     if (this.#closed) throw new Error("Plugin registry is closed");
-    if (!isHarnessPluginInScope(descriptor.id, this.scope))
+    if (!isHarnessPluginInScope(descriptor.id, this.scope, descriptor.kind))
       throw new Error("Plugin identity is outside this runtime's scope");
     if (adapter.harnessId !== descriptor.id) throw new Error("Plugin Adapter identity mismatch");
     if (this.#entries.has(descriptor.id)) throw new Error("Duplicate Harness plugin identity");

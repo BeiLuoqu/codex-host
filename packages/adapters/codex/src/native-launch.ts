@@ -1,7 +1,7 @@
-/** Native Codex execution belongs to an explicitly configured, isolated Web home. */
+/** Native Codex launch uses local CLI configuration without Desktop routing hooks. */
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export const CODEX_COMMAND_ENV = "CODEXHOST_CODEX_COMMAND";
 export const CODEX_HOME_ENV = "CODEXHOST_CODEX_HOME";
@@ -12,11 +12,6 @@ function canonicalPath(path: string): string {
   if (existsSync(absolute)) return realpathSync(absolute);
   const parent = dirname(absolute);
   return parent === absolute ? absolute : join(canonicalPath(parent), basename(absolute));
-}
-
-function contains(parent: string, child: string): boolean {
-  const path = relative(parent, child);
-  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 
 export function nativeCodexLaunch(environment: NodeJS.ProcessEnv): {
@@ -36,25 +31,14 @@ export function nativeCodexLaunch(environment: NodeJS.ProcessEnv): {
   ) {
     throw new Error("Web Codex must use a native CLI, not a Desktop proxy or shim");
   }
-  const configuredHome = environment[CODEX_HOME_ENV];
+  const configuredHome =
+    environment[CODEX_HOME_ENV] ??
+    environment.CODEX_HOME ??
+    join(environment.HOME ?? homedir(), ".codex");
   if (!configuredHome || !isAbsolute(configuredHome)) {
-    throw new Error("Web Codex requires an absolute isolated home (--codex-home)");
+    throw new Error("Web Codex requires an absolute native home (--codex-home)");
   }
   const home = canonicalPath(configuredHome);
-  const desktopHomes = [
-    join(homedir(), ".codex"),
-    ...(environment.HOME ? [join(environment.HOME, ".codex")] : []),
-    environment.CODEX_HOME,
-    environment.CODEXHOST_GUI_CODEX_HOME,
-  ].filter((value): value is string => Boolean(value));
-  if (
-    desktopHomes.some((path) => {
-      const desktopHome = canonicalPath(path);
-      return contains(desktopHome, home) || contains(home, desktopHome);
-    })
-  ) {
-    throw new Error("Web Codex home must be separate from the GUI Codex home");
-  }
   const childEnvironment = Object.fromEntries(
     Object.entries(environment).filter(([key]) => {
       const name = key.toUpperCase();

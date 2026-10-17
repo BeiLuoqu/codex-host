@@ -54,9 +54,11 @@ plugins/
 }
 ```
 
-每个根目录都有自己的 `enabled.json`。发行版生成预装目录的启用文件，作为对随包交付插件的显式信任；用户目录由用户配置。发现但未启用的插件不执行，也不进入目录查询结果。缺少某个根目录或其 `enabled.json` 时不加载该根目录插件；配置无效时拒绝该根目录，不回退到硬编码内置实现。不扫描项目目录，不自动安装或下载依赖，不热替换。
+默认启用配置来自每个根目录的 `enabled.json`。发行版生成预装目录的启用文件，作为对随包交付插件的显式信任；用户目录由用户配置。发现但未启用的插件不执行，也不进入目录查询结果。缺少某个根目录或其 `enabled.json` 时不加载该根目录插件；配置无效时拒绝该根目录，不回退到硬编码内置实现。不扫描项目目录，不自动安装或下载依赖，不热替换。
 
-启用许可与运行时所有权是两个条件。公共 Manifest、配置和通用描述可以使用 `codex` ID；Desktop / CH Host 加载器及 Registry 默认使用 `external` 范围，在模块导入、工厂和预取之前排除 `codex`。`onlyIds` 或 `enabled.json` 不能扩大这个范围。独立 Web Codex 执行入口显式使用 `web-codex`，仅加载 `codex`；两种 Registry 各自管理关闭生命周期。范围由服务端装配决定，不由浏览器请求或插件自行声明。
+固定隔离 Web owner 可通过公共 Loader 的 `enabledIds` 提供服务端显式启用集合，替代读取这些根目录的 `enabled.json`；该集合不是浏览器参数，不写回 external 配置。此路径仍复用公共发现、校验、超时、工厂调用和 Registry 关闭机制。
+
+启用许可与运行时所有权是两个条件。公共 Manifest、配置和通用描述可以使用 `codex` ID；Desktop / CH Host 加载器及 Registry 默认使用 `external` 范围，在模块导入、工厂和预取之前排除 `codex`。`onlyIds`、`enabled.json` 或显式启用集合都不能扩大这个范围。共享 Host 中的隔离 Web Codex 执行入口显式使用 `web-codex`，仅加载 `codex` 会话插件，导入前排除 usage 插件；两种 Registry 各自管理关闭生命周期。范围由服务端装配决定，不由浏览器请求或插件自行声明。
 
 Desktop / CH 的公开插件目录、外部 Harness 路由、Broker 和会话导入仍拒绝 `codex`。GUI 原生 Codex 不注册成 external Thread，也不通过这个执行插件创建、恢复或操作会话；是否共用进程不改变这些边界。
 
@@ -310,3 +312,5 @@ DeepSeek 插件通过自身的 HTTP/WebSocket 实现连接受支持的本机 DSH
 - 恢复、Pi/DeepSeek 导入、委派、协议路由和 Renderer 的定向回归。
 
 这些是合成测试、构建和分离 Bundle 冒烟检查，不等同于真实 Codex Desktop、所有原生 Harness、macOS Broker、SSH 远端或完整安装/升级验收。后续仍须按架构方案的能力基线和发布 Gate 完成迁移与验证。
+
+公共 `HarnessSession.steer` 可选方法表达原生同轮输入，调用失败不得隐式取消并重发；公共 `HarnessAdapter.readHistory` 可选方法读取持久历史而不打开执行会话。未实现的插件保持原有行为。Codex 使用这些方法及统一的 Adapter/Session/Item/Inspection 类型，不另建 Web 专用镜像协议；宿主的来源隔离与会话存储职责不进入插件。

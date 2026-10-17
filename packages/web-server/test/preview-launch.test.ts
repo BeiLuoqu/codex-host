@@ -15,6 +15,7 @@ it("removes inherited Host routing and Node injection without changing the paren
   const parent = {
     PATH: "/usr/bin",
     HOME: "/home/test",
+    CODEX_HOME: "/home/test/.codex",
     ANTHROPIC_API_KEY: "test-credential",
     CODEXHOST_RUNTIME_TOKEN: "host-token",
     CODEXHOST_CODEX_COMMAND: "/unsafe/codex",
@@ -32,6 +33,7 @@ it("removes inherited Host routing and Node injection without changing the paren
   assert.deepEqual(env, {
     PATH: "/usr/bin",
     HOME: "/home/test",
+    CODEX_HOME: "/home/test/.codex",
     ANTHROPIC_API_KEY: "test-credential",
   });
   assert.deepEqual(parent, original);

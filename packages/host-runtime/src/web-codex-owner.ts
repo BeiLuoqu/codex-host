@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
-import { homedir } from "node:os";
 import {
   IsolatedSessions,
   LocalSessionOrganization,
@@ -11,6 +10,7 @@ import {
   type SessionNotification,
 } from "@codexhost/session-runtime";
 import {
+  clientProjectlessWorkspaceSchema,
   webCodexConfigurationSchema,
   webCodexRequestSchema,
   webCodexStreamRequestSchema,
@@ -19,6 +19,7 @@ import {
 } from "@codexhost/shared-contracts";
 import type { ClientChannelEvents } from "./client-channel-events.js";
 import { createWebCodexHarness } from "./web-codex-harness.js";
+import { allocateProjectlessWorkspace } from "./projectless-workspace.js";
 
 type PendingInteraction = {
   sessionId: string;
@@ -39,7 +40,7 @@ const sessionOperations = new Set([
   "executeCommand",
 ]);
 
-/** One fixed isolated source next to external ownership. Never an official Codex route. */
+/** One fixed Web-owned source next to external ownership. Never an official Codex route. */
 export class SharedWebCodexOwner {
   private configuration: WebCodexConfiguration | undefined;
   private scope: string | undefined;
@@ -103,26 +104,12 @@ export class SharedWebCodexOwner {
       command: await realpath(requested.command),
       pluginRoots: await Promise.all(requested.pluginRoots.map((root) => realpath(root))),
     };
-    for (const gui of [
-      this.environment.CODEX_HOME,
-      this.environment.CODEXHOST_GUI_CODEX_HOME,
-      path.join(this.environment.HOME ?? homedir(), ".codex"),
-      path.join(homedir(), ".codex"),
-    ]) {
-      if (!gui) continue;
-      const official = canonicalSessionPath(gui);
-      const overlaps = (parent: string, child: string) => {
-        const local = path.relative(parent, child);
-        return (
-          !local ||
-          (local !== ".." && !local.startsWith(`..${path.sep}`) && !path.isAbsolute(local))
-        );
-      };
-      if (overlaps(official, configuration.home) || overlaps(configuration.home, official))
-        throw new Error("scope-conflict: GUI home overlap");
-    }
     if (this.closed) throw new Error("owner-offline");
     if (this.configuration) {
+      if (configuration.home !== this.configuration.home)
+        throw new Error(
+          `scope-conflict: Host already uses ${this.configuration.home}; keep --codex-home set to that directory for existing sessions`,
+        );
       if (JSON.stringify(configuration) !== JSON.stringify(this.configuration))
         throw new Error("scope-conflict");
       return this.description();
@@ -251,6 +238,23 @@ export class SharedWebCodexOwner {
         const configuration = args.configuration as Parameters<IsolatedSessions["prepareDraft"]>[1];
         if (configuration?.selection?.provider !== "codex") throw new Error("scope-conflict");
         if (!id) throw new Error("session-address-required");
+        if (args.projectlessWorkspace !== undefined) {
+          const choice = clientProjectlessWorkspaceSchema.safeParse(args.projectlessWorkspace);
+          if (!choice.success || args.cwd !== undefined || args.workspaceId !== undefined)
+            throw new Error("Invalid projectless workspace choice");
+          const existing = owner.list().items.find((row) => row.sessionId === id);
+          if (existing && existing.workspaceKind !== "projectless")
+            throw new Error("session/busy: Draft workspace is already selected");
+          const cwd =
+            typeof existing?.cwd === "string"
+              ? existing.cwd
+              : (await allocateProjectlessWorkspace(this.environment, choice.data.prompt ?? ""))
+                  .cwd;
+          return owner.prepareDraft(
+            { sessionId: id, cwd, workspaceKind: "projectless" },
+            configuration,
+          );
+        }
         return owner.prepareDraft(
           { sessionId: id, ...(typeof args.cwd === "string" ? { cwd: args.cwd } : {}) },
           configuration,

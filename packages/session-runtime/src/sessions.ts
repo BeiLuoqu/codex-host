@@ -1,3 +1,19 @@
+import {
+  hostTurnIdSchema,
+  hostInteractionIdSchema,
+  harnessModelRefSchema,
+  harnessThinkingOptionIdSchema,
+  harnessPermissionModeIdSchema,
+  nativeSessionRefSchema,
+  nativeCheckpointRefSchema,
+} from "@codexhost/shared-contracts";
+import type {
+  HostEvent,
+  HostInteraction,
+  HostInteractionResponse,
+  HostTurnSnapshot,
+  OpenSessionInput,
+} from "@codexhost/harness-adapter";
 import type { DraftConfiguration } from "./draft-configuration.js";
 /**
  * The `session/*` Remote surface backed by codexhost Harness Sessions.
@@ -35,6 +51,15 @@ import {
 } from "./contracts.js";
 import { projectTokenUsage } from "./usage-projection.js";
 
+/** Web metadata predating the public contract stored V1 references without the version field. */
+function readNativeRef(value: unknown) {
+  return nativeSessionRefSchema.parse(
+    value && typeof value === "object" && !Array.isArray(value)
+      ? { formatVersion: 1, ...value }
+      : value,
+  );
+}
+
 interface ModelSelection {
   provider: string;
   model: string;
@@ -44,6 +69,7 @@ interface ModelSelection {
 interface SessionMeta {
   sessionId: string;
   cwd: string;
+  workspaceKind?: "projectless";
   createdAt: number;
   updatedAt: number;
   harnessId?: string;
@@ -259,6 +285,7 @@ export class IsolatedSessions {
       running: runtime?.running ?? false,
       blank: meta.blank,
       cwd: meta.cwd,
+      ...(meta.workspaceKind ? { workspaceKind: meta.workspaceKind } : {}),
       ...(meta.origin === undefined ? {} : { origin: meta.origin }),
       ...(meta.parentSessionId === undefined ? {} : { parentSessionId: meta.parentSessionId }),
       projections: {
@@ -276,6 +303,7 @@ export class IsolatedSessions {
       workspaceId?: string;
       cwd?: string;
       sessionId?: string;
+      workspaceKind?: "projectless";
     },
     configuration?: DraftConfiguration,
   ): Promise<{ sessionId: string; agentPreset: string }> {
@@ -290,6 +318,7 @@ export class IsolatedSessions {
       });
     const now = Date.now();
     const meta: SessionMeta = { sessionId, cwd, createdAt: now, updatedAt: now, blank: true };
+    if (request.workspaceKind) meta.workspaceKind = request.workspaceKind;
     if (configuration) {
       meta.selection = { ...configuration.selection };
       if (configuration.permissionModeId) meta.permissionModeId = configuration.permissionModeId;
@@ -318,7 +347,8 @@ export class IsolatedSessions {
     if (this.shuttingDown)
       throw new SessionRuntimeError("session/closed", "Web sessions are closing.");
     this.saveMeta(meta);
-    this.workspaces.attachSession(sessionId, workspace?.workspaceId, cwd);
+    if (meta.workspaceKind !== "projectless")
+      this.workspaces.attachSession(sessionId, workspace?.workspaceId, cwd);
     const runtime = this.runtime(sessionId);
     this.observer.changed("api-session/added", this.summary(runtime.meta));
     return { sessionId, agentPreset: "standard" };
@@ -326,7 +356,7 @@ export class IsolatedSessions {
 
   /** Materialize an already configured Web draft without updating global preferences. */
   async prepareDraft(
-    request: { sessionId: string; cwd?: string },
+    request: { sessionId: string; cwd?: string; workspaceKind?: "projectless" },
     configuration: DraftConfiguration,
   ): Promise<void> {
     await this.create(request, configuration);
@@ -336,7 +366,8 @@ export class IsolatedSessions {
       runtime.opening ||
       runtime.running ||
       this.shuttingDown ||
-      runtime.meta.cwd !== request.cwd
+      runtime.meta.cwd !== request.cwd ||
+      runtime.meta.workspaceKind !== request.workspaceKind
     )
       throw new SessionRuntimeError("session/busy", "Draft is already in use.");
     runtime.meta.selection = { ...configuration.selection };
@@ -430,16 +461,20 @@ export class IsolatedSessions {
     const adapter = await this.harnesses.adapter(harnessId);
     const common = {
       cwd: meta.cwd,
-      ...(selection?.provider === harnessId ? { model: { id: selection.model } } : {}),
-      ...(selection?.provider === harnessId && selection.reasoningEffort !== undefined
-        ? { thinkingOptionId: selection.reasoningEffort }
+      ...(selection?.provider === harnessId
+        ? { model: harnessModelRefSchema.parse({ id: selection.model }) }
         : {}),
-      ...(meta.permissionModeId !== undefined ? { permissionModeId: meta.permissionModeId } : {}),
+      ...(selection?.provider === harnessId && selection.reasoningEffort !== undefined
+        ? { thinkingOptionId: harnessThinkingOptionIdSchema.parse(selection.reasoningEffort) }
+        : {}),
+      ...(meta.permissionModeId !== undefined
+        ? { permissionModeId: harnessPermissionModeIdSchema.parse(meta.permissionModeId) }
+        : {}),
     };
-    const input =
+    const input: OpenSessionInput =
       meta.nativeRef === undefined
         ? { kind: "create", ...common }
-        : { kind: "resume", nativeRef: meta.nativeRef, ...common };
+        : { kind: "resume", nativeRef: readNativeRef(meta.nativeRef), ...common };
     const result = await adapter.open(input);
     if (!result.ok)
       throw new SessionRuntimeError(`harness/${result.error.code}`, result.error.message, {});
@@ -521,7 +556,7 @@ export class IsolatedSessions {
     }
   }
 
-  private onEvent(runtime: Runtime, event: Record<string, unknown> & { type: string }): void {
+  private onEvent(runtime: Runtime, event: HostEvent): void {
     switch (event.type) {
       case "session.state.changed":
         this.applyState(runtime, event.state as HarnessSessionLike["initialState"]);
@@ -814,7 +849,7 @@ export class IsolatedSessions {
       }
       // Cancelled before the Harness was ready: never start the native turn.
       if (this.shuttingDown || runtime.projector !== projector || projector.isFinished) return;
-      const turnId = `turn-${randomUUID()}`;
+      const turnId = hostTurnIdSchema.parse(`turn-${randomUUID()}`);
       runtime.turnId = turnId;
       const result = await session.execute({
         type: "turn.start",
@@ -837,30 +872,19 @@ export class IsolatedSessions {
    */
   private async steer(runtime: Runtime, prompt: QueuedPrompt): Promise<void> {
     await runtime.starting;
-    // Harnesses that accept input into a running turn keep their work; others restart.
-    const native =
-      (runtime.harness?.capabilities as { steering?: { native?: boolean } } | undefined)?.steering
-        ?.native === true;
     if (
-      native &&
-      runtime.harness !== undefined &&
-      runtime.turnId !== undefined &&
-      runtime.projector !== undefined &&
+      runtime.harness?.steer &&
+      runtime.turnId &&
+      runtime.projector &&
       !runtime.projector.isFinished
     ) {
-      const result = await runtime.harness.execute({
-        type: "turn.steer",
-        turnId: runtime.turnId,
+      const result = await runtime.harness.steer({
+        turnId: hostTurnIdSchema.parse(runtime.turnId),
         input: [{ type: "text", text: textOf(prompt.content) }],
       });
-      if (result.ok) {
-        runtime.projector.steer(prompt.content, prompt.requestId);
-        return;
-      }
-      console.error(
-        `[session ${runtime.meta.sessionId}] native steer failed, restarting the turn`,
-        result.error,
-      );
+      if (!result.ok) throw new SessionRuntimeError("session/steer-failed", result.error.message);
+      runtime.projector.steer(prompt.content, prompt.requestId);
+      return;
     }
     runtime.queue.unshift(prompt);
     this.publishQueue(runtime);
@@ -868,7 +892,7 @@ export class IsolatedSessions {
       try {
         const result = await runtime.harness.execute({
           type: "turn.cancel",
-          turnId: runtime.turnId,
+          turnId: hostTurnIdSchema.parse(runtime.turnId),
         });
         if (!result.ok) throw new SessionRuntimeError("session/steer-failed", result.error.message);
       } catch (error) {
@@ -884,12 +908,9 @@ export class IsolatedSessions {
 
   // ---- interactions ------------------------------------------------------------------------
 
-  private onInteraction(
-    runtime: Runtime,
-    interaction: Record<string, unknown> & { type: string },
-  ): void {
+  private onInteraction(runtime: Runtime, interaction: HostInteraction): void {
     const interactionId = String(interaction.interactionId);
-    const invocation = this.observer.interaction(runtime.meta.sessionId, interaction);
+    const invocation = this.observer.interaction(runtime.meta.sessionId, { ...interaction });
     runtime.interactions.set(interactionId, { interactionId, cancel: invocation.cancel });
     this.notify(
       runtime,
@@ -907,8 +928,8 @@ export class IsolatedSessions {
           runtime.interactions.delete(interactionId);
           const result = await runtime.harness?.execute({
             type: "interaction.respond",
-            interactionId,
-            response,
+            interactionId: hostInteractionIdSchema.parse(interactionId),
+            response: response as HostInteractionResponse,
           });
           if (result && !result.ok)
             console.error("[session] interaction response rejected", result.error);
@@ -981,9 +1002,11 @@ export class IsolatedSessions {
     if (this.harnesses.preferences && meta.harnessId === undefined)
       await this.harnesses.preferences
         .remember(selection.provider, {
-          model: { id: selection.model },
-          thinkingOptionId: selection.reasoningEffort,
-          permissionModeId: meta.permissionModeId,
+          model: harnessModelRefSchema.parse({ id: selection.model }),
+          thinkingOptionId: harnessThinkingOptionIdSchema
+            .optional()
+            .parse(selection.reasoningEffort),
+          permissionModeId: harnessPermissionModeIdSchema.optional().parse(meta.permissionModeId),
         })
         .catch(() =>
           this.observer.changed(
@@ -1005,7 +1028,7 @@ export class IsolatedSessions {
     if (session !== undefined) {
       const modelResult = await session.execute({
         type: "model.select",
-        model: { id: selection.model },
+        model: harnessModelRefSchema.parse({ id: selection.model }),
       });
       if (!modelResult.ok)
         throw new SessionRuntimeError("session/model-unavailable", modelResult.error.message, {
@@ -1015,7 +1038,7 @@ export class IsolatedSessions {
       if (selection.reasoningEffort !== undefined) {
         const thinking = await session.execute({
           type: "thinking.select",
-          thinkingOptionId: selection.reasoningEffort,
+          thinkingOptionId: harnessThinkingOptionIdSchema.parse(selection.reasoningEffort),
         });
         if (!thinking.ok) console.error("[session] thinking selection rejected", thinking.error);
       }
@@ -1071,7 +1094,7 @@ export class IsolatedSessions {
     if (runtime.harness !== undefined && runtime.turnId !== undefined) {
       const result = await runtime.harness.execute({
         type: "turn.cancel",
-        turnId: runtime.turnId,
+        turnId: hostTurnIdSchema.parse(runtime.turnId),
       });
       if (!result.ok) throw new SessionRuntimeError("session/cancel-failed", result.error.message);
     } else if (runtime.running) {
@@ -1365,21 +1388,11 @@ export class IsolatedSessions {
     const parent = this.index[meta.parentSessionId];
     child.backfilling ??= (async () => {
       try {
-        const adapter = (await this.harnesses.adapter(meta.harnessId ?? "")) as unknown as {
-          subagents?: {
-            readSnapshot(input: {
-              parent: unknown;
-              nativeSubagentId: string;
-              cwd: string;
-            }): Promise<
-              { ok: true; value: { turns: unknown[] } } | { ok: false; error: { message: string } }
-            >;
-          };
-        };
+        const adapter = await this.harnesses.adapter(meta.harnessId ?? "");
         if (adapter.subagents === undefined || parent?.nativeRef === undefined)
           throw new Error("This Harness does not expose subagent transcripts");
         const snapshot = await adapter.subagents.readSnapshot({
-          parent: parent.nativeRef,
+          parent: readNativeRef(parent.nativeRef),
           nativeSubagentId: meta.nativeSubagentId as string,
           cwd: meta.cwd,
         });
@@ -1424,22 +1437,7 @@ export class IsolatedSessions {
       imported?: string;
     }>
   > {
-    const adapter = (await this.harnesses.adapter(harnessId)) as unknown as {
-      sessionImport?: {
-        listCandidates(): Promise<
-          | {
-              ok: true;
-              value: Array<{
-                nativeSessionId: string;
-                title: string | null;
-                cwd: string;
-                updatedAt: number;
-              }>;
-            }
-          | { ok: false; error: { message: string } }
-        >;
-      };
-    };
+    const adapter = await this.harnesses.adapter(harnessId);
     if (adapter.sessionImport === undefined) return [];
     const result = await adapter.sessionImport.listCandidates();
     if (!result.ok)
@@ -1480,20 +1478,7 @@ export class IsolatedSessions {
       (meta) => meta.harnessId === harnessId && meta.nativeSessionId === nativeSessionId,
     );
     if (existing !== undefined) return { sessionId: existing.sessionId, created: false };
-    const adapter = (await this.harnesses.adapter(harnessId)) as unknown as {
-      sessionImport?: {
-        resolveCandidate?(id: string): Promise<
-          | {
-              ok: true;
-              value: {
-                candidate: { title: string | null; cwd: string; updatedAt: number };
-                nativeRef: unknown;
-              };
-            }
-          | { ok: false; error: { message: string } }
-        >;
-      };
-    };
+    const adapter = await this.harnesses.adapter(harnessId);
     const resolve = adapter.sessionImport?.resolveCandidate;
     if (resolve === undefined)
       throw new SessionRuntimeError(
@@ -1538,18 +1523,10 @@ export class IsolatedSessions {
   }
 
   /** Project historical Harness turns into a journal (no presentation frames). */
-  private replayTurns(runtime: Runtime, turns: unknown[]): void {
+  private replayTurns(runtime: Runtime, turns: HostTurnSnapshot[]): void {
     try {
       let previousEnd = runtime.meta.createdAt;
-      for (const turn of turns as Array<{
-        input: Array<{ type: string; text?: string }>;
-        items: Array<{ item: HostItem; outcome: HostItemOutcome }>;
-        outcome: TurnOutcomeShape;
-        model?: { id: string };
-        startedAtMs?: number;
-        completedAtMs?: number;
-        checkpoint?: unknown;
-      }>) {
+      for (const turn of turns) {
         const start = turn.startedAtMs ?? previousEnd;
         const end = turn.completedAtMs ?? start;
         previousEnd = end;
@@ -1581,16 +1558,10 @@ export class IsolatedSessions {
       try {
         // Prefer a read-only history call when the Adapter offers one: it needs no writer role
         // and starts no native session.
-        const adapter = (await this.harnesses.adapter(runtime.meta.harnessId ?? "")) as unknown as {
-          readHistory?(
-            nativeRef: unknown,
-          ): Promise<
-            { ok: true; value: { turns: unknown[] } } | { ok: false; error: { message: string } }
-          >;
-        };
+        const adapter = await this.harnesses.adapter(runtime.meta.harnessId ?? "");
         const snapshot =
           adapter.readHistory !== undefined && runtime.meta.nativeRef !== undefined
-            ? await adapter.readHistory(runtime.meta.nativeRef)
+            ? await adapter.readHistory(readNativeRef(runtime.meta.nativeRef))
             : await (await this.harnessFor(runtime)).readSnapshot();
         if (!snapshot.ok) throw new Error(snapshot.error.message);
         if (runtime.log.events.some((event) => event.type === "turn/start")) return;
@@ -1623,9 +1594,7 @@ export class IsolatedSessions {
     const sources: Array<{ harnessId: string; name: string }> = [];
     for (const harnessId of this.harnesses.ids()) {
       try {
-        const adapter = (await this.harnesses.adapter(harnessId)) as unknown as {
-          sessionImport?: unknown;
-        };
+        const adapter = await this.harnesses.adapter(harnessId);
         if (adapter.sessionImport !== undefined)
           sources.push({
             harnessId,
@@ -1647,24 +1616,6 @@ export class IsolatedSessions {
   async importNativeRequest(args: Record<string, unknown>) {
     const request = requestOf<{ harnessId: string; nativeSessionId: string }>(args);
     return await this.importNative(request.harnessId, request.nativeSessionId);
-  }
-
-  /** Import the newest native sessions of every Harness that supports it. */
-  async importRecent(limit: number): Promise<number> {
-    let count = 0;
-    for (const harnessId of this.harnesses.ids()) {
-      try {
-        const candidates = await this.importCandidates(harnessId);
-        for (const candidate of candidates.slice(0, limit)) {
-          if (candidate.imported !== undefined) continue;
-          await this.importNative(harnessId, candidate.nativeSessionId);
-          count += 1;
-        }
-      } catch (error) {
-        console.error(`[import] ${harnessId}`, error instanceof Error ? error.message : error);
-      }
-    }
-    return count;
   }
 
   // ---- fork --------------------------------------------------------------------------------
@@ -1706,8 +1657,8 @@ export class IsolatedSessions {
     const adapter = await this.harnesses.adapter(meta.harnessId);
     const opened = await adapter.open({
       kind: "fork",
-      sourceRef: meta.nativeRef,
-      checkpoint,
+      sourceRef: readNativeRef(meta.nativeRef),
+      checkpoint: nativeCheckpointRefSchema.parse(checkpoint),
       cwd: meta.cwd,
     });
     if (!opened.ok)
@@ -1727,7 +1678,9 @@ export class IsolatedSessions {
       harnessId: meta.harnessId,
       ...(meta.selection === undefined ? {} : { selection: meta.selection }),
       ...(meta.lastUsed === undefined ? {} : { lastUsed: meta.lastUsed }),
-      ...(meta.permissionModeId === undefined ? {} : { permissionModeId: meta.permissionModeId }),
+      ...(meta.permissionModeId === undefined
+        ? {}
+        : { permissionModeId: harnessPermissionModeIdSchema.parse(meta.permissionModeId) }),
       title: `Fork · ${(meta.title ?? "Session").replace(/^Fork · /u, "")}`,
       blank: false,
       lastPromptAt: now,
@@ -1859,7 +1812,7 @@ export class IsolatedSessions {
       if (runtime.harness !== undefined) {
         const result = await runtime.harness.execute({
           type: "permissionMode.select",
-          permissionModeId: mode.value,
+          permissionModeId: harnessPermissionModeIdSchema.parse(mode.value),
         });
         if (!result.ok) return { commandId, result: { kind: "error", text: result.error.message } };
       }
@@ -1868,9 +1821,11 @@ export class IsolatedSessions {
         const selection = runtime.meta.selection;
         await this.harnesses.preferences
           ?.remember(selection.provider, {
-            model: { id: selection.model },
-            thinkingOptionId: selection.reasoningEffort,
-            permissionModeId: mode.value,
+            model: harnessModelRefSchema.parse({ id: selection.model }),
+            thinkingOptionId: harnessThinkingOptionIdSchema
+              .optional()
+              .parse(selection.reasoningEffort),
+            permissionModeId: harnessPermissionModeIdSchema.parse(mode.value),
           })
           .catch(() =>
             this.observer.changed(
@@ -1916,7 +1871,7 @@ export class IsolatedSessions {
     runtime.projector = this.newProjector(runtime);
     this.setRunning(runtime, true);
     runtime.projector.begin([{ type: "text", text: line.trim() }], undefined);
-    const turnId = `turn-${randomUUID()}`;
+    const turnId = hostTurnIdSchema.parse(`turn-${randomUUID()}`);
     runtime.turnId = turnId;
     const result = await session.commands.execute({
       turnId,

@@ -307,21 +307,8 @@ it("moves an unsent draft between sources and sends only through its final sourc
   );
 });
 
-it("does not create Codex implicitly for a projectless draft or route official GUI IDs", async (t) => {
+it("does not route official GUI IDs through the Codex plugin", async (t) => {
   const bench = setup(t);
-  const draft = await bench.request<{ sessionId: string }>("session/create", {});
-  await bench.select(draft.sessionId, "codex");
-  const rejected = await bench.rpc.dispatch("session/prompt", {
-    args: {
-      request: {
-        sessionId: draft.sessionId,
-        requestId: "projectless-codex",
-        content: [{ type: "text", text: "Requires an explicit workspace" }],
-      },
-    },
-  });
-  assert.ok(!rejected.ok);
-  assert.equal(rejected.error.code, "workspace/invalid-path");
   for (const method of [
     "session/prompt",
     "session/cancel",

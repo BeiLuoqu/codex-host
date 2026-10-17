@@ -385,7 +385,7 @@ describe("fork", () => {
       {
         event: {
           type: "turn.completed",
-          outcome: { status: "succeeded", checkpoint: { harnessId: "fake", key: "cp-1" } },
+          outcome: { status: "succeeded", checkpoint: { checkpointId: "cp-1" } },
         },
       },
     ];
@@ -402,7 +402,7 @@ describe("fork", () => {
       {
         event: {
           type: "turn.completed",
-          outcome: { status: "succeeded", checkpoint: { harnessId: "fake", key: "cp-2" } },
+          outcome: { status: "succeeded", checkpoint: { checkpointId: "cp-2" } },
         },
       },
     ];
