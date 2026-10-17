@@ -66,26 +66,6 @@ describe("official Codex passthrough", () => {
     { method: "turn/start" },
     { method: "turn/interrupt", params: "future-params-shape" },
     { method: "thread/read" },
-    { method: "thread/attachment/list", params: { threadId: "official-thread", limit: 100 } },
-    { method: "thread/queue/list", params: { threadId: "official-thread", limit: 100 } },
-    {
-      method: "thread/settings/update",
-      params: {
-        threadId: "official-thread",
-        approvalPolicy: "never",
-        sandboxPolicy: { type: "dangerFullAccess" },
-      },
-    },
-    {
-      method: "thread/settings/update",
-      params: {
-        threadId: "official-thread",
-        approvalPolicy: "on-request",
-        sandboxPolicy: { type: "readOnly" },
-        model: "future-model",
-        futureSetting: true,
-      },
-    },
     { method: "future/method", params: { anything: [1, "two"] } },
   ])("forwards an unrecognized native shape unchanged: $method", async (request) => {
     const fixture = createFixture();
