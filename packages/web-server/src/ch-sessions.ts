@@ -68,6 +68,8 @@ export class ChSessions {
   private drafts = new Map<string, Draft>();
   private controls = new Set<StreamSink>();
   private refreshing: Promise<void> | undefined;
+  private refreshingCatalog = false;
+  private catalogReadAt = -Infinity;
   private timer?: NodeJS.Timeout;
   private closed = false;
   private readonly realtime: ChRealtime | undefined;
@@ -157,9 +159,18 @@ export class ChSessions {
     return this.drafts.get(id)?.canonicalId ?? id;
   }
   private async refresh(): Promise<void> {
-    this.refreshing ??= this.listAll().finally(() => {
-      this.refreshing = undefined;
-    });
+    if (this.closed) return;
+    if (this.refreshing && !this.refreshingCatalog) {
+      await this.refreshing.catch(() => undefined);
+      return this.refresh();
+    }
+    if (!this.refreshing) {
+      this.refreshingCatalog = true;
+      this.refreshing = this.listAll().finally(() => {
+        this.refreshing = undefined;
+        this.refreshingCatalog = false;
+      });
+    }
     return this.refreshing;
   }
   private async listAll(): Promise<void> {
@@ -196,7 +207,17 @@ export class ChSessions {
     }
     this.ownership = ownership;
     this.rows = new Map([...found].filter(([id]) => ownership.has(id)));
+    await this.syncWorkspace();
+    if (this.closed) return;
+    this.workspaces.setReferenceArchives([...archivedIds].filter((id) => ownership.has(id)));
+    await this.publishCatalogChanges();
+    // Native pins are optional and cannot delay publishing the confirmed catalog.
+    await this.pins.sync().catch(() => undefined);
+    this.catalogReadAt = Date.now();
+  }
+  private async syncWorkspace(): Promise<void> {
     const projects = await this.host.projects([...this.rows.keys()]);
+    if (this.closed) return;
     const groups = new Map<string, string | undefined>();
     const projectless = new Set(projects.projectless.filter((id) => !projects.assignments[id]));
     for (const row of this.rows.values()) {
@@ -220,11 +241,6 @@ export class ChSessions {
       if (!draft.cwd) projectless.add(draft.id);
     }
     this.workspaces.setReferenceGroups(groups, projectless);
-    this.workspaces.setReferenceArchives([...archivedIds].filter((id) => ownership.has(id)));
-    await this.publishCatalogChanges();
-    // A missing Desktop pin service must not hide readable Threads. Retain the
-    // last confirmed pins; a user command still reports its failure explicitly.
-    await this.pins.sync().catch(() => undefined);
   }
   /** Only fields used by the list summary; history projections have their own
    * control stream. Re-emitting every row makes each browser rebuild its entire
@@ -1081,8 +1097,19 @@ export class ChSessions {
       sink.onClose(() => clearInterval(poll));
     });
     this.timer = setInterval(() => {
-      if (this.closed) return;
-      void this.refresh().catch(() => undefined);
+      if (this.closed || this.refreshing || (this.realtime && !this.hostOnline)) return;
+      if (!this.realtime || Date.now() - this.catalogReadAt >= 60_000) {
+        void this.refresh().catch(() => undefined);
+      } else {
+        this.refreshing = this.syncWorkspace()
+          .then(async () => {
+            if (!this.closed) await this.pins.sync().catch(() => undefined);
+          })
+          .finally(() => {
+            this.refreshing = undefined;
+          });
+        void this.refreshing.catch(() => undefined);
+      }
     }, 10000);
     this.timer.unref();
   }

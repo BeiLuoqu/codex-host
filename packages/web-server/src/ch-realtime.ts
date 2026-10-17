@@ -51,7 +51,11 @@ export class ChRealtime {
       this.schedule("");
     } else if (event.type === "changed") {
       if (this.watched.has(event.threadId)) this.schedule(event.threadId);
-      if (event.method.startsWith("thread/") || event.method === "turn/completed")
+      if (
+        event.method.startsWith("thread/") ||
+        event.method === "turn/started" ||
+        event.method === "turn/completed"
+      )
         this.schedule("");
     }
   }

@@ -126,7 +126,10 @@ export function startConsoleApp(document: Document): void {
     { migrateLegacy: false },
   );
   window.addEventListener("pagehide", (event) => {
-    if (!event.persisted) stopGroupSync();
+    if (!event.persisted) {
+      stopGroupSync();
+      state.stop();
+    }
   });
   const diagnostics = createConsoleConnectionDiagnostics(modelClient);
   const sessionImportClient = createRendererSessionImportClient((method, params) =>
