@@ -104,7 +104,7 @@ const DEEPSEEK_VERIFIED_VERSIONS = [
 ] as const;
 
 /** Install command offered when the local CLI predates Session Format V4. */
-export const DEEPSEEK_UPGRADE_COMMAND = `npm install -g @deepseek-ai/dsh@${DEEPSEEK_NEWEST_VERIFIED_VERSION}`;
+export const DEEPSEEK_UPGRADE_COMMAND = "npm install -g @deepseek-ai/dsh@latest";
 
 export const DEFAULT_DEEPSEEK_ENDPOINT = "http://127.0.0.1:3080/";
 const MODERN_AUTHENTICATION_FINGERPRINT = Buffer.from(

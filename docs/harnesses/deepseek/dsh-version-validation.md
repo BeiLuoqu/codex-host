@@ -28,7 +28,7 @@ codexhost 只对接写 Session Format V4 的 DSH，最低版本为 `0.1.7-rc.1`�
 | `0.2.1-rc.2` | `687f282e8625c6b8d11ff58211a90524be2e4317` | 辅助搜索请求新增 `thinking` |
 
 - 版本门槛只拦低版本，不拦高版本。
-- `dsh --version` 必须输出单行规范 SemVer。低于 `0.1.7-rc.1` 的版本（包括 `0.1.7-alpha.*` 等更早的预发布）在启动托管 Web 前返回 `unsupported`：stage 为 `version`，不可重试。中英双语提示依次说明当前版本低于最低版本、列出上表六个支持版本、说明高于 `0.2.1-rc.2` 的版本可以尝试连接但适配度可能有限，最后给出升级命令 `npm install -g @deepseek-ai/dsh@0.2.1-rc.2`。支持版本列表与升级命令由 `generation-selector.ts` 中的同一份版本列表生成，升级命令始终指向最新已验证版本。
+- `dsh --version` 必须输出单行规范 SemVer。低于 `0.1.7-rc.1` 的版本（包括 `0.1.7-alpha.*` 等更早的预发布）在启动托管 Web 前返回 `unsupported`：stage 为 `version`，不可重试。中英双语提示依次说明当前版本低于最低版本、列出上表六个支持版本、说明高于 `0.2.1-rc.2` 的版本可以尝试连接但适配度可能有限，最后给出升级命令 `npm install -g @deepseek-ai/dsh@latest`。支持版本列表由 `generation-selector.ts` 维护；升级命令与首次安装、连接页的“更新 CLI”保持一致，跟随 npm `latest`，不因验证了 `next` 上的版本而切换安装渠道。
 - 不低于门槛但未验证的版本（例如以后的 `0.2.1` 正式版）按 V4 尝试。托管 Web、Remote、历史和流式数据仍逐项严格校验，不符合就明确失败。设置 → 连接只列出六个支持版本，并提示高于 `0.2.1-rc.2` 的版本可以尝试连接、但适配度可能有限。`0.2.0-rc.2` 与 `0.2.1-rc.1` 之间的 `0.2.1-alpha.*` 不低于门槛，会按 V4 尝试，但未经验证。
 - 首次安装、安装指引及连接页的“更新 CLI”均跟随 npm `latest`；保留既有安装管理策略，不因协议合并重新固定版本。安装最新版不代表已验证兼容，连接仍须通过 V4 协议校验。截至 2026-10-17，`latest` 为 `0.2.0-rc.2`，`next` 为 `0.2.1-rc.2`，`alpha` 为 `0.2.1-alpha.5`。
 - 旧 Session Ref 没有 locator（V0 时期）或带任意合法 SemVer locator（V3/V4 时期）时，都可以尝试恢复。Fork checkpoint 必须带 `v4-turn-end:` 前缀，且 locator 与当前 CLI 版本一致。
@@ -259,7 +259,7 @@ CodeRabbit 在 #412 上建议拒绝 catalog `options` 中的 `auto`，本变更�
 - 会话列表：`formatStatus` 为 `current`、`migration-required` 时照常作为导入候选，其他取值拒绝。
 - 搜索请求：`web/deepseek-search-llm-request` 带与不带 `thinking: {type: "disabled"}` 均被接受；`thinking` 为 `enabled`、带 `budget_tokens`、缺 `type`、字符串、`null`，或请求体带其他成员时均被拒绝。
 - 实时回合：搜索请求夹在工具调用与结果之间时，回合仍成功结束，Item 不变。
-- 版本：`0.2.1-rc.1`、`0.2.1-rc.2` 被识别为已验证版本，低版本提示逐字列出六个版本并给出 `0.2.1-rc.2` 升级命令。
+- 版本：`0.2.1-rc.1`、`0.2.1-rc.2` 被识别为已验证版本，低版本提示逐字列出六个版本并给出跟随 npm `latest` 的升级命令。
 - 在改动前的源码上，`0.2.1-rc.1` 相关的日志、实时回合、会话列表与回放用例中 13 项失败；`0.2.1-rc.2` 的搜索请求用例中 3 项失败（接受带 `thinking` 的请求、实时回合、rc.2 回放），拒绝类用例在改动前后都通过。
 
 V4 回放夹具 `packages/adapters/deepseek-harness/test/fixtures/dsh-021rc1-tool-call-turn.v4.jsonl` 与 `dsh-v0.2.1-rc.1` 的 `snapshots/session/tool-call-turn/session.v4.jsonl` 逐字节相同（该文件最后修改于 DSH `54c13688a853e78aa907ce175dbd39dd700378d8`，`snapshot.yml` 标记 `recording: live`）。它与 0.2.0-rc.2 夹具是同一场景，多出 bash 的 `job/registered`、`job/settled` 和 `tool/result` 的 `meta`，两者共用同一回放测试。

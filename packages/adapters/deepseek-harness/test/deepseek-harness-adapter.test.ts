@@ -270,7 +270,7 @@ describe("DeepSeek public generation selector", () => {
 
     const expected = {
       code: "unsupported",
-      message: expect.stringContaining("npm install -g @deepseek-ai/dsh@0.2.1-rc.2"),
+      message: expect.stringContaining("npm install -g @deepseek-ai/dsh@latest"),
       retryable: false,
       diagnostic: "unsupported",
       stage: "version",
