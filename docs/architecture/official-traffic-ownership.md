@@ -18,6 +18,7 @@ Host 夹在 Codex Desktop 与官方 app-server 之间。官方协议的方法和
 - `thread/list`：Host 能完整解码时合并外部 Thread；解码失败且不带 Host 游标时整条转发官方，此页只显示官方结果。
 - `thread/section/move`：Host 维护跨所有者的分区顺序；参数无法解码时，`threadId` 或 `beforeThreadId` 指向外部 Thread 则报错，其他原样转发。
 - `thread/archive`、`thread/unarchive`、`thread/metadata/update` 及 `turn/*`、`thread/read` 等：先按 `threadId` 判定归属，官方 Thread 原样转发，外部 Thread 才解码参数。
+- 其他带外部 `threadId` 的 `thread/*` 请求返回 `-32076`。`thread/attachment/list`、`thread/queue/list` 按官方结构返回空列表，兼容不带 codexhost 渲染扩展的客户端。`thread/settings/update` 只接受客户端不附加 Codex 限制的默认同步参数：`approvalPolicy: "never"`、`approvalsReviewer: "user"`、`sandboxPolicy: { type: "dangerFullAccess" }`；这三个字段可以省略或为 `null`。回应不改变 Harness 的原生权限模式。其他设置字段、限制性审批或沙箱策略仍返回 `-32076`，不把未应用的设置变更报告为成功。原生 Codex Thread 的这些请求继续原样转发。
 
 ## 已知例外
 
