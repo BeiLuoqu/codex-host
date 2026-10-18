@@ -10,6 +10,8 @@ import {
   RUNTIME_STATUS_METHOD,
   REMOTE_UPDATE_METHOD,
   remoteUpdateParamsSchema,
+  HARNESS_INSTALLATION_METHOD,
+  harnessInstallationRequestTimeoutMs,
 } from "@codexhost/shared-contracts";
 import { requestDesktopRemoteConnections } from "@codexhost/desktop-control";
 import type { RuntimeMaintenance } from "./runtime-maintenance.js";
@@ -29,7 +31,6 @@ import {
   type HarnessPreferenceSnapshot,
 } from "@codexhost/shared-contracts";
 import type { SharedThreadBridge } from "./shared-thread-bridge.js";
-import { HARNESS_INSTALLATION_METHOD } from "@codexhost/shared-contracts";
 import { handleHarnessInstallation, HarnessInstallationError } from "./harness-installation.js";
 import {
   isConsoleHostMethod,
@@ -1324,6 +1325,8 @@ export class AppServerHost {
           },
         };
     }
+    const installationTimeout = harnessInstallationRequestTimeoutMs(method, params);
+    if (installationTimeout !== undefined) timeoutMs = Math.max(timeoutMs, installationTimeout);
     if (typeof params.threadId === "string") {
       const location = await this.#locateExternalThread(params.threadId);
       if (location.kind !== "external")
