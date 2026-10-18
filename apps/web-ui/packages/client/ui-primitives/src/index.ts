@@ -142,6 +142,7 @@ export type {
   MarkdownDelegate,
   MarkdownDelegateProviderProps,
   MarkdownExternalLinkHandler,
+  MarkdownLinkResolver,
 } from "./markdown/MarkdownDelegate.tsx";
 export { MarkdownText } from "./markdown/MarkdownText.tsx";
 export type {

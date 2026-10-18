@@ -9,8 +9,17 @@ import type { ImageLightboxLabels } from "../ImageLightbox.tsx";
  */
 export type MarkdownExternalLinkHandler = (href: string) => void;
 
+/** Resolve an application link to a browser-safe destination and in-app navigation. */
+export interface MarkdownLinkResolver {
+  (href: string): { readonly href: string; readonly open: () => void } | undefined;
+  /** Recheck destinations when the application's target directory changes. */
+  readonly subscribe?: (listener: () => void) => () => void;
+}
+
 /** Navigation capabilities supplied by the nearest Markdown owner. */
 export interface MarkdownDelegate {
+  /** Application-owned links; unresolved destinations still pass the protocol allowlist. */
+  readonly resolveLink?: MarkdownLinkResolver | undefined;
   /** Image previews for decoded local paths in this owner's workspace. */
   readonly fileImages?:
     | {
@@ -46,10 +55,11 @@ export function MarkdownDelegateProvider({
   openExternalLink,
   openFile,
   fileImages,
+  resolveLink,
 }: MarkdownDelegateProviderProps): ReactNode {
   const delegate = useMemo(
-    () => ({ openExternalLink, openFile, fileImages }),
-    [openExternalLink, openFile, fileImages],
+    () => ({ openExternalLink, openFile, fileImages, resolveLink }),
+    [openExternalLink, openFile, fileImages, resolveLink],
   );
   return (
     <MarkdownDelegateContext.Provider value={delegate}>{children}</MarkdownDelegateContext.Provider>

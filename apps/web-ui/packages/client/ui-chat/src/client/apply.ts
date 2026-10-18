@@ -292,6 +292,7 @@ export function apply(ctx: Context): void {
                 ?.sessionOf(scope)
                 .openReference("skill", { ref: `/${name}` });
             },
+            resolveLink: ctx.get("chatLinks")?.resolve,
             openExternalLink: (url) => {
               if (
                 linkOpening.getSnapshot() === "sidebar" &&

@@ -1,4 +1,4 @@
-/** Text-only local CH Thread references shared by sidebar drag, menu, and Composer. */
+/** Local CH Thread references shared by messages, sidebar drag, menu, and Composer. */
 export const THREAD_REFERENCE_MIME = "application/x-codexhost-thread-reference";
 export const THREAD_REFERENCE_SOURCE = "codexhost-thread";
 
@@ -29,6 +29,21 @@ export function threadReferenceUri(reference: ThreadReference): string {
     (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
   );
   return `thread://${id}?hostId=local`;
+}
+
+/** Local Thread identities accepted from explicit message links, never inferred from titles. */
+export function localThreadId(href: string): string | undefined {
+  if (href.trim() !== href) return;
+  const match =
+    /^codex:\/\/threads\/([^/?#\s<>]+)$/u.exec(href) ??
+    /^thread:\/\/([^/?#\s<>]+)\?hostId=local$/u.exec(href);
+  if (match?.[1] === undefined) return;
+  try {
+    const id = decodeURIComponent(match[1]);
+    return id && !/[\u0000-\u001f\u007f]/u.test(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function threadReferenceInsert(reference: ThreadReference) {

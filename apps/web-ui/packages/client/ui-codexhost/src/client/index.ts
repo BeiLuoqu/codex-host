@@ -18,7 +18,12 @@ import { HostConnectionStatus } from "./HostConnectionStatus.tsx";
 import { HostUsageDock } from "./HostUsageDock.tsx";
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client";
 import type {} from "@deepseek-ai/dsh-client-ui-input-trigger/client";
-import { THREAD_REFERENCE_SOURCE } from "@deepseek-ai/dsh-client-ui-conversation/thread-reference";
+import {
+  THREAD_REFERENCE_SOURCE,
+  localThreadId,
+  threadReferenceOf,
+} from "@deepseek-ai/dsh-client-ui-conversation/thread-reference";
+import type {} from "@deepseek-ai/dsh-client-ui-chat/client";
 import type {} from "@deepseek-ai/dsh-api-remotes/client";
 import { ensureServiceWorker } from "./notifications.ts";
 import { NotificationsRow } from "./NotificationsRow.tsx";
@@ -57,6 +62,29 @@ export const inject = [
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), "ui-codexhost: dictionaries");
   const t = ctx.locale.bind(NS);
+  ctx.provide("chatLinks", {
+    resolve: Object.assign(
+      (href: string) => {
+        const threadId = localThreadId(href);
+        if (threadId === undefined) return;
+        const targetId = threadId as SessionId;
+        const localTarget = () => {
+          const row = ctx.sessions.list.getSnapshot().byId[targetId];
+          return row === undefined ? undefined : threadReferenceOf(row);
+        };
+        if (localTarget() === undefined) return;
+        const destination = new URL(window.location.href);
+        destination.searchParams.set("session", targetId);
+        return {
+          href: destination.href,
+          open: () => {
+            if (localTarget() !== undefined) ctx.uiWorkspace.openSession(targetId);
+          },
+        };
+      },
+      { subscribe: (listener: () => void) => ctx.sessions.list.subscribe(listener) },
+    ),
+  });
   ctx.effect(
     () =>
       ctx.inputTriggers.registerSource({

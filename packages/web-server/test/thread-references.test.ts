@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import {
+  localThreadId,
   parseThreadReferenceDrag,
   threadReferenceInsert,
   threadReferenceOf,
@@ -52,4 +53,40 @@ it("does not infer shared ownership from a Harness, UUID, or uncreated draft", (
     { id: "remote", blank: false, projectionValues: { threadReference: { hostId: "remote" } } },
   ])
     assert.equal(threadReferenceOf(session), undefined);
+});
+
+it("parses explicit local Thread links without normalizing their identity", () => {
+  for (const id of ["canonical-target", "UPPER-Case", "会话/带?#括号()"])
+    for (const href of [
+      `codex://threads/${encodeURIComponent(id)}`,
+      `thread://${encodeURIComponent(id)}?hostId=local`,
+    ])
+      assert.equal(localThreadId(href), id);
+});
+
+it("rejects remote, ambiguous, malformed and unrelated message destinations", () => {
+  for (const href of [
+    "target",
+    "thread://target",
+    "thread://target?hostId=remote-explicit",
+    "thread://target?hostId=local&hostId=other",
+    "thread://target?hostId=local&extra=true",
+    "thread://target?hostId=local#fragment",
+    "thread://target/path?hostId=local",
+    "codex://threads/target?hostId=remote-explicit",
+    "codex://threads/target/extra",
+    "codex://threads/target#fragment",
+    "codex://other/target",
+    "codex://threads/",
+    "codex://threads/%ZZ",
+    "codex://threads/%00",
+    "codex://threads/%0a",
+    "codex://threads/target\n",
+    " thread://target?hostId=local",
+    "https://example.com",
+    "mailto:someone@example.com",
+    "javascript:alert(1)",
+    "data:text/html,hello",
+  ])
+    assert.equal(localThreadId(href), undefined, href);
 });

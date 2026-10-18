@@ -157,6 +157,7 @@ export function ChatView({
   openFile,
   openSkill,
   openExternalLink,
+  resolveLink,
   loadOlder,
   loadThrough,
   loadImage,
@@ -369,6 +370,7 @@ export function ChatView({
             )}
             <MarkdownDelegateProvider
               openExternalLink={openExternalLink}
+              resolveLink={resolveLink}
               openFile={requestOpenFile}
               fileImages={fileImages}
             >

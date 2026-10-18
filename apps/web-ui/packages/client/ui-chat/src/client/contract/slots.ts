@@ -25,7 +25,10 @@ import type {
   SnapshotSelectorHook,
 } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ObservableSnapshot } from "@deepseek-ai/dsh-client-store";
-import type { MarkdownFileMentions } from "@deepseek-ai/dsh-client-ui-primitives";
+import type {
+  MarkdownFileMentions,
+  MarkdownLinkResolver,
+} from "@deepseek-ai/dsh-client-ui-primitives";
 import type {} from "@deepseek-ai/dsh-client-ui-layout/client";
 import type { createChatStore } from "../stores.ts";
 import type { ChatPresentationPolicy } from "../presentation-policy.ts";
@@ -138,6 +141,8 @@ declare module "@deepseek-ai/cordis" {
   interface Context {
     /** Optional prose file-mention provider. */
     chatFileMentions: ChatFileMentions;
+    /** Optional application-link resolver owned by the product integration. */
+    chatLinks: { resolve: MarkdownLinkResolver };
   }
 }
 
@@ -267,6 +272,8 @@ export interface ChatViewInjected {
   openSkill: (name: string) => void;
   /** Open one HTTP(S) message link at the selected destination, using an external tab if Sidebar Browser is unavailable. */
   openExternalLink: (url: string) => void;
+  /** Resolve product-specific message links without exposing their protocols to Chat. */
+  resolveLink?: MarkdownLinkResolver | undefined;
   openFile: (path: string, options?: OpenFileOptions) => Promise<void>;
   loadOlder: () => void;
   /** Jump loader: page history back through seq; resolves when the window covers it. */

@@ -4,8 +4,9 @@
  * cache frozen blocks as React elements; the rendered DOM is pinned
  * byte-for-byte by `tests/fixtures/markdown-dom` and must not drift.
  *
- * External link and image destinations pass a protocol allowlist; settled
- * local file links use an explicit owner callback. Images additionally require
+ * External link and image destinations pass a protocol allowlist; application
+ * links resolve through the owner to allowlisted URLs, and settled local file
+ * links use an explicit owner callback. Images additionally require
  * absolute HTTP(S), raw HTML renders as literal text (no HTML enters the
  * DOM), and KaTeX runs without trusted commands. Fragment-anchor URLs fail
  * the allowlist, so footnote references and back-references render as plain
@@ -16,7 +17,7 @@
  * may add node types this renderer has no mapping for.
  */
 
-import { Fragment, createElement, useCallback, useState } from "react";
+import { Fragment, createElement, useCallback, useState, useSyncExternalStore } from "react";
 import type { Key, ReactNode } from "react";
 import clsx from "clsx";
 import type * as Md from "mdast";
@@ -558,16 +559,16 @@ function anchorWrapsOnlyImages(children: Md.PhrasingContent[]): boolean {
   );
 }
 
-/** Anchor over an already-authored href: allowlisted or unwrapped, with optional owner navigation for HTTP(S). */
+/** Owner-resolved or allowlisted anchor; unsupported destinations retain only their label. */
 function renderSafeLink(href: string, children: ReactNode[], key: Key, glyph = true): ReactNode {
-  const safeHref = sanitizeUrl(href);
-  if (safeHref === "") return <Fragment key={key}>{children}</Fragment>;
   return (
-    <MarkdownAnchor key={key} href={safeHref} glyph={glyph}>
+    <MarkdownAnchor key={key} href={href} glyph={glyph}>
       {children}
     </MarkdownAnchor>
   );
 }
+
+const noLinkChanges = () => () => {};
 
 function MarkdownAnchor({
   href,
@@ -578,12 +579,26 @@ function MarkdownAnchor({
   readonly glyph: boolean;
   readonly children: ReactNode[];
 }): ReactNode {
-  const { openExternalLink } = useMarkdownDelegate();
-  const external = ["http:", "https:"].includes(new URL(href).protocol);
-  const open = external ? openExternalLink : undefined;
+  const { openExternalLink, resolveLink } = useMarkdownDelegate();
+  const destination = () => resolveLink?.(href)?.href;
+  const resolvedHref = useSyncExternalStore(
+    resolveLink?.subscribe ?? noLinkChanges,
+    destination,
+    destination,
+  );
+  const safeHref = sanitizeUrl(resolvedHref ?? href);
+  if (safeHref === "") return <>{children}</>;
+  const external =
+    resolvedHref === undefined && ["http:", "https:"].includes(new URL(safeHref).protocol);
+  const open =
+    resolvedHref !== undefined
+      ? () => resolveLink?.(href)?.open()
+      : external && openExternalLink !== undefined
+        ? () => openExternalLink(safeHref)
+        : undefined;
   return (
     <a
-      href={href}
+      href={safeHref}
       {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
       onClick={
         open === undefined
@@ -598,11 +613,11 @@ function MarkdownAnchor({
               )
                 return;
               event.preventDefault();
-              open(href);
+              open();
             }
       }
     >
-      {glyph && <LinkIconMedium kind="url" href={href} className={css.linkIcon} />}
+      {glyph && <LinkIconMedium kind="url" href={safeHref} className={css.linkIcon} />}
       {children}
     </a>
   );
