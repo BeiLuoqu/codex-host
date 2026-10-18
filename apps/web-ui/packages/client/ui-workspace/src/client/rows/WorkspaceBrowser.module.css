@@ -524,6 +524,12 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* Workspace paging is a section-level action, so align it with the section
+   headings and folder glyphs instead of the folder labels. */
+.sessionOverflowButton[data-row-key="overflow:workspaces"] {
+  padding-inline-start: 8px;
+}
+
 /* Group paging aligns with its child glyphs; flat-list paging is unchanged. */
 .groupSessions > .sessionOverflowButton {
   margin-top: 0;

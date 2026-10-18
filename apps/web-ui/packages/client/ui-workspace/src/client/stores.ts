@@ -13,6 +13,10 @@ import { reconcileManualOrder, type ArchivedFilter, type SessionRowState } from 
 /** Browser-local order account for the hierarchy-free flat Session list. */
 export const FLAT_SESSION_ORDER_KEY = "__flat_session_order__";
 
+/** Sidebar sections above the tree: they fold independently of the tree's own groups. */
+export const PINNED_SECTION_KEY = "pinned";
+export const WORKSPACES_SECTION_KEY = "workspaces";
+
 /** Session-list grouping mode: sibling Workspace sections, a Workspace tree, or one flat list. */
 export type SessionGroupBy = "workspace" | "workspace-tree" | "flat";
 /** Session order: saved manual positions or current recency. */
@@ -24,11 +28,29 @@ type WorkspaceViewState = {
   orderBy: SessionOrderBy;
   /** Explicit group expansion keyed by Workspace identity, including descendants in tree mode. */
   groupExpansion: Record<string, boolean>;
+  /**
+   * Section folds above the tree, keyed by section. A missing entry shows the
+   * section, which also covers views persisted before sections could fold.
+   */
+  sectionExpansion?: Record<string, boolean>;
   /** Saved manual order per Workspace group plus the browser-local flat-list account. */
   sessionOrderByAccount: Record<string, string[]>;
   /** Archived-row visibility for the current page; page startup resets it to 'default'. */
   archivedFilter?: ArchivedFilter;
 };
+
+/**
+ * Read one section's fold state.
+ * @param expansion - persisted section folds, when the view carries them.
+ * @param key - section key.
+ * @returns whether the section shows its rows.
+ */
+export function sectionExpanded(
+  expansion: Readonly<Record<string, boolean>> | undefined,
+  key: string,
+): boolean {
+  return expansion?.[key] ?? true;
+}
 
 type SessionOrderSource = {
   members: Readonly<Record<string, readonly SessionId[]>>;
@@ -48,6 +70,7 @@ type WorkspaceViewActions = {
     initialOrders: Readonly<Record<string, readonly string[]>>,
   ) => void;
   setGroupExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void;
+  setSectionExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void;
   retainAccountKeys: (draft: WorkspaceViewState, workspaceKeys: readonly string[]) => void;
   syncSessionOrders: (
     draft: WorkspaceViewState,
@@ -88,6 +111,7 @@ export function createWorkspaceViewStore(): EngineStoreHandle<
       groupBy: "workspace",
       orderBy: "updated",
       groupExpansion: {},
+      sectionExpansion: {},
       sessionOrderByAccount: {},
       archivedFilter: "default",
     }),
@@ -103,6 +127,9 @@ export function createWorkspaceViewStore(): EngineStoreHandle<
       },
       setGroupExpanded: (d, key: string, expanded: boolean) => {
         d.groupExpansion[key] = expanded;
+      },
+      setSectionExpanded: (d, key: string, expanded: boolean) => {
+        d.sectionExpansion = { ...d.sectionExpansion, [key]: expanded };
       },
       retainAccountKeys: (d, workspaceKeys: readonly string[]) => {
         const retained = new Set(workspaceKeys);

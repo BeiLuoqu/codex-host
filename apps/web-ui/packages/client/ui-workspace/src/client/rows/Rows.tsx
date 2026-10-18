@@ -545,6 +545,7 @@ export function SearchResultItem({
  */
 export function SessionNodeItem({
   node,
+  rowKey = `session:${node.id}`,
   currentId,
   now,
   onOpen,
@@ -555,6 +556,8 @@ export function SessionNodeItem({
   t,
 }: {
   node: SessionNode;
+  /** Distinguish the Recents projection from the same Session's project row. */
+  rowKey?: string | undefined;
   currentId: string | undefined;
   now: number;
   onOpen: (id: SessionNode["id"]) => void;
@@ -599,7 +602,7 @@ export function SessionNodeItem({
   const ownRow = (
     <div
       ref={rowRef}
-      data-row-key={`session:${node.id}`}
+      data-row-key={rowKey}
       className={clsx(
         css.sessionRow,
         selected && css.selected,

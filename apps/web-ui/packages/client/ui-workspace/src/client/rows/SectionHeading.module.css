@@ -1,19 +1,30 @@
-.row {
+/* Section headers share the pinned heading's typography, so the three
+   sidebar sections read as one list of peers. The family is inherited: the
+   sidebar shell owns the Codex text face. */
+.heading {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-height: 30px;
-  padding-inline: 8px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  cursor: pointer;
+  padding: 0 8px;
   border-radius: var(--dsw-radius-sm);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 21px;
 }
 
-.row:focus-visible,
-.create:focus-visible {
-  outline: var(--dsw-focus-ring-width) solid
-    var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+.heading[data-row-key] {
+  cursor: pointer;
+}
+
+.heading[data-row-key]:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.heading[data-row-key]:focus-visible,
+.action:focus-visible {
+  outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: -2px;
 }
 
@@ -32,7 +43,7 @@
   transform: rotate(-90deg);
 }
 
-.create {
+.action {
   display: grid;
   place-items: center;
   width: 24px;
@@ -46,16 +57,16 @@
   cursor: pointer;
 }
 
-.create:hover {
+.action:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
 @media (pointer: coarse) {
-  .row {
+  .heading {
     min-height: 44px;
   }
 
-  .create {
+  .action {
     width: 44px;
     height: 44px;
   }

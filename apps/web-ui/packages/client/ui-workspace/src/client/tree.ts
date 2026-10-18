@@ -1,6 +1,6 @@
 /**
  * Derives the workspace browser tree from caller-projected Workspace and
- * Session order. Unassigned Sessions trail under Ungrouped; blank Sessions
+ * Session order. Recents includes Sessions from every Workspace; blank Sessions
  * stay in the composer and do not enter navigation until the first prompt.
  */
 import {
@@ -25,7 +25,7 @@ declare module "@deepseek-ai/dsh-session-projection/types" {
   }
 }
 
-/** Group key for Sessions outside every Workspace. */
+/** Recents group key, also used for the browser-local unassigned Session account. */
 export const UNGROUPED_KEY = "";
 
 /**
@@ -78,10 +78,10 @@ export type SessionOrderBy = "manual" | "updated";
 export interface GroupNode {
   /** Group key: the workspace id or {@link UNGROUPED_KEY}. */
   key: string;
-  /** Backing Workspace id; absent only for the ungrouped bucket. */
+  /** Backing Workspace id; absent for Recents. */
   workspaceId: WorkspaceId | undefined;
   cwd: string | undefined;
-  /** Workspace creation time (epoch ms); absent only for the ungrouped bucket. */
+  /** Workspace creation time (epoch ms); absent for Recents. */
   createdAt: number | undefined;
   label: string;
   /** Total visible sessions in the group. */
@@ -121,8 +121,6 @@ export interface TreeView {
   expandedGroups: readonly string[];
   /** Omit active pins when a separate Pinned section renders them. Membership is unchanged. */
   excludePinned?: boolean;
-  /** Browser-local order for Sessions without a backing Workspace account. */
-  ungroupedOrder?: readonly string[];
 }
 
 interface Group {
@@ -321,52 +319,23 @@ function buildGroup(
   return { key, workspaceId, cwd, createdAt, label, sessions: [...members] };
 }
 
-/** Apply a stored Ungrouped order and append newly loose Sessions by recency. */
-function orderedUngrouped(
-  members: readonly SessionSummary[],
-  stored: readonly string[] | undefined,
-  summaries: SessionListState["byId"],
-): SessionSummary[] {
-  const byId = new Map(members.map((session) => [session.id as string, session]));
-  const ids =
-    stored === undefined
-      ? orderByRecency(
-          members.map((session) => session.id),
-          summaries,
-        )
-      : reconcileManualOrder(
-          members.map((session) => session.id),
-          stored,
-          summaries,
-        );
-  return ids.flatMap((id) => {
-    const session = byId.get(id);
-    /* v8 ignore next -- ids are projected exclusively from the members used to build byId. */
-    return session === undefined ? [] : [session];
-  });
-}
-
 /**
  * Group Sessions by Workspace: one group per caller-ordered entity, with
- * members resolved from caller-ordered sessionIds. Sessions outside every
- * Workspace trail in the browser-local Ungrouped order, which falls back to
- * recency before that order is initialized.
+ * members resolved from caller-ordered sessionIds. Recents follows with all
+ * visible Sessions, newest first, independently of Workspace membership.
  */
 function groupByWorkspace(
   list: SessionListState,
   workspaces: readonly WorkspaceView[],
   archived: ReadonlySet<SessionId>,
   archivedFilter: ArchivedFilter,
-  ungroupedOrder: readonly string[] | undefined,
 ): Group[] {
   const groups: Group[] = [];
-  const accounted = new Set<SessionId>();
   for (const workspace of workspaces) {
     const members: SessionSummary[] = [];
     for (const id of workspace.sessionIds) {
       const summary = list.byId[id];
       if (summary === undefined) continue; // account may lead the list pull; the row appears when the summary lands
-      accounted.add(id);
       if (!sessionVisible(summary, archived, archivedFilter)) continue;
       members.push(summary);
     }
@@ -384,23 +353,13 @@ function groupByWorkspace(
       ),
     );
   }
-  const stray = list.ids
+  const recent = orderByRecency(list.ids, list.byId)
     .map((id) => list.byId[id])
     .filter(
-      (s): s is SessionSummary =>
-        s !== undefined && !accounted.has(s.id) && sessionVisible(s, archived, archivedFilter),
+      (s): s is SessionSummary => s !== undefined && sessionVisible(s, archived, archivedFilter),
     );
-  if (stray.length > 0) {
-    groups.push(
-      buildGroup(
-        UNGROUPED_KEY,
-        undefined,
-        undefined,
-        undefined,
-        "",
-        orderedUngrouped(stray, ungroupedOrder, list.byId),
-      ),
-    );
+  if (recent.length > 0) {
+    groups.push(buildGroup(UNGROUPED_KEY, undefined, undefined, undefined, "", recent));
   }
   return groups;
 }
@@ -483,15 +442,8 @@ export function deriveGroups(
   const pinned = new Set(rowState.pinnedSessionIds);
   const expandedGroups = new Set(view.expandedGroups);
   const current = mainSessionId(list);
-  const currentGroup = current === undefined ? undefined : owningGroupKey(workspaces, current);
   const groups: GroupNode[] = [];
-  for (const g of groupByWorkspace(
-    list,
-    workspaces,
-    archived,
-    rowState.archivedFilter,
-    view.ungroupedOrder,
-  )) {
+  for (const g of groupByWorkspace(list, workspaces, archived, rowState.archivedFilter)) {
     const expanded = expandedGroups.has(g.key);
     const members = view.excludePinned
       ? g.sessions.filter((session) => !pinned.has(session.id) || archived.has(session.id))
@@ -504,7 +456,7 @@ export function deriveGroups(
       label: g.label,
       sessionCount: members.length,
       expanded,
-      containsCurrent: g.key === currentGroup,
+      containsCurrent: g.sessions.some((session) => session.id === current),
       sessions: expanded
         ? sectionMembers(members, pinned, archived).map((session) =>
             sessionNode(session, list, statuses, pinned, archived),

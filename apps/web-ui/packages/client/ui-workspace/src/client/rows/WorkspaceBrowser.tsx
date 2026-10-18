@@ -26,6 +26,7 @@ import {
   IconCloseFillRegular,
   IconFlatListOutlineRegular,
   IconFolderCloseRegular,
+  IconNewChatOutlineRegular,
   IconProjectAddOutlineRegular,
   IconQueueOutlineRegular,
   IconSearchOutlineRegular,
@@ -67,9 +68,21 @@ import {
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from "./Rows.tsx";
 import { AnimatedRows } from "./AnimatedRows.tsx";
 import { PinnedSection } from "./PinnedSection.tsx";
-import { RecentHeader } from "./RecentHeader.tsx";
-import { GROUP_INITIAL_ROWS, SIDEBAR_PAGE_ROWS, sidebarWindow } from "./sidebar-window.ts";
-import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from "../stores.ts";
+import { SectionHeading } from "./SectionHeading.tsx";
+import {
+  GROUP_INITIAL_ROWS,
+  SIDEBAR_PAGE_ROWS,
+  sidebarWindow,
+  WORKSPACE_INITIAL_ROWS,
+  workspaceWindow,
+} from "./sidebar-window.ts";
+import {
+  FLAT_SESSION_ORDER_KEY,
+  PINNED_SECTION_KEY,
+  sectionExpanded,
+  WORKSPACES_SECTION_KEY,
+  type SessionGroupBy,
+} from "../stores.ts";
 import { WorkspacePickFlow } from "../WorkspacePicker.tsx";
 import css from "./WorkspaceBrowser.module.css";
 
@@ -300,6 +313,10 @@ type SessionTreeProps = Pick<
     groupExpansion: Readonly<Record<string, boolean>>;
     /** Persist one Workspace group's expansion. */
     setGroupExpanded: (key: string, expanded: boolean) => void;
+    /** Persisted folds of the sections above the tree (pinned / workspaces). */
+    sectionExpansion: Readonly<Record<string, boolean>> | undefined;
+    /** Persist one section's fold. */
+    setSectionExpanded: (key: string, expanded: boolean) => void;
     /** Save a drag order and select Manual. */
     setSessionOrder: (accountKey: string, order: readonly string[]) => void;
     /** Registry-global pin and archive sets plus the archived-visibility choice. */
@@ -364,6 +381,8 @@ function SessionTree({
   nestWorkspaces,
   groupExpansion,
   setGroupExpanded,
+  sectionExpansion,
+  setSectionExpanded,
   setSessionOrder,
   home,
   t,
@@ -422,7 +441,6 @@ function SessionTree({
     const result = deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       excludePinned: true,
-      ungroupedOrder: ungroupedSessionIds,
     });
     if (canStartProjectless && !result.some((group) => group.key === UNGROUPED_KEY))
       result.push({
@@ -437,15 +455,7 @@ function SessionTree({
         sessions: [],
       });
     return result;
-  }, [
-    list,
-    workspaces,
-    rowState,
-    statuses,
-    expandedGroups,
-    ungroupedSessionIds,
-    canStartProjectless,
-  ]);
+  }, [list, workspaces, rowState, statuses, expandedGroups, canStartProjectless]);
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
       if (groupExpansion[key] === false || (key === revealGroup && groupExpansion[key] !== true)) {
@@ -521,30 +531,72 @@ function SessionTree({
     rootGroups[0]?.workspaceId !== undefined &&
     workspaceDrag?.over?.id === rootGroups[0].workspaceId &&
     workspaceDrag.over.half === "before";
+  // Root ancestor of every rendered group: in tree mode the Workspace holding
+  // the current Session may sit under folders, and revealing it must not
+  // uncollapse the whole list.
+  const rootKeyOf = useMemo(() => {
+    const roots = new Map<string, string>();
+    const visit = (group: GroupNode, root: string): void => {
+      roots.set(group.key, root);
+      for (const child of childrenByParent.get(group.key) ?? []) visit(child, root);
+    };
+    for (const root of rootGroups) visit(root, root.key);
+    return roots;
+  }, [childrenByParent, rootGroups]);
+  const keptWorkspaceRoots = useMemo(() => {
+    const keys = new Set<string>();
+    for (const key of [currentGroup, revealGroup]) {
+      const root = key === undefined ? undefined : rootKeyOf.get(key);
+      if (root !== undefined && root !== UNGROUPED_KEY) keys.add(root);
+    }
+    return keys;
+  }, [currentGroup, revealGroup, rootKeyOf]);
+  const [allWorkspacesShown, setAllWorkspacesShown] = useState(false);
+  const workspaceRoots = rootGroups.filter((group) => group.key !== UNGROUPED_KEY);
+  const collapsedWorkspaces = workspaceWindow(
+    workspaceRoots,
+    WORKSPACE_INITIAL_ROWS,
+    keptWorkspaceRoots,
+  );
+  const shownWorkspaceRoots = allWorkspacesShown ? workspaceRoots : collapsedWorkspaces.rows;
+  const pinnedSectionExpanded = sectionExpanded(sectionExpansion, PINNED_SECTION_KEY);
+  const workspacesSectionExpanded = sectionExpanded(sectionExpansion, WORKSPACES_SECTION_KEY);
+
+  // Folding a group returns its Session window to the default, so reopening it
+  // shows the same rows a first visit does.
+  const toggleGroup = (group: GroupNode): void => {
+    if (group.expanded) {
+      setSessionLimits((limits) => ({ ...limits, [group.key]: GROUP_INITIAL_ROWS }));
+    }
+    setGroupExpanded(group.key, !group.expanded);
+  };
 
   const pinnedRows = deriveFlat(list, rowState.pinnedSessionIds, rowState, statuses).filter(
     (node) => node.pinned,
   );
-  const rowKeys = pinnedRows.map((node) => `session:${node.id}`);
+  const rowKeys: string[] = [];
+  if (pinnedRows.length > 0) {
+    rowKeys.push(`section:${PINNED_SECTION_KEY}`);
+    if (pinnedSectionExpanded) for (const node of pinnedRows) rowKeys.push(`session:${node.id}`);
+  }
   if (groups.length === 0 && pinnedRows.length === 0) rowKeys.push("empty");
   const renderGroup = (group: GroupNode, depth: number): ReactNode => {
     const workspaceId = group.workspaceId;
     const children = childrenByParent.get(group.key) ?? [];
     const compatibleDrag =
       workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key);
-    const collapsed = sidebarWindow(group.sessions, GROUP_INITIAL_ROWS, current, revealSessionId);
     const visible = sidebarWindow(
       group.sessions,
       sessionLimits[group.key] ?? GROUP_INITIAL_ROWS,
       current,
       revealSessionId,
     );
-    const sessionsExpanded = visible.hiddenCount === 0;
     rowKeys.push(`workspace:${group.key}`);
     const childRows = group.expanded ? children.map((child) => renderGroup(child, depth + 1)) : [];
     const sessions = visible.rows;
-    for (const node of sessions) rowKeys.push(`session:${node.id}`);
-    if (collapsed.hiddenCount > 0) rowKeys.push(`overflow:${group.key}`);
+    for (const node of sessions)
+      rowKeys.push(`${workspaceId === undefined ? "recent" : "session"}:${node.id}`);
+    if (visible.hiddenCount > 0) rowKeys.push(`overflow:${group.key}`);
     const workspaceMarker =
       workspaceId !== undefined && workspaceDrag?.over?.id === workspaceId
         ? workspaceDrag.over.half
@@ -627,15 +679,25 @@ function SessionTree({
         }
       >
         {workspaceId === undefined ? (
-          <RecentHeader
+          <SectionHeading
+            label={t("group.ungrouped")}
             expanded={group.expanded}
-            canCreate={canStartProjectless}
-            t={t}
-            onToggle={() => setGroupExpanded(group.key, !group.expanded)}
-            onCreate={() => {
-              setGroupExpanded(group.key, true);
-              startSession();
+            onToggle={() => {
+              toggleGroup(group);
             }}
+            rowKey={`workspace:${group.key}`}
+            action={
+              canStartProjectless
+                ? {
+                    label: t("actions.newSession"),
+                    icon: <IconNewChatOutlineRegular size={16} />,
+                    onActivate: () => {
+                      setGroupExpanded(group.key, true);
+                      startSession();
+                    },
+                  }
+                : undefined
+            }
           />
         ) : (
           <ProjectRowItem
@@ -644,10 +706,7 @@ function SessionTree({
             home={home}
             t={t}
             onToggle={() => {
-              if (group.expanded) {
-                setSessionLimits((limits) => ({ ...limits, [group.key]: GROUP_INITIAL_ROWS }));
-              }
-              setGroupExpanded(group.key, !group.expanded);
+              toggleGroup(group);
             }}
             onCreate={() => {
               if (group.workspaceId !== undefined) {
@@ -675,7 +734,7 @@ function SessionTree({
           />
         )}
         {childRows.length > 0 && <div role="group">{childRows}</div>}
-        {(sessions.length > 0 || collapsed.hiddenCount > 0) && (
+        {(sessions.length > 0 || visible.hiddenCount > 0) && (
           <div
             role="group"
             className={css.groupSessions}
@@ -732,6 +791,7 @@ function SessionTree({
               return (
                 <SessionNodeItem
                   key={node.id}
+                  rowKey={workspaceId === undefined ? `recent:${node.id}` : undefined}
                   node={node}
                   currentId={current}
                   now={now}
@@ -750,24 +810,19 @@ function SessionTree({
                 />
               );
             })}
-            {collapsed.hiddenCount > 0 && (
+            {visible.hiddenCount > 0 && (
               <button
                 type="button"
                 className={css.sessionOverflowButton}
                 data-row-key={`overflow:${group.key}`}
-                aria-expanded={sessionsExpanded}
                 onClick={() => {
                   setSessionLimits((limits) => ({
                     ...limits,
-                    [group.key]: sessionsExpanded
-                      ? GROUP_INITIAL_ROWS
-                      : (limits[group.key] ?? GROUP_INITIAL_ROWS) + SIDEBAR_PAGE_ROWS,
+                    [group.key]: (limits[group.key] ?? GROUP_INITIAL_ROWS) + SIDEBAR_PAGE_ROWS,
                   }));
                 }}
               >
-                {sessionsExpanded
-                  ? t("sessions.collapse")
-                  : t("sessions.expand", { n: Math.min(SIDEBAR_PAGE_ROWS, visible.hiddenCount) })}
+                {t("sessions.expand", { n: Math.min(SIDEBAR_PAGE_ROWS, visible.hiddenCount) })}
               </button>
             )}
           </div>
@@ -776,7 +831,32 @@ function SessionTree({
     );
   };
 
-  const groupRows = rootGroups.map((group) => renderGroup(group, 0));
+  // Recents keeps the tail: the Workspace section ends with its own reveal
+  // control rather than an unbounded run of folders, and folding that section
+  // leaves Recents in place.
+  const groupRows: ReactNode[] = [];
+  if (workspaceRoots.length > 0) rowKeys.push(`section:${WORKSPACES_SECTION_KEY}`);
+  if (workspacesSectionExpanded) {
+    for (const group of shownWorkspaceRoots) groupRows.push(renderGroup(group, 0));
+    if (!allWorkspacesShown && collapsedWorkspaces.hiddenCount > 0) {
+      rowKeys.push("overflow:workspaces");
+      groupRows.push(
+        <button
+          key="overflow:workspaces"
+          type="button"
+          className={css.sessionOverflowButton}
+          data-row-key="overflow:workspaces"
+          onClick={() => {
+            setAllWorkspacesShown(true);
+          }}
+        >
+          {t("workspaces.expand")}
+        </button>,
+      );
+    }
+  }
+  const recentRoot = rootGroups.find((group) => group.key === UNGROUPED_KEY);
+  if (recentRoot !== undefined) groupRows.push(renderGroup(recentRoot, 0));
   return (
     <div className={clsx(css.treeBody, css.wide)}>
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
@@ -785,7 +865,13 @@ function SessionTree({
         label={t("section.sessions")}
         rowKeys={rowKeys}
         ready={list.phase === "ready" && workspaceReady && !nativeDragActive}
-        resetKey={JSON.stringify([animationResetKey, sessionLimits])}
+        resetKey={JSON.stringify([
+          animationResetKey,
+          sessionLimits,
+          allWorkspacesShown,
+          pinnedSectionExpanded,
+          workspacesSectionExpanded,
+        ])}
       >
         <PinnedSection
           rows={pinnedRows}
@@ -795,11 +881,25 @@ function SessionTree({
           renderSlot={renderSlot}
           revealSessionId={revealSessionId}
           onSessionRevealed={onSessionRevealed}
-          followingLabel={t("section.workspaces")}
+          expanded={pinnedSectionExpanded}
+          onToggle={() => {
+            setSectionExpanded(PINNED_SECTION_KEY, !pinnedSectionExpanded);
+          }}
           t={t}
         />
         {groups.length === 0 && pinnedRows.length === 0 && (
           <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
+        )}
+        {workspaceRoots.length > 0 && (
+          <SectionHeading
+            label={t("section.workspaces")}
+            expanded={workspacesSectionExpanded}
+            onToggle={() => {
+              if (workspacesSectionExpanded) setAllWorkspacesShown(false);
+              setSectionExpanded(WORKSPACES_SECTION_KEY, !workspacesSectionExpanded);
+            }}
+            rowKey={`section:${WORKSPACES_SECTION_KEY}`}
+          />
         )}
         {groupRows}
       </AnimatedRows>
@@ -819,6 +919,8 @@ function FlatList({
   onSessionRenameRequest,
   usePanelInfo,
   setSessionOrder,
+  sectionExpansion,
+  setSectionExpanded,
   workspaceReady,
   animationResetKey,
   revealSessionId,
@@ -833,6 +935,8 @@ function FlatList({
   | "renderSlot"
   | "usePanelInfo"
   | "setSessionOrder"
+  | "sectionExpansion"
+  | "setSectionExpanded"
   | "workspaceReady"
   | "animationResetKey"
   | "revealSessionId"
@@ -871,19 +975,21 @@ function FlatList({
     if (nextOrder !== undefined) setSessionOrder(FLAT_SESSION_ORDER_KEY, nextOrder);
   };
   const now = Date.now();
+  const pinnedSectionExpanded = sectionExpanded(sectionExpansion, PINNED_SECTION_KEY);
   return (
     <div className={clsx(css.treeBody, css.wide)}>
       <AnimatedRows
         className={clsx(css.list, css.flatList)}
         label={t("section.sessions")}
         rowKeys={[
-          ...pinnedRows.map((row) => `session:${row.id}`),
+          ...(pinnedRows.length === 0 ? [] : [`section:${PINNED_SECTION_KEY}`]),
+          ...(pinnedSectionExpanded ? pinnedRows.map((row) => `session:${row.id}`) : []),
           ...(rows.length === 0 && pinnedRows.length === 0 ? ["empty"] : []),
           ...visible.rows.map((row) => `session:${row.id}`),
           ...(hasOverflow ? ["overflow:flat"] : []),
         ]}
         ready={list.phase === "ready" && workspaceReady && drag === null}
-        resetKey={`${animationResetKey}/${limit}`}
+        resetKey={`${animationResetKey}/${limit}/${String(pinnedSectionExpanded)}`}
       >
         <PinnedSection
           rows={pinnedRows}
@@ -893,9 +999,13 @@ function FlatList({
           renderSlot={renderSlot}
           revealSessionId={revealSessionId}
           onSessionRevealed={onSessionRevealed}
-          followingLabel={t("section.sessions")}
+          expanded={pinnedSectionExpanded}
+          onToggle={() => {
+            setSectionExpanded(PINNED_SECTION_KEY, !pinnedSectionExpanded);
+          }}
           t={t}
         />
+        {pinnedRows.length > 0 && <SectionHeading label={t("section.sessions")} />}
         {rows.length === 0 && pinnedRows.length === 0 && (
           <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
         )}
@@ -1156,6 +1266,7 @@ export function WorkspaceBrowser({
   const orderBy = useStore((s) => s.orderBy);
   const archivedFilter = useStore((s) => s.archivedFilter ?? "default");
   const groupExpansion = useStore((s) => s.groupExpansion);
+  const sectionExpansion = useStore((s) => s.sectionExpansion);
   const sessionOrderByAccount = useStore((s) => s.sessionOrderByAccount);
   // Archived sessions are not openable: the row stays visible under the
   // filter but a click explains instead of navigating.
@@ -1686,6 +1797,11 @@ export function WorkspaceBrowser({
       {/* Always-mounted seat keeps the region's flex slot while the list
           itself is wide-only. */}
       <div className={css.listArea}>
+        {wide && list.phase === "pending" && (
+          <div className={css.empty} role="status">
+            {t("sessions.loading")}
+          </div>
+        )}
         {wide &&
           (normalizedQuery !== "" ? (
             <SearchResults
@@ -1716,6 +1832,8 @@ export function WorkspaceBrowser({
               onSessionRenameRequest={requestSessionRename}
               renderSlot={renderSlot}
               setSessionOrder={saveSessionOrder}
+              sectionExpansion={sectionExpansion}
+              setSectionExpanded={actions.setSectionExpanded}
               revealSessionId={revealSessionId}
               onSessionRevealed={acknowledgeSessionReveal}
               t={t}
@@ -1736,6 +1854,8 @@ export function WorkspaceBrowser({
               animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
               groupExpansion={groupExpansion}
               setGroupExpanded={actions.setGroupExpanded}
+              sectionExpansion={sectionExpansion}
+              setSectionExpanded={actions.setSectionExpanded}
               setSessionOrder={saveSessionOrder}
               rowState={rowState}
               onLeaveArchivedOnly={leaveArchivedOnly}
@@ -1797,11 +1917,6 @@ export function WorkspaceBrowser({
             composingRef.current = true;
           }}
           onCompositionEnd={() => {
-        {wide && list.phase === "pending" && (
-          <div className={css.empty} role="status">
-            {t("sessions.loading")}
-          </div>
-        )}
             composingRef.current = false;
           }}
           onKeyDown={(e) => {

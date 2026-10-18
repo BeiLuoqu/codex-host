@@ -56,6 +56,7 @@ for (const mobile of [false, true]) {
       const folder = page.getByRole("treeitem").filter({ hasText: /^product$/ });
       await folder.waitFor();
       if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
+      const projectGroup = page.locator("[data-sidebar-group]").filter({ has: folder });
       const rows = page.locator('[data-row-key^="session:sidebar-"]');
       await rows.first().waitFor();
       assert.equal(await rows.count(), 5);
@@ -83,7 +84,7 @@ for (const mobile of [false, true]) {
       assert.ok(Math.abs(childGeometry.iconX - headingGeometry.titleX) < 1);
       assert.equal(childGeometry.left, headingGeometry.left, "keep the full-width row hit area");
       assert.equal(childGeometry.width, headingGeometry.width);
-      const moreX = await page
+      const moreX = await projectGroup
         .getByRole("button", { name: "Show 10 more", exact: true })
         .evaluate(
           (element) =>
@@ -259,25 +260,19 @@ for (const mobile of [false, true]) {
         await page.keyboard.press("Enter");
         assert.equal(await rows.nth(1).getAttribute("aria-current"), "page");
         await shot(page, "sidebar-desktop-keyboard");
-        await page.getByRole("button", { name: "Show 10 more", exact: true }).click();
+        await projectGroup.getByRole("button", { name: "Show 10 more", exact: true }).click();
         assert.equal(await rows.count(), 15);
-        await page.getByRole("button", { name: "Show 10 more", exact: true }).click();
+        await projectGroup.getByRole("button", { name: "Show 10 more", exact: true }).click();
         assert.equal(await rows.count(), 25);
         await page.getByRole("button", { name: "Show 3 more", exact: true }).click();
         assert.equal(await rows.count(), 28);
         const lastKey = await rows.last().getAttribute("data-row-key");
         await rows.last().click();
-        await page.getByRole("button", { name: "Show less", exact: true }).click();
         assert.equal(
-          await rows.count(),
-          6,
-          "selected older Thread survives collapse without all intermediate rows",
+          await page.getByRole("button", { name: "Show less", exact: true }).count(),
+          0,
+          "a fully paged group offers no collapse control",
         );
-        assert.equal(
-          await page.locator(`[data-row-key="${lastKey}"]`).getAttribute("aria-selected"),
-          "true",
-        );
-        await shot(page, "sidebar-selected-older");
         await folder.press("ArrowLeft");
         assert.equal(await folder.getAttribute("aria-expanded"), "false");
         assert.notEqual(
@@ -290,7 +285,21 @@ for (const mobile of [false, true]) {
           await folderIcon.locator("path").first().getAttribute("d"),
           expandedFolderPath,
         );
-        assert.equal(await rows.count(), 6);
+        assert.equal(
+          await rows.count(),
+          6,
+          "reopening the group starts from the default window and keeps the selected Thread",
+        );
+        assert.equal(
+          await page.locator(`[data-row-key="${lastKey}"]`).getAttribute("aria-selected"),
+          "true",
+        );
+        assert.equal(
+          await projectGroup.getByRole("button", { name: "Show 10 more", exact: true }).count(),
+          1,
+          "the default window pages forward again",
+        );
+        await shot(page, "sidebar-selected-older");
         await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
         await page.mouse.move(1000, 800);
         await page.locator("body[data-ds-dark-theme]").waitFor();

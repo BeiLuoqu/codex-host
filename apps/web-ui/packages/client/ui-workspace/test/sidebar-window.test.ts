@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { sidebarWindow } from "../src/client/rows/sidebar-window.ts";
+import {
+  sidebarWindow,
+  WORKSPACE_INITIAL_ROWS,
+  workspaceWindow,
+} from "../src/client/rows/sidebar-window.ts";
 
 const rows = () =>
   Array.from({ length: 40 }, (_, i) => ({
@@ -47,4 +51,33 @@ it("extends a presentation window by ten without mutating the catalog order", ()
   assert.deepEqual(source, before);
   assert.equal(sidebarWindow(source, 50).hiddenCount, 0);
   assert.deepEqual(sidebarWindow([], 5), { rows: [], hiddenCount: 0 });
+});
+
+const workspaces = () => ["a", "b", "c", "d", "e", "f", "g"].map((key) => ({ key }));
+
+it("shows the leading Workspaces and hides the rest by default", () => {
+  const result = workspaceWindow(workspaces(), WORKSPACE_INITIAL_ROWS, new Set());
+  assert.deepEqual(
+    result.rows.map((row) => row.key),
+    ["a", "b", "c", "d", "e"],
+  );
+  assert.equal(result.hiddenCount, 2);
+});
+it("keeps a Workspace that must stay reachable in place without spending the quota", () => {
+  const result = workspaceWindow(workspaces(), WORKSPACE_INITIAL_ROWS, new Set(["g"]));
+  assert.deepEqual(
+    result.rows.map((row) => row.key),
+    ["a", "b", "c", "d", "e", "g"],
+  );
+  assert.equal(result.hiddenCount, 1);
+});
+it("leaves a short Workspace list completely visible", () => {
+  assert.deepEqual(workspaceWindow(workspaces().slice(0, 3), WORKSPACE_INITIAL_ROWS, new Set()), {
+    rows: workspaces().slice(0, 3),
+    hiddenCount: 0,
+  });
+  assert.deepEqual(workspaceWindow([], WORKSPACE_INITIAL_ROWS, new Set()), {
+    rows: [],
+    hiddenCount: 0,
+  });
 });
