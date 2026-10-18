@@ -34,6 +34,7 @@ export interface ModelDirectoryState {
   /** Provider-local failures from the last load; usable groups stay usable. */
   failures: readonly ModelCatalogFailure[];
   harnessOrder?: readonly string[];
+  rememberedSelections?: Readonly<Record<string, ModelSelection>>;
   modelFavorites?: Readonly<Record<string, readonly string[]>>;
   preferencesAvailable?: boolean;
   /** Lifecycle of the in-flight operation. */
@@ -220,6 +221,7 @@ export class ModelDirectory {
         boundHarnessId,
         failures: catalog.value?.failures ?? [],
         harnessOrder: catalog.value?.harnessOrder ?? [],
+        rememberedSelections: catalog.value?.rememberedSelections ?? {},
         modelFavorites: catalog.value?.modelFavorites ?? {},
         preferencesAvailable: catalog.value?.preferencesAvailable ?? false,
         status: catalog.status === "error" ? "error" : "loading",
@@ -245,6 +247,7 @@ export class ModelDirectory {
       boundHarnessId,
       failures: catalog.value.failures,
       harnessOrder: catalog.value.harnessOrder ?? [],
+      rememberedSelections: catalog.value.rememberedSelections ?? {},
       modelFavorites: catalog.value.modelFavorites ?? {},
       preferencesAvailable: catalog.value.preferencesAvailable ?? false,
       status: this.store.getSnapshot().status === "selecting" ? "selecting" : "ready",

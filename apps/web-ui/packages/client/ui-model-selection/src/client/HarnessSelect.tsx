@@ -69,16 +69,23 @@ export function HarnessSelect({
       close();
       return;
     }
-    const model = state.harnesses.find((group) => group.id === id)?.models[0];
+    const group = state.harnesses.find((candidate) => candidate.id === id);
+    const remembered = state.rememberedSelections?.[id];
+    const model =
+      group?.models.find((candidate) => candidate.id === remembered?.model) ?? group?.models[0];
     if (model === undefined) return;
+    const rememberedEffort = model.reasoning?.efforts.some(
+      (option) => option.id === remembered?.reasoningEffort,
+    )
+      ? remembered?.reasoningEffort
+      : undefined;
+    const reasoningEffort = rememberedEffort ?? model.reasoning?.defaultEffort;
     close();
     try {
       const result = await select({
         provider: id,
         model: model.id,
-        ...(model.reasoning?.defaultEffort === undefined
-          ? {}
-          : { reasoningEffort: model.reasoning.defaultEffort }),
+        ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
       });
       if (result !== undefined && !result.ok)
         report(t("error.action", { message: result.error.message }));

@@ -96,6 +96,22 @@ it("shares GUI file preferences across Web clients, restores defaults and isolat
   assert.equal((await store.get()).values.newThread?.byHarness.codex, undefined);
   await a.remember("fake", { model: { id: "native" }, permissionModeId: "auto" });
   assert.equal((await a.configuration("fake"))?.model?.id, "native");
+  const decorated = await a.decorate({
+    default: { provider: "fake", model: "alternate" },
+    groups: [
+      {
+        id: "fake",
+        name: "Fake",
+        models: [
+          { id: "alternate", name: "Alternate" },
+          { id: "native", name: "Native" },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(decorated.rememberedSelections, {
+    fake: { provider: "fake", model: "native" },
+  });
   await call("session/create", { sessionId: "first", cwd: root });
   const projection = (await call("session/projections", { sessionId: "first" })) as {
     values: Record<string, unknown>;

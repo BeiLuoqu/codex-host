@@ -15,6 +15,7 @@ import {
 import { FakeChChannel, startFakeChChannel } from "../support/ch-channel.ts";
 import { startFakeChDebugger } from "../support/ch-host.ts";
 import { startServer } from "../support/server.ts";
+import { createHarnessAdapter as createOther } from "../fake-harness/other/plugin.ts";
 
 it(
   "synchronizes favorites and idle policy without refresh, and restores new-session defaults",
@@ -27,12 +28,23 @@ it(
     const host = new FakeChChannel();
     host.add("shared", root, "Shared conversation");
     host.inspection.catalog.models.push({ ref: { id: "alternate" }, label: "Alternate Model" });
+    const other = createOther();
+    t.after(() => other.close());
     const request = host.request.bind(host);
     host.request = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
       if (method === HARNESS_PREFERENCES_GET_METHOD)
         return (await store.get(String(params.scope ?? "external"))) as T;
       if (method === HARNESS_PREFERENCES_PATCH_METHOD)
         return (await store.patch(harnessPreferencePatchSchema.parse(params))) as T;
+      if (method === "codexhost/harness/plugins/list")
+        return {
+          plugins: [
+            { id: "fake", name: "Fake Harness", version: "1" },
+            { id: "other", name: "Other Harness", version: "1" },
+          ],
+        } as T;
+      if (method === "codexhost/harness/inspect" && params.harnessId === "other")
+        return (await other.inspect()) as T;
       return request<T>(method, params);
     };
     await store.subscribe((revision) => {
@@ -138,6 +150,23 @@ it(
       .filter({ hasText: basename(root) })
       .hover();
     await b.getByRole("button", { name: `New session in ${basename(root)}`, exact: true }).click();
+    await b
+      .getByRole("button", { name: "Select model, current Alternate Model", exact: true })
+      .waitFor();
+    await b
+      .getByRole("button", { name: "Select Harness, current Fake Harness", exact: true })
+      .click();
+    await b.getByRole("menuitem", { name: "Other Harness", exact: true }).click();
+    await b
+      .getByRole("button", {
+        name: "Select model, current Other Model, reasoning effort High",
+        exact: true,
+      })
+      .waitFor();
+    await b
+      .getByRole("button", { name: "Select Harness, current Other Harness", exact: true })
+      .click();
+    await b.getByRole("menuitem", { name: "Fake Harness", exact: true }).click();
     await b
       .getByRole("button", { name: "Select model, current Alternate Model", exact: true })
       .waitFor();

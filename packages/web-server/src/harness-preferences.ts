@@ -117,34 +117,51 @@ export class WebHarnessPreferences {
         ...external.values.favorites,
         ...(code ? { codex: code.values.favorites.codex ?? [] } : {}),
       };
+      const configurationFor = (harnessId: string) =>
+        harnessId === "codex"
+          ? code?.values.newThread?.byHarness.codex
+          : external.values.newThread?.byHarness[harnessId];
       const preferred =
         catalog.groups.find((group) => group.id === external.values.newThread?.lastHarness) ??
         catalog.groups.find((group) => group.id === catalog.default.provider);
-      const configuration =
-        preferred?.id === "codex"
-          ? code?.values.newThread?.byHarness.codex
-          : preferred
-            ? external.values.newThread?.byHarness[preferred.id]
-            : undefined;
-      const model =
-        preferred?.models.find((model) => model.id === configuration?.model?.id) ??
-        preferred?.models.find((model) => model.id === catalog.default.model) ??
-        preferred?.models[0];
-      const effort = model?.reasoning?.efforts.some(
-        (option) => option.id === configuration?.thinkingOptionId,
-      )
-        ? configuration?.thinkingOptionId
-        : model?.reasoning?.defaultEffort;
+      const selectionFor = (
+        group: ModelGroup,
+        fallbackModelId?: string,
+      ): { provider: string; model: string; reasoningEffort?: string } | undefined => {
+        const configuration = configurationFor(group.id);
+        const model =
+          group.models.find((model) => model.id === configuration?.model?.id) ??
+          group.models.find((model) => model.id === fallbackModelId) ??
+          group.models[0];
+        if (!model) return undefined;
+        const effort = model.reasoning?.efforts.some(
+          (option) => option.id === configuration?.thinkingOptionId,
+        )
+          ? configuration?.thinkingOptionId
+          : model.reasoning?.defaultEffort;
+        return {
+          provider: group.id,
+          model: model.id,
+          ...(effort ? { reasoningEffort: effort } : {}),
+        };
+      };
+      const rememberedSelections = Object.fromEntries(
+        catalog.groups.flatMap((group) => {
+          if (!configurationFor(group.id)?.model) return [];
+          const selection = selectionFor(group);
+          return selection ? ([[group.id, selection]] as const) : [];
+        }),
+      );
+      const defaultSelection = preferred
+        ? selectionFor(
+            preferred,
+            preferred.id === catalog.default.provider ? catalog.default.model : undefined,
+          )
+        : undefined;
       return {
         ...catalog,
-        default:
-          preferred && model
-            ? {
-                provider: preferred.id,
-                model: model.id,
-                ...(effort ? { reasoningEffort: effort } : {}),
-              }
-            : catalog.default,
+        default: defaultSelection ?? catalog.default,
+        rememberedSelections,
         modelFavorites: favorites,
         preferencesAvailable: true,
       };

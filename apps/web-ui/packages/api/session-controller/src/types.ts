@@ -166,6 +166,8 @@ export interface ModelCatalogFailure {
 
 /** Host-generation model catalog and the default used by unconfigured Sessions. */
 export interface ModelCatalog {
+  /** Available new-Session selection resolved from each Harness's saved preference. */
+  readonly rememberedSelections?: Readonly<Record<string, ModelSelection>>;
   readonly modelFavorites?: Readonly<Record<string, readonly string[]>>;
   readonly preferencesAvailable?: boolean;
   /** Presentation only, shared with Desktop; includes unavailable Harness rows. */

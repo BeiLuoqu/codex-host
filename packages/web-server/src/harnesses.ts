@@ -38,6 +38,10 @@ export interface HarnessCatalog {
     groups: ModelGroup[];
     failures: Array<{ id: string; name: string; message: string }>;
     harnessOrder?: string[];
+    rememberedSelections?: Record<
+      string,
+      { provider: string; model: string; reasoningEffort?: string }
+    >;
     modelFavorites?: Record<string, string[]>;
     preferencesAvailable?: boolean;
   }>;
