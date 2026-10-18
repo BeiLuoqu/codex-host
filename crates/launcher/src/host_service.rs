@@ -11,6 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use codexhost_platform::{
     configure_detached_service_command, node_entrypoint_path, spawn_supervised,
 };
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -18,6 +19,8 @@ struct ReadyOwner {
     pid: u32,
     started_at_micros: u64,
     executable: PathBuf,
+    #[serde(default)]
+    runtime: PathBuf,
 }
 fn owner_snapshot(data: &Path) -> Option<codexhost_platform::ProcessSnapshot> {
     let record = fs::read(data.join("shared-host-ready.json"))
@@ -30,12 +33,13 @@ fn owner_snapshot(data: &Path) -> Option<codexhost_platform::ProcessSnapshot> {
 fn owner_ready(data: &Path) -> bool {
     owner_snapshot(data).is_some()
 }
-fn publish_ready(data: &Path, pid: u32) -> Result<(), Box<dyn Error>> {
+fn publish_ready(data: &Path, pid: u32, runtime: &Path) -> Result<(), Box<dyn Error>> {
     let live = codexhost_platform::process_snapshot(pid)?;
     let bytes = serde_json::to_vec(&ReadyOwner {
         pid,
         started_at_micros: live.started_at_micros,
         executable: live.executable,
+        runtime: runtime.to_owned(),
     })?;
     let temporary = data.join(format!("shared-host-ready-{}.tmp", std::process::id()));
     let mut options = OpenOptions::new();
@@ -157,6 +161,7 @@ fn ensure(arguments: &[String], options: Options) -> Result<(), Box<dyn Error>> 
     let ready = launches.join(format!("{}-{nonce}.ready", std::process::id()));
     let mut command = Command::new(env::current_exe()?);
     command
+        .current_dir(&options.data)
         .arg("host")
         .arg("serve")
         .args(arguments)
@@ -210,6 +215,7 @@ fn serve(mut options: Options) -> Result<(), Box<dyn Error>> {
     let mut command = Command::new(&options.node);
     clean(&mut command);
     command
+        .current_dir(&options.data)
         .arg("--disable-warning=UNDICI-EHPA")
         .arg(node_entrypoint_path(&options.runtime))
         .arg("--codexhost-shared-host")
@@ -230,7 +236,7 @@ fn serve(mut options: Options) -> Result<(), Box<dyn Error>> {
             if !published && let Some(result) = readiness(&node_ready) {
                 match result {
                     Ok(()) => {
-                        publish_ready(&options.data, child.id())?;
+                        publish_ready(&options.data, child.id(), &options.runtime)?;
                         publish_status(ready, "ready\n")?;
                     }
                     Err(error) => {
@@ -295,42 +301,91 @@ fn wait_for_shutdown(
     }
 }
 
+fn stop(options: &Options) -> Result<(), Box<dyn Error>> {
+    let owner = owner_snapshot(&options.data);
+    let supervisor = owner
+        .as_ref()
+        .filter(|owner| owner.parent_id > 1)
+        .and_then(|owner| codexhost_platform::process_snapshot(owner.parent_id).ok());
+    let mut command = Command::new(&options.node);
+    clean(&mut command);
+    let status = command
+        .arg(node_entrypoint_path(&options.runtime))
+        .arg("--codexhost-shared-host")
+        .arg("--data")
+        .arg(&options.data)
+        .arg("--stop")
+        .stderr(Stdio::inherit())
+        .status()?;
+    if status.success() {
+        wait_for_shutdown(owner.as_ref(), supervisor.as_ref(), Duration::from_secs(10))
+    } else {
+        Err("Shared Host shutdown was not confirmed".into())
+    }
+}
+
+// Keep the file in place: unlinking a locked file would let another caller lock a
+// different inode. The OS releases the lock when the maintenance process exits.
+fn lifecycle_lock(data: &Path) -> Result<fs::File, Box<dyn Error>> {
+    fs::create_dir_all(data)?;
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(data.join("shared-host-lifecycle.lock"))?;
+    let started = Instant::now();
+    loop {
+        match file.try_lock_exclusive() {
+            Ok(()) => return Ok(file),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.raw_os_error() == Some(33) =>
+            {
+                if started.elapsed() > Duration::from_secs(40) {
+                    return Err("Shared Host lifecycle is busy; no action was taken".into());
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
 pub fn run(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     let action = arguments.first().map(String::as_str).unwrap_or("");
     if arguments.is_empty() {
         return Err(
-            "usage: codexhost host ensure --node <file> --host-runtime <file> --data <directory>"
+            "usage: codexhost host <ensure|restart|stop> --node <file> --host-runtime <file> --data <directory>"
                 .into(),
         );
     }
     let options = options(&arguments[1..])?;
+    // The detached supervisor must not inherit or reacquire the caller's lock:
+    // ensure/restart retain it until that supervisor has published readiness.
+    let _guard = match action {
+        "ensure" | "stop" | "restart" => Some(lifecycle_lock(&options.data)?),
+        _ => None,
+    };
     match action {
         "ensure" => ensure(&arguments[1..], options),
         "serve" => serve(options),
-        "stop" => {
-            let owner = owner_snapshot(&options.data);
-            let supervisor = owner
-                .as_ref()
-                .filter(|owner| owner.parent_id > 1)
-                .and_then(|owner| codexhost_platform::process_snapshot(owner.parent_id).ok());
-            let mut command = Command::new(&options.node);
-            clean(&mut command);
-            let status = command
-                .arg(node_entrypoint_path(&options.runtime))
-                .arg("--codexhost-shared-host")
-                .arg("--data")
-                .arg(&options.data)
-                .arg("--stop")
-                .stderr(Stdio::inherit())
-                .status()?;
-            if status.success() {
-                wait_for_shutdown(owner.as_ref(), supervisor.as_ref(), Duration::from_secs(10))
-            } else {
-                Err("Shared Host shutdown was not confirmed".into())
+        "stop" => stop(&options),
+        "restart" => {
+            stop(&options)?;
+            let data = options.data.clone();
+            let runtime = options.runtime.clone();
+            ensure(&arguments[1..], options)?;
+            let owner: ReadyOwner = serde_json::from_slice(&fs::read(data.join("shared-host-ready.json"))?)?;
+            if owner.runtime != runtime || !owner_ready(&data) {
+                return Err("Shared Host restart did not activate the requested runtime".into());
             }
+            Ok(())
         }
         _ => Err(
-            "usage: codexhost host ensure --node <file> --host-runtime <file> --data <directory>"
+            "usage: codexhost host <ensure|restart|stop> --node <file> --host-runtime <file> --data <directory>"
                 .into(),
         ),
     }

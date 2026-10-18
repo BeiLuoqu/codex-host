@@ -64,6 +64,40 @@ afterEach(() => {
 });
 
 describe("development Desktop start", () => {
+  it("rejects the removed host subcommand without starting a process", async () => {
+    const spawnImplementation = vi.fn();
+    await expect(
+      runDevelopmentDesktop({ arguments_: ["host"], spawnImplementation }),
+    ).rejects.toThrow("semantic version");
+    expect(spawnImplementation).not.toHaveBeenCalled();
+  });
+  it.each(["build", "restart"])("does not launch Desktop when %s fails", async (failure) => {
+    const root = temporaryDirectory();
+    const nodePath = path.join(root, "node");
+    materializeArtifacts(root, "linux", nodePath);
+    const calls = [];
+    const spawnImplementation = vi.fn((command, args) => {
+      calls.push({ command, args });
+      return exitingChild(
+        (failure === "build" && args.includes("build")) ||
+          (failure === "restart" && args[0] === "host")
+          ? 7
+          : 0,
+      );
+    });
+    const result = runDevelopmentDesktop({
+      root,
+      nodePath,
+      platform: "linux",
+      environment: { npm_execpath: "/npm.js" },
+      arguments_: [],
+      spawnImplementation,
+    });
+    if (failure === "build") await expect(result).resolves.toBe(7);
+    else await expect(result).rejects.toThrow("Host restart failed");
+    expect(calls.some(({ args }) => args[0] === "launch")).toBe(false);
+    if (failure === "build") expect(calls.some(({ args }) => args[0] === "host")).toBe(false);
+  });
   it.each([0, 7])(
     "routes web --no-build to the preview without Desktop cleanup or build (exit %s)",
     async (code) => {
@@ -87,6 +121,7 @@ describe("development Desktop start", () => {
           "--import",
           "tsx",
           path.join(root, "packages/web-server/scripts/preview.ts"),
+          "--restart",
           "--port",
           "3181",
         ],
@@ -131,6 +166,7 @@ describe("development Desktop start", () => {
             "--import",
             "tsx",
             path.join(root, "packages/web-server/scripts/preview.ts"),
+            "--restart",
             "--port",
             "3181",
           ],
@@ -151,6 +187,8 @@ describe("development Desktop start", () => {
       help: true,
     });
     expect(usage()).toContain("npm start");
+    expect(usage()).not.toContain("npm start host");
+    expect(() => parseArguments(["host"])).toThrow("semantic version");
     expect(usage()).toContain("Stop any running Codex Desktop");
   });
 
@@ -192,7 +230,9 @@ describe("development Desktop start", () => {
       const root = temporaryDirectory();
       const nodePath = path.join(root, "node");
       const artifacts = materializeArtifacts(root, "linux", nodePath);
-      const spawnImplementation = vi.fn(() => readyChild());
+      const spawnImplementation = vi.fn((_command, args) =>
+        args[0] === "host" ? exitingChild() : readyChild(),
+      );
       vi.spyOn(console, "log").mockImplementation(() => undefined);
       vi.spyOn(console, "warn").mockImplementation(() => undefined);
       await runDevelopmentDesktop({
@@ -203,9 +243,9 @@ describe("development Desktop start", () => {
         environment: { PATH: path.join(root, "missing"), CODEXHOST_DEV_VERSION: "0.99.0" },
         spawnImplementation,
       });
-      expect(spawnImplementation).toHaveBeenCalledOnce();
-      expect(spawnImplementation.mock.calls[0][0]).toBe(artifacts.launcher);
-      expect(spawnImplementation.mock.calls[0][2].env.CODEXHOST_DEV_VERSION).toBe(version);
+      expect(spawnImplementation).toHaveBeenCalledTimes(2);
+      expect(spawnImplementation.mock.calls[1][0]).toBe(artifacts.launcher);
+      expect(spawnImplementation.mock.calls[1][2].env.CODEXHOST_DEV_VERSION).toBe(version);
     },
   );
 
@@ -213,7 +253,9 @@ describe("development Desktop start", () => {
     const root = temporaryDirectory();
     const nodePath = path.join(root, "node");
     const artifacts = materializeArtifacts(root, "linux", nodePath);
-    const spawnImplementation = vi.fn(() => readyChild());
+    const spawnImplementation = vi.fn((_command, args) =>
+      args[0] === "host" ? exitingChild() : readyChild(),
+    );
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const environment = {
@@ -234,7 +276,7 @@ describe("development Desktop start", () => {
       environment,
       spawnImplementation,
     });
-    const [command, arguments_, options] = spawnImplementation.mock.calls[0];
+    const [command, arguments_, options] = spawnImplementation.mock.calls[1];
     expect(command).toBe(artifacts.launcher);
     expect(arguments_).toEqual(expect.arrayContaining(["--host-runtime", artifacts.hostRuntime]));
     for (const key of Object.keys(environment).filter((key) => key.startsWith("CODEXHOST_NPM_"))) {
@@ -379,15 +421,16 @@ describe("development Desktop start", () => {
       }),
     ).resolves.toBe(0);
 
-    expect(invocations).toHaveLength(3);
+    expect(invocations).toHaveLength(4);
     expect(invocations[0].command).toBe("powershell.exe");
     expect(invocations[1]).toMatchObject({
       command: nodePath,
       arguments: [path.join(root, "npm-cli.js"), "run", "build"],
     });
-    expect(invocations[2].command).toBe(path.join(root, "target", "debug", "codexhost.exe"));
-    expect(invocations[2].arguments).toContain(piPath);
-    expect(invocations[2].options).toMatchObject({
+    expect(invocations[2].arguments.slice(0, 2)).toEqual(["host", "restart"]);
+    expect(invocations[3].command).toBe(path.join(root, "target", "debug", "codexhost.exe"));
+    expect(invocations[3].arguments).toContain(piPath);
+    expect(invocations[3].options).toMatchObject({
       cwd: root,
       stdio: ["ignore", "pipe", "inherit"],
     });
@@ -524,7 +567,7 @@ describe("development Desktop start", () => {
 
       // Cleanup, build and Launcher all pass the same selective suppression
       // to their children, without disabling the proxy or changing the caller.
-      expect(spawnImplementation).toHaveBeenCalledTimes(3);
+      expect(spawnImplementation).toHaveBeenCalledTimes(4);
       for (const [, , options] of spawnImplementation.mock.calls) {
         expect(options.env).toMatchObject({
           NODE_OPTIONS: [nodeOptions, "--disable-warning=UNDICI-EHPA"].filter(Boolean).join(" "),
@@ -559,9 +602,10 @@ describe("development Desktop start", () => {
       }),
     ).resolves.toBe(0);
 
-    expect(invocations).toHaveLength(2);
+    expect(invocations).toHaveLength(3);
     expect(invocations[0].command).toBe("powershell.exe");
-    expect(invocations[1]).toMatchObject({
+    expect(invocations[1].arguments.slice(0, 2)).toEqual(["host", "restart"]);
+    expect(invocations[2]).toMatchObject({
       command: artifacts.launcher,
       arguments: expect.arrayContaining(["launch"]),
       options: expect.objectContaining({
@@ -579,7 +623,7 @@ describe("development Desktop start", () => {
     let launcherChild;
     const spawnImplementation = vi.fn((command, arguments_, options) => {
       invocations.push({ command, arguments: arguments_, options });
-      if (command === artifacts.launcher) {
+      if (command === artifacts.launcher && arguments_[0] === "launch") {
         launcherChild = readyChild();
         return launcherChild;
       }
@@ -599,8 +643,8 @@ describe("development Desktop start", () => {
       }),
     ).resolves.toBe(0);
 
-    expect(invocations).toHaveLength(2);
-    expect(invocations[1].command).toBe(artifacts.launcher);
+    expect(invocations).toHaveLength(3);
+    expect(invocations[2].command).toBe(artifacts.launcher);
     expect(launcherChild.unref).toHaveBeenCalled();
   });
 
@@ -608,8 +652,8 @@ describe("development Desktop start", () => {
     const root = temporaryDirectory();
     const nodePath = path.join(root, "node.exe");
     materializeArtifacts(root, "win32", nodePath);
-    const spawnImplementation = vi.fn((command) => {
-      if (command === path.join(root, "target", "debug", "codexhost.exe")) {
+    const spawnImplementation = vi.fn((command, args) => {
+      if (command === path.join(root, "target", "debug", "codexhost.exe") && args[0] === "launch") {
         return exitingChild(9);
       }
       return exitingChild();

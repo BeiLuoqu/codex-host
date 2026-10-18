@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { it } from "node:test";
 import { promisify } from "node:util";
 
@@ -157,6 +157,9 @@ it(
         response.result.value.groups.map((group) => group.id),
         ["fake"],
       );
+      const owner = JSON.parse(readFileSync(join(hostData, "shared-host-ready.json"), "utf8"));
+      assert.ok(owner.runtime.startsWith(join(hostData, "host-builds") + sep));
+      assert.equal(existsSync(owner.runtime), true);
 
       // Acceptance for the right Sidebar's packaged runtime pieces: the
       // terminal runner, node-pty, the Office engine, and the four client tabs.

@@ -267,11 +267,16 @@ Old profiles, lock files and migration markers are not inspected or moved. There
 No Harness selection is needed; \`--harness <id,...>\` remains an optional advanced subset override.
 Missing CLIs and connection failures are normal unavailable states, not Web startup failures.
 Using a Harness requires an installed/authenticated native CLI; default enablement does not imply full Web capability verification.
-Optional preview flags: --port, --data, --workspace, --harness, --ch-data, --ch-codex-home, --codex-command, --codex-home.
-Startup checks for an existing Host before launching; dynamic-port discovery does not guarantee a strict singleton.
+Optional preview flags: --port, --data, --workspace, --harness, --ch-data, --ch-codex-home.
+Native ensure, stop and restart serialize lifecycle operations per Host data directory.
+Restart keeps the lock through shutdown and readiness; reconnecting clients reuse the replacement.
 No profile/home ownership lock or exit proof is used. The existing Mapping Store lock remains.
+Packed Web retains its Host, native Launcher and complete plugins in <ch-data>/host-builds/<content-hash>/;
+repackaging does not replace these files. Host cwd is the Host data directory. External path overrides
+remain caller-managed. Snapshots are not automatically deleted; stop their clients and Host before cleanup.
 Ctrl+C stops Web only. Explicit backend maintenance: native/codexhost host stop --node <absolute-node> --host-runtime <absolute-host-runtime.mjs> --data <absolute-ch-data>.
-Close clients first to prevent their on-demand restart; stopping the backend also stops its tasks.
+Use host restart with the same arguments for replacement while updated clients stay open.
+Close older clients without lifecycle locking first. Stopping or restarting the backend stops its tasks.
 Do not launch app/server.mjs directly from a CodexHost-managed session with inherited Desktop settings.
 Codex CLI is an ordinary preinstalled external Harness. Its executable comes from the shared discovery rules
 and the persisted launch setting for \`codex-cli\`; \`CODEX_HOME\` selects the native home, otherwise ~/.codex.

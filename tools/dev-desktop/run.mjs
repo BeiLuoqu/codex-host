@@ -3,6 +3,7 @@ import { constants, accessSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { runQuietWebBuild } from "./build.mjs";
+import { restartDevelopmentHost } from "./host.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
@@ -150,11 +151,10 @@ echo 'codexhost dev: stopped the running Codex Desktop'
 export function usage() {
   return `usage: npm start [version] [-- --no-build]
        npm start web [-- --port 3181]
-       npm start host
 
 Stop any running Codex Desktop, then build and run the current codexhost worktree.
-The web subcommand builds and starts the Web preview without stopping Desktop.
-The host subcommand builds and restarts the shared Host after confirmation, interrupting its tasks.
+Both commands restart the shared Host, interrupting its tasks, then start the selected interface.
+The web subcommand replaces this worktree's Web preview on the selected port without stopping Desktop.
 
 arguments:
   version            set the runtime version, e.g. npm start 0.12.0
@@ -393,16 +393,6 @@ export async function runDevelopmentDesktop({
   nodePath = process.execPath,
   spawnImplementation = spawn,
 } = {}) {
-  if (arguments_[0] === "host") {
-    const { runDevelopmentHost } = await import("./host.mjs");
-    return runDevelopmentHost(arguments_.slice(1), {
-      root,
-      environment,
-      platform,
-      nodePath,
-      run: (invocation, env) => runChild(invocation, root, spawnImplementation, env),
-    });
-  }
   if (arguments_[0] === "web") {
     const webArguments = arguments_.slice(1);
     if (!webArguments.includes("--no-build")) {
@@ -419,6 +409,7 @@ export async function runDevelopmentDesktop({
           "--import",
           "tsx",
           path.join(root, "packages/web-server/scripts/preview.ts"),
+          "--restart",
           ...webArguments.filter((argument) => argument !== "--no-build"),
         ],
       },
@@ -507,6 +498,11 @@ export async function runDevelopmentDesktop({
     launchEnvironment.CODEXHOST_DEV_VERSION = options.version;
     console.log(`codexhost dev: source runtime version is ${options.version}`);
   }
+  await restartDevelopmentHost({
+    artifacts,
+    environment: launchEnvironment,
+    run: (invocation, env) => runChild(invocation, root, spawnImplementation, env),
+  });
   const launchStartedAt = performance.now();
   const launchResult = await runLauncher(
     launcherInvocation(artifacts, piPath),

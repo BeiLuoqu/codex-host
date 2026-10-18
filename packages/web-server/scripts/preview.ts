@@ -5,9 +5,11 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { previewLaunch } from "../src/preview-launch.ts";
+import { restartDevelopmentPreview } from "../src/development-restart.ts";
 
 const { values } = parseArgs({
   options: {
+    restart: { type: "boolean" },
     "ch-cdp": { type: "string" },
     "ch-control-directory": { type: "string" },
     "ch-launcher": { type: "string" },
@@ -62,6 +64,7 @@ for (const id of selected.split(",")) {
     throw new Error(`Preview requires a bundled session Adapter for ${id}`);
   }
 }
+if (values.restart) await restartDevelopmentPreview(distribution, values, launch.env);
 const child = spawn(process.execPath, launch.args, {
   env: launch.env,
   cwd: distribution,

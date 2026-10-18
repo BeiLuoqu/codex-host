@@ -36,6 +36,7 @@ import { inspectImage, readImageFile, WebImages } from "./web-images.ts";
 import { WebFiles } from "./web-files.ts";
 import { serveFileUpload } from "./ch-file-upload-http.ts";
 import { defaultWebDataDirectory } from "./data-paths.ts";
+import { snapshotPackagedHost } from "./packaged-host.ts";
 
 /** Packed distribution: app/server.mjs shares a root with web/, adapters/ and native/. */
 const DISTRIBUTION_ROOT = resolve(import.meta.dirname, "..");
@@ -118,6 +119,10 @@ const enabledHarnesses =
     ? undefined
     : new Set(values.harness.split(","));
 const workspaces = new Workspaces(data, resolve(values.workspace as string), true);
+const packagedHost =
+  PACKED && !values["ch-cdp"]
+    ? await snapshotPackagedHost(DISTRIBUTION_ROOT, displayDirectory)
+    : DISTRIBUTION_ROOT;
 const pluginSource = resolve(values["ch-plugins"] ?? values.adapters ?? defaultAdapterRoots());
 const chHost = await createChHostClient({
   launch: {
@@ -125,7 +130,7 @@ const chHost = await createChHostClient({
       values["ch-launcher"] ??
         (PACKED
           ? join(
-              DISTRIBUTION_ROOT,
+              packagedHost,
               "native",
               process.platform === "win32" ? "codexhost.exe" : "codexhost",
             )
@@ -138,7 +143,7 @@ const chHost = await createChHostClient({
     runtime: resolve(
       values["ch-host-runtime"] ??
         (PACKED
-          ? join(import.meta.dirname, "host-runtime.mjs")
+          ? join(packagedHost, "app/host-runtime.mjs")
           : join(REPO_ROOT, "packages/host-runtime/dist/main.js")),
     ),
     dataDirectory: resolve(
@@ -147,7 +152,10 @@ const chHost = await createChHostClient({
           ? dirname(resolve(values["ch-control-directory"]))
           : join(homedir(), ".codexhost")),
     ),
-    bundledPlugins: pluginSource,
+    bundledPlugins:
+      PACKED && pluginSource === resolve(DISTRIBUTION_ROOT, "adapters")
+        ? join(packagedHost, "adapters")
+        : pluginSource,
     ...(values["ch-codex-home"] ? { codexHome: resolve(values["ch-codex-home"]) } : {}),
   },
   ...(values["ch-data"] && !values["ch-control-directory"]

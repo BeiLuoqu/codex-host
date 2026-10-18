@@ -64,7 +64,7 @@ https://github.com/user-attachments/assets/c48192d7-23ff-4f6e-b61a-6345a655bb76
 
 ## Standalone Web development
 
-This checkout also contains a Web/PWA application. Run `npm ci`, `npm run build:web`, then `npm start web` for an authenticated Web client that starts or connects to one independent local codexhost background Host. Web and Desktop can each be used alone, share canonical external Threads when both are open, and close without stopping the other or its tasks. Existing saved GUI project metadata remains read-only; no GUI projects are created. This does not launch or restart Desktop. A running older Desktop-owned Host is not taken over; update/restart it separately to transition. `-- --session-source standalone` explicitly selects the independent Harness plugin mode. See [the Web guide](docs/product/standalone-web.md) for connection requirements, plugin distribution and current limitations.
+This checkout also contains a Web/PWA application. Run `npm ci`, `npm run build:web`, then `npm start web` for an authenticated Web client. The development command restarts the shared Host and this checkout's Web service on the selected port, interrupting running Host tasks. Web and Desktop can each be used alone, share canonical external Threads when both are open, and close without stopping the other or its tasks. Existing saved GUI project metadata remains read-only; no GUI projects are created. This does not launch or restart Desktop. A running older Desktop-owned Host is not taken over; update/restart it separately to transition. `-- --session-source standalone` explicitly selects the independent Harness plugin mode. See [the Web guide](docs/product/standalone-web.md) for connection requirements, plugin distribution and current limitations.
 
 ## Quick Start
 
@@ -299,6 +299,8 @@ cd codex-host
 npm ci
 npm start
 ```
+
+`npm start` rebuilds and restarts the shared Host and Desktop; `npm start web` rebuilds and restarts the shared Host and Web. Both interrupt running Host tasks. `--no-build` skips building but still restarts the selected interface and Host.
 
 To run the current source with a specific runtime version, use `npm start 0.12.0` (prereleases such as `0.13.0-rc.1` are also accepted). Host status, console version and update-check version reporting use this value. Without a version argument the version remains `<workspace-version>-dev`; `npm start 0.12.0 -- --no-build` reuses artifacts after building once. The override lasts for this launch and does not modify version files or publish packages. Source installations still lack packaged self-update resources; remote npm installation downloads the published package with that version, not the local source.
 

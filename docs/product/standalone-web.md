@@ -20,11 +20,13 @@ npm start web -- --port 4401
 
 Web 默认端口为 **4400**，控制台默认端口为 **4399**；可用 `--port` 显式覆盖 Web 端口。`npm start web` 默认监听所有 IPv4 网卡；手机可使用终端输出的带令牌局域网或 Tailscale 地址。需要相应网络可达且防火墙允许入站，不会自动配置穿透或公网端口转发。不要将明文 HTTP 直接暴露到不可信网络；跨网络优先使用 Tailscale，或配置 HTTPS 反向代理。
 
-`npm start web` 默认先执行 `build:web`，完整构建并打包当前工作树后启动；成功时仅显示构建进度和耗时，不刷依赖构建明细。构建失败则不启动旧产物，显示末尾最多 64,000 字符的诊断；完整输出可通过 `npm run build:web` 查看。`npm start web -- --no-build` 显式复用已有 Web 发行目录。两种方式都不触发 Desktop 清理或重启；不带 `web` 的 `npm start` 仍启动 Desktop。Desktop 启动前只清理旧 Desktop 及已核实的 Controller，不按 `codexhost` 进程名清理运行时；Desktop 原生 Launcher 负责自身进程树退出，并保留已经独立运行的共享 Host。因此先启动 Web 再启动 Desktop 不应停止共享后台或其任务。原 `npm run start:web` 保留兼容。
+`npm start web` 默认先执行 `build:web`，构建成功并验证产物后，停止相同工作树、相同端口的旧 Web 开发服务，通过原生 `host restart` 重启共享 Host，再启动当前 Web。成功构建仅显示进度和耗时；失败显示末尾最多 64,000 字符诊断，保留旧 Host 和 Web。完整构建输出可通过 `npm run build:web` 查看。`npm start web -- --no-build` 复用已有发行产物，仍重启 Host 和 Web。不会关闭 Desktop，但 Host 上所有运行中的任务会被中断，另一端界面自动重连。不带 `web` 的 `npm start` 同样默认重启 Host 和 Desktop。`npm run start:web` 保留兼容。Web 仅停止明确匹配的旧开发进程，不按端口直接杀进程；其他程序占用端口仍需自行处理。开发重启要求本地共享 Host，旧 CDP 接入使用直接 preview 入口。
 
 `build:web` 编译当前工作树的 CH 包并调用已有插件构建器，构建原生 Launcher，随后编译前端和打包。插件输入为 `packages/host-runtime/dist/plugins`，不是已安装的 CH.app 或另一个仓库。用量统计专用插件不作为聊天 Harness；Web 另行打包同仓库的 Codex Adapter。
 
-发行目录为 `packages/web-server/dist/codexhost-web`，包含 Node 网关、Web 界面、同一 Host bundle、当前平台的原生 Launcher 和自包含插件；网关与 Host bundle 使用既有安装资源布局 `app/server.mjs`、`app/host-runtime.mjs`，原生 CLI 无须 Web 专用路径回退，根目录 `preview.mjs` 仍为隔离启动入口；会话与用量插件在后台显式启用，Codex Adapter 仅由独立 Web 执行作用域加载，不进入共享 Host 的 external 注册表。整体目录可以移动到仓库外运行，无需源码目录或仓库的 node_modules，但原生 Launcher 不能跨 OS/CPU 使用。默认共享模式也不要求 Desktop 运行：Web、Desktop 均可独立使用，同时开启时共享后台，晚开启的一端读取最新事实；关闭任意界面不停止另一端或后台任务。需要本机受支持的 Node，Harness CLI 和其认证仍由用户安装、配置。
+发行目录为 `packages/web-server/dist/codexhost-web`，包含 Node 网关、Web 界面、同一 Host bundle、当前平台的原生 Launcher 和自包含插件；网关与 Host bundle 使用既有安装资源布局 `app/server.mjs`、`app/host-runtime.mjs`，原生 CLI 无须 Web 专用路径回退，根目录 `preview.mjs` 仍为隔离启动入口；会话与用量插件在后台显式启用，Codex CLI 与其他外部 Harness 使用同一插件注册表，Manifest 只声明 Web 界面。整体目录可以移动到仓库外运行，无需源码目录或仓库的 node_modules，但原生 Launcher 不能跨 OS/CPU 使用。默认共享模式也不要求 Desktop 运行：Web、Desktop 均可独立使用，同时开启时共享后台，晚开启的一端读取最新事实；关闭任意界面不停止另一端或后台任务。需要本机受支持的 Node，Harness CLI 和其认证仍由用户安装、配置。
+
+打包版 Web 在连接 Host 前，将随包的 Host bundle、原生 Launcher 与完整插件目录复制到 `<ch-data>/host-builds/<内容哈希>/`，完成后原子发布；相同内容复用同一路径。后台与 Web 自动重连始终引用这份快照，重新打包 Web 不会删除或替换运行中的 Host 文件，延迟加载的插件资源仍可读取。显式指定的外部运行入口、Launcher 或插件目录由调用方维护，不会自动复制。快照不包含用户凭据或会话数据，不自动清理；需要回收磁盘时，先停止相关 Web 与 Host，再清理不使用的构建。直接运行打包入口仍按共享生命周期复用已有后台；仓库开发命令 `npm start` 和 `npm start web` 则默认重启后台及对应界面。
 
 ## Web 数据目录
 
