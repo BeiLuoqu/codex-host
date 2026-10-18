@@ -1,5 +1,9 @@
 import type { Context } from "@deepseek-ai/cordis";
-import { IconEditOutlineRegular } from "@deepseek-ai/dsh-client-ui-primitives";
+import {
+  IconEditOutlineRegular,
+  diffTotals,
+  type DiffHunk,
+} from "@deepseek-ai/dsh-client-ui-primitives";
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ToolCallViewProps } from "../../contract/slots.ts";
 import { diffCardModel } from "../models/diff-card-model.ts";
@@ -31,9 +35,23 @@ function contentKilobytes(block: FileMutationRowProps["block"]): number | null {
   return Math.ceil(chars / KILOBYTE);
 }
 
+function fileStatsFromDiffs(diffs: DiffHunk[]): { path: string; added: number; removed: number }[] {
+  const order: string[] = [];
+  const grouped = new Map<string, DiffHunk[]>();
+  for (const hunk of diffs) {
+    const existing = grouped.get(hunk.path);
+    if (existing === undefined) {
+      order.push(hunk.path);
+      grouped.set(hunk.path, [hunk]);
+    } else existing.push(hunk);
+  }
+  return order.map((path) => ({ path, ...diffTotals(grouped.get(path) ?? []) }));
+}
+
 /**
  * Shows the path and decoded input size through preparation, execution, and
  * settlement, with the applied diff available once the call settles.
+ * Several paths collapse to a turn-level file-change summary.
  */
 export function FileMutationRow({
   toolName,
@@ -47,8 +65,16 @@ export function FileMutationRow({
 }: FileMutationRowProps) {
   const model = toolRowModel(toolName, block, cwd, home);
   const diff = diffCardModel(block);
+  const fileStats = fileStatsFromDiffs(diff?.card.diffs ?? []);
+  const multi = fileStats.length > 1;
+  const running = model.state === "running" || model.state === "preparing";
   const kilobytes = contentKilobytes(block);
   const size = kilobytes === null ? null : t("tool.preparing.content", { kilobytes });
+  const title = multi
+    ? t(running ? "tool.title.filesChanging" : "tool.title.filesEdited", {
+        count: fileStats.length,
+      })
+    : t(model.titleKey);
   return (
     <ToolRow
       useDisclosure={useDisclosure}
@@ -56,14 +82,15 @@ export function FileMutationRow({
       variant={model.variant}
       toolName={toolName}
       icon={FILE_MUTATION_ICON}
-      title={t(model.titleKey)}
-      summary={model.summary}
-      summarySuffix={size !== null && model.summary !== "" ? size : undefined}
+      title={title}
+      summary={multi ? "" : model.summary}
+      summarySuffix={multi || size === null || model.summary === "" ? undefined : size}
       output={model.output}
       errorSummary={model.errorSummary}
       diff={diff}
+      fileStats={multi ? fileStats : undefined}
       state={model.state}
-      filePath={model.filePath}
+      filePath={multi ? undefined : model.filePath}
       onOpenFile={openFile}
       inspect={inspect}
     />

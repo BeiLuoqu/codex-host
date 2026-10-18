@@ -6,6 +6,7 @@ import type {
   TurnTailOwnerProps,
 } from "../contract/slots.ts";
 import { MessageIconActions } from "./MessageIconActions.tsx";
+import { TurnChangesCard } from "./TurnChangesCard.tsx";
 import { TurnUsagePanel } from "./TurnUsagePanel.tsx";
 import { assistantText } from "./turn-assistant.ts";
 import { hasAssistantReplyContent } from "../contract/assistant-content.ts";
@@ -52,6 +53,7 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
   const [forkError, setForkError] = useState<string>();
   const detailed = usePerformanceUsage((mode) => mode) === "detailed";
   const data = node.data;
+  const nodeStore = useChat((snapshot) => snapshot.nodes);
   const hasLaterChatNode = useChat(
     (snapshot) =>
       (lastContent(snapshot, data.turn, true)?.anchorSeq ?? -1) >
@@ -95,6 +97,7 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
       data-turn-tail={data.turn}
       data-actions-reveal={endsWithResponse ? "always" : "hover"}
     >
+      <TurnChangesCard nodeStore={nodeStore} turn={data.turn} t={t} />
       {tail}
       <MessageIconActions
         text={assistantText(closing.blocks)}

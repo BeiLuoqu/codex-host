@@ -5,6 +5,7 @@ import { threadListTitle } from "./ch-thread-title.ts";
 import { RpcError } from "./transport.ts";
 import {
   TurnProjector,
+  type HostFileChange,
   type HostItem,
   type HostItemOutcome,
   type TurnOutcomeShape,
@@ -38,6 +39,41 @@ export interface ChThread {
   turns: ChTurn[];
   parentThreadId?: string | null;
   canAcceptDirectInput?: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function fileChangeKind(value: unknown): HostFileChange["kind"] {
+  const type = typeof value === "string" ? value : isRecord(value) ? value.type : undefined;
+  if (type === "add" || type === "create") return "add";
+  if (type === "delete") return "delete";
+  return "update";
+}
+
+function fileChangeDiff(value: Record<string, unknown>): string {
+  if (typeof value.diff === "string") return value.diff;
+  if (typeof value.unifiedDiff === "string") return value.unifiedDiff;
+  return "";
+}
+
+function hostFileChanges(value: unknown): HostFileChange[] {
+  if (!Array.isArray(value)) return [];
+  const changes: HostFileChange[] = [];
+  for (const candidate of value) {
+    if (!isRecord(candidate)) continue;
+    changes.push({
+      path: typeof candidate.path === "string" ? candidate.path : "",
+      kind: fileChangeKind(candidate.kind),
+      unifiedDiff: fileChangeDiff(candidate),
+    });
+  }
+  return changes;
+}
+
+function hasFileChangePath(item: Extract<HostItem, { type: "fileChange" }>): boolean {
+  return item.changes.some((change) => change.path.trim() !== "");
 }
 
 function itemOf(item: ChItem, reasoningPreviewIds: ReadonlySet<string>): HostItem | undefined {
@@ -91,13 +127,7 @@ function itemOf(item: ChItem, reasoningPreviewIds: ReadonlySet<string>): HostIte
       return {
         type: "fileChange",
         itemId,
-        changes: (Array.isArray(item.changes) ? item.changes : []).map(
-          (value: { path?: string; diff?: string; kind?: unknown }) => ({
-            path: String(value.path ?? ""),
-            kind: typeof value.kind === "string" && value.kind === "delete" ? "delete" : "update",
-            unifiedDiff: String(value.diff ?? ""),
-          }),
-        ),
+        changes: hostFileChanges(item.changes),
       };
     case "contextCompaction":
       return { type: "contextCompaction", itemId };
@@ -132,7 +162,10 @@ export class ChThreadView {
     {
       projector: TurnProjector;
       items: Map<string, HostItem>;
+      started: Set<string>;
       completed: Set<string>;
+      /** Last settled changes per fileChange item, to spot a summary that keeps growing. */
+      fileRevisions: Map<string, { json: string; count: number }>;
       done: boolean;
     }
   >();
@@ -279,7 +312,14 @@ export class ChThreadView {
           this.projectInput(input),
           typeof clientId === "string" ? clientId : undefined,
         );
-        view = { projector, items: new Map(), completed: new Set(), done: false };
+        view = {
+          projector,
+          items: new Map(),
+          started: new Set(),
+          completed: new Set(),
+          fileRevisions: new Map(),
+          done: false,
+        };
         this.turns.set(turn.id, view);
       }
       if (!complete) this.log.clock = undefined;
@@ -289,14 +329,40 @@ export class ChThreadView {
       );
       for (const item of turn.items) {
         const projected = itemOf(item, reasoningPreviewIds);
-        if (!projected || view.completed.has(item.id)) continue;
+        if (!projected) continue;
+        if (view.completed.has(item.id)) {
+          // The Host's per-Turn file summary keeps one id and grows as more files
+          // change, even after it first reports completed. Settle each growth as
+          // its own call; every one carries the cumulative changes.
+          const revision = view.fileRevisions.get(item.id);
+          if (projected.type === "fileChange" && revision !== undefined) {
+            const json = JSON.stringify(projected.changes);
+            if (json !== revision.json) {
+              const count = revision.count + 1;
+              const next = {
+                ...projected,
+                itemId: `${item.id}#${count}` as typeof projected.itemId,
+              };
+              view.projector.itemStarted(next);
+              view.projector.itemCompleted(next, { status: "succeeded" });
+              view.fileRevisions.set(item.id, { json, count });
+            }
+          }
+          continue;
+        }
         const old = view.items.get(item.id);
-        if (!old) {
+        if (!view.started.has(item.id)) {
+          view.items.set(item.id, projected);
+          // DSH diff cards read the first tool/call arguments. Start only once a
+          // path exists so an empty CH fileChange does not freeze file_path: "".
+          if (projected.type === "fileChange" && !hasFileChangePath(projected)) continue;
           view.projector.itemStarted(projected);
           if (projected.type === "commandExecution" && projected.output)
             view.projector.itemUpdated(item.id, { type: "output.append", text: projected.output });
+          view.started.add(item.id);
         } else if (
           (projected.type === "agentMessage" || projected.type === "reasoning") &&
+          old !== undefined &&
           (old.type === "agentMessage" || old.type === "reasoning") &&
           projected.text.startsWith(old.text)
         ) {
@@ -304,13 +370,18 @@ export class ChThreadView {
           if (text) view.projector.itemUpdated(item.id, { type: "text.append", text });
         } else if (
           (projected.type === "agentMessage" || projected.type === "reasoning") &&
+          old !== undefined &&
           (old.type === "agentMessage" || old.type === "reasoning")
         ) {
           throw new RpcError(
             "host/history-changed",
             "CH changed already displayed text. Reload this page to reopen its current history.",
           );
-        } else if (projected.type === "commandExecution" && old.type === "commandExecution") {
+        } else if (
+          projected.type === "commandExecution" &&
+          old !== undefined &&
+          old.type === "commandExecution"
+        ) {
           const output = projected.output ?? "";
           if (output.startsWith(old.output ?? "")) {
             const text = output.slice((old.output ?? "").length);
@@ -320,6 +391,15 @@ export class ChThreadView {
               type: "output.replace",
               output: { content: [{ type: "text", text: output }] },
             });
+        } else if (
+          projected.type === "fileChange" &&
+          old?.type === "fileChange" &&
+          JSON.stringify(old.changes) !== JSON.stringify(projected.changes)
+        ) {
+          view.projector.itemUpdated(item.id, {
+            type: "fileChanges.replace",
+            changes: projected.changes,
+          });
         }
         view.items.set(item.id, projected);
         const itemOutcome: HostItemOutcome | undefined =
@@ -334,8 +414,14 @@ export class ChThreadView {
                 ? { status: "cancelled" }
                 : undefined;
         if (itemOutcome) {
+          if (!view.started.has(item.id)) {
+            view.projector.itemStarted(projected);
+            view.started.add(item.id);
+          }
           view.projector.itemCompleted(projected, itemOutcome);
           view.completed.add(item.id);
+          if (projected.type === "fileChange")
+            view.fileRevisions.set(item.id, { json: JSON.stringify(projected.changes), count: 0 });
         }
       }
       if (complete) {

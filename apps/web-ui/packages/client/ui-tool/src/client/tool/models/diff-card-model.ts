@@ -64,7 +64,7 @@ function intendedDiff(block: ToolCallBlock): IntendedDiff | null {
     }
     return null;
   }
-  const { file_path: path } = parsed.args;
+  const path = typeof parsed.args.file_path === "string" ? parsed.args.file_path : parsed.args.path;
   if (typeof path !== "string" || path.trim() === "") return null;
   if (parsed.name === "write") {
     const { content } = parsed.args;
@@ -79,6 +79,57 @@ function intendedDiff(block: ToolCallBlock): IntendedDiff | null {
   return { tool: "edit", diff: { path, oldText: oldText || null, newText } };
 }
 
+function hunkFromFileArg(value: unknown): DiffHunk | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const path =
+    typeof record.path === "string"
+      ? record.path
+      : typeof record.file_path === "string"
+        ? record.file_path
+        : "";
+  if (path.trim() === "") return null;
+  if (
+    record.kind === "add" ||
+    (typeof record.content === "string" && record.old_string === undefined)
+  ) {
+    const newText =
+      typeof record.content === "string"
+        ? record.content
+        : typeof record.new_string === "string"
+          ? record.new_string
+          : "";
+    return { path, oldText: null, newText };
+  }
+  if (typeof record.old_string === "string" && typeof record.new_string === "string") {
+    return { path, oldText: record.old_string || null, newText: record.new_string };
+  }
+  return null;
+}
+
+function intendedHunks(
+  block: ToolCallBlock,
+): { tool: "write" | "edit" | "str_replace_editor"; diffs: DiffHunk[] } | null {
+  const parsed = parsedToolCall(block);
+  if (parsed === null) return null;
+  if (parsed.name === "str_replace_editor") {
+    const intended = intendedDiff(block);
+    return intended === null ? null : { tool: intended.tool, diffs: [intended.diff] };
+  }
+  if (parsed.name !== "edit" && parsed.name !== "write") return null;
+  if (Array.isArray(parsed.args.files) && parsed.args.files.length > 0) {
+    const diffs: DiffHunk[] = [];
+    for (const file of parsed.args.files) {
+      const hunk = hunkFromFileArg(file);
+      if (hunk === null) return null;
+      diffs.push(hunk);
+    }
+    return { tool: parsed.name, diffs };
+  }
+  const intended = intendedDiff(block);
+  return intended === null ? null : { tool: intended.tool, diffs: [intended.diff] };
+}
+
 function appliedDiffs(meta: unknown): DiffHunk[] | "empty" | null {
   if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return null;
   const diffs = (meta as Record<string, unknown>).diffs;
@@ -89,7 +140,8 @@ function appliedDiffs(meta: unknown): DiffHunk[] | "empty" | null {
 
 /**
  * Derive running diffs for root write/edit and `str_replace_editor`
- * create/replace calls, plus applied settled diffs for root write/edit calls.
+ * create/replace calls, plus applied settled diffs from result metadata.
+ * Settled `meta.diffs` render even when the call arguments were incomplete.
  * A successful write with valid empty metadata uses its argument-derived
  * whole-file diff, matching create and identical-overwrite presentation;
  * `str_replace_editor` settles through Generic because it has no result view.
@@ -98,14 +150,12 @@ function appliedDiffs(meta: unknown): DiffHunk[] | "empty" | null {
  */
 export function diffCardModel(block: ToolCallBlock): DiffCardModel | null {
   if (block.parentCallId !== undefined) return null;
-  const intended = intendedDiff(block);
-  if (intended === null) return null;
-  if (!("kind" in block)) return { card: { diffs: [intended.diff] } };
-  if (intended.tool === "str_replace_editor") return null;
+  const intended = intendedHunks(block);
+  if (!("kind" in block)) return intended === null ? null : { card: { diffs: intended.diffs } };
+  if (intended?.tool === "str_replace_editor") return null;
   if (block.isError) return null;
   const applied = appliedDiffs(block.meta);
-  if (applied === null || applied === "empty") {
-    return intended.tool === "write" ? { card: { diffs: [intended.diff] } } : null;
-  }
-  return { card: { diffs: applied } };
+  if (applied !== null && applied !== "empty") return { card: { diffs: applied } };
+  if (intended === null) return null;
+  return intended.tool === "write" ? { card: { diffs: intended.diffs } } : null;
 }

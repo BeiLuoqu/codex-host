@@ -1,0 +1,59 @@
+.root {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.anchor {
+  position: relative;
+  outline: none;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--dsw-alias-fill-secondary, rgb(128 128 128 / 14%));
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.list {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  display: none;
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: 12px;
+  corner-shape: round;
+  background: var(--dsw-alias-button-floating-fill);
+  box-shadow: var(--dsw-elevation-panel);
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  list-style: none;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.anchor:is(:hover, :focus-visible) .list {
+  display: block;
+}
+
+.file {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 360px;
+  padding: 3px 0;
+}
+
+.path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

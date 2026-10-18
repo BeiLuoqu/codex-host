@@ -1,4 +1,5 @@
 /** Register the Chat Conversation target, renderers, stats, and details surface. */
+import { ChangesDock } from "./chat/ChangesDock.tsx";
 import type {} from "@deepseek-ai/dsh-client-product-analytics/client";
 import type { Context } from "@deepseek-ai/cordis";
 import type { ImageAttachmentRef } from "@deepseek-ai/dsh-attachment";
@@ -408,6 +409,13 @@ export function apply(ctx: Context): void {
       UsagePill,
     );
   });
+
+  ctx.slots.inject("conversation.input.dock", () =>
+    ctx.slots.register(
+      { name: "conversation.input.dock", id: "file-changes", order: 5, locale: NS },
+      ChangesDock,
+    ),
+  );
 
   ctx.slots.inject("conversation.approval.detail", () =>
     ctx.slots.register({ name: "conversation.approval.detail" }, ApprovalCommand),

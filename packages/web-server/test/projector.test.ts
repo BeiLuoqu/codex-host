@@ -202,6 +202,53 @@ describe("TurnProjector", () => {
     });
   });
 
+  it("maps a multi-file Host fileChange onto the first path's DSH edit args", () => {
+    const log = newLog();
+    const projector = new TurnProjector(log, { live: false });
+    projector.begin([{ type: "text", text: "edit" }], undefined);
+    projector.itemCompleted(
+      {
+        type: "fileChange",
+        itemId: "f1",
+        changes: [
+          {
+            path: "a.ts",
+            kind: "update",
+            unifiedDiff: "--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
+          },
+          {
+            path: "b.ts",
+            kind: "update",
+            unifiedDiff: "--- a/b.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-x\n+y\n",
+          },
+        ],
+      },
+      { status: "succeeded" },
+    );
+    projector.finish({ status: "succeeded" });
+    const call = defined(log.events.find((event) => event.type === "tool/call")).data as {
+      name: string;
+      arguments: string;
+    };
+    assert.equal(call.name, "edit");
+    assert.deepEqual(JSON.parse(call.arguments), {
+      file_path: "a.ts",
+      old_string: "old",
+      new_string: "new",
+      files: [
+        { path: "a.ts", kind: "update", old_string: "old", new_string: "new" },
+        { path: "b.ts", kind: "update", old_string: "x", new_string: "y" },
+      ],
+    });
+    const result = defined(log.events.find((event) => event.type === "tool/result")).data as {
+      meta: { diffs: Array<{ path: string }> };
+    };
+    assert.deepEqual(
+      result.meta.diffs.map((diff) => diff.path),
+      ["a.ts", "b.ts"],
+    );
+  });
+
   it("maps Claude Code file tools onto DSH diff views", () => {
     const log = newLog();
     const projector = new TurnProjector(log, { live: false });

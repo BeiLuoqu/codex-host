@@ -1,0 +1,86 @@
+.card {
+  margin: 8px 0;
+  border: 1px solid var(--dsw-alias-border-l3, rgb(128 128 128 / 24%));
+  border-radius: 14px;
+  corner-shape: round;
+  background: var(--dsw-alias-fill-secondary, rgb(128 128 128 / 8%));
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  corner-shape: round;
+  background: var(--dsw-alias-fill-tertiary, rgb(128 128 128 / 16%));
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 0.15s;
+}
+
+.chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--dsw-alias-border-l3, rgb(128 128 128 / 24%));
+  list-style: none;
+}
+
+.file:first-child {
+  margin-top: 12px;
+}
+
+.fileHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.path {
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

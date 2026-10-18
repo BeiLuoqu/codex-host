@@ -14,6 +14,7 @@ import type { ChatConversationViewNode, ChatNode } from "../contract/chat-nodes.
 import type { ProcessActivitySummary, ProcessGroupData } from "../contract/process-groups.ts";
 import { hasAssistantReplyContent } from "../contract/assistant-content.ts";
 import { isVisibleChatNode } from "../contract/chat-visibility.ts";
+import { isIndependentProcessTool } from "../contract/turn-process.ts";
 import { processActivity } from "./process-activity.ts";
 
 const INDEPENDENT = new Set([
@@ -35,7 +36,7 @@ function turnOf(node: ChatNode): number | undefined {
 function independent(node: ChatNode): boolean {
   return (
     INDEPENDENT.has(node.kind) ||
-    (node.kind === "tool-call" && node.data.root.name === "compact_context")
+    (node.kind === "tool-call" && isIndependentProcessTool(node.data.root.name))
   );
 }
 

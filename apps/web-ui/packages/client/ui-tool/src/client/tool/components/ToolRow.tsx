@@ -78,6 +78,8 @@ export interface ToolRowProps {
   terminal?: TerminalCardModel | null | undefined;
   /** Diff card with inline totals colored on header hover and while expanded. */
   diff?: DiffCardModel | null | undefined;
+  /** Per-file +/- rows shown above the diff when more than one path changed. */
+  fileStats?: readonly { path: string; added: number; removed: number }[] | undefined;
   read?: ReadCardModel | null | undefined;
   /**
    * Image-card material for a call whose result is an image (derived by
@@ -158,6 +160,7 @@ export const ToolRow = memo(function ToolRow({
   errorSummary,
   terminal,
   diff,
+  fileStats,
   read,
   image,
   renderSlot,
@@ -315,12 +318,27 @@ export const ToolRow = memo(function ToolRow({
               className={css.terminalBody}
             />
           ) : diffBody !== null ? (
-            <DiffBlock
-              {...diffBody.card}
-              labels={diffLabels}
-              maxLines={CHAT_DIFF_MAX_LINES}
-              className={css.diffBody}
-            />
+            <>
+              {fileStats !== undefined && fileStats.length > 1 && (
+                <ul className={css.fileStats}>
+                  {fileStats.map((file) => (
+                    <li key={file.path} className={css.fileStat}>
+                      <span className={css.fileStatPath}>{file.path}</span>
+                      <span className={css.diffStat}>
+                        <span className={css.diffAdded}>{`+${file.added}`}</span>{" "}
+                        <span className={css.diffRemoved}>{`-${file.removed}`}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <DiffBlock
+                {...diffBody.card}
+                labels={diffLabels}
+                maxLines={CHAT_DIFF_MAX_LINES}
+                className={css.diffBody}
+              />
+            </>
           ) : readBody !== null ? (
             <ReadBlock
               {...readBody}
@@ -423,6 +441,7 @@ export const ToolRow = memo(function ToolRow({
       terminalBody,
       terminalLabels,
       diffBody,
+      fileStats,
       diffLabels,
       readBody,
       readLabels,

@@ -13,7 +13,11 @@ import type {
 } from "../contract/slots.ts";
 import type { ChatNode } from "../contract/chat-nodes.ts";
 import type { ChatNodeStore } from "../contract/snapshot.ts";
-import { TURN_PROCESS_INDEPENDENT_KINDS, turnProcessAlwaysOpen } from "../contract/turn-process.ts";
+import {
+  TURN_PROCESS_INDEPENDENT_KINDS,
+  isIndependentProcessTool,
+  turnProcessAlwaysOpen,
+} from "../contract/turn-process.ts";
 import { storedTurnProcessEntry } from "../stores.ts";
 import { useSearchableHidden } from "./searchable-hidden.ts";
 import css from "./ChatView.module.css";
@@ -47,9 +51,9 @@ function turnOf(node: ChatNode | undefined): number | undefined {
   return location?.kind === "turn" || location?.kind === "step" ? location.turn.turn : undefined;
 }
 
-/** Compaction is a user-visible context boundary, not ordinary folded tool work. */
-function isContextCompaction(node: ChatNode | undefined): boolean {
-  return node?.kind === "tool-call" && node.data.root.name === "compact_context";
+/** File diffs and compaction stay visible; ordinary tools fold into work details. */
+function isIndependentProcessToolNode(node: ChatNode | undefined): boolean {
+  return node?.kind === "tool-call" && isIndependentProcessTool(node.data.root.name);
 }
 
 /**
@@ -112,7 +116,7 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
     routedNode !== undefined &&
     processWindowReady &&
     !TURN_PROCESS_INDEPENDENT_KINDS.has(routedNode.kind) &&
-    !isContextCompaction(routedNode) &&
+    !isIndependentProcessToolNode(routedNode) &&
     routedNode.anchorSeq >= processSpec.processStartSeq &&
     (liveProcess ||
       processSpec.answerAnchorSeq === null ||

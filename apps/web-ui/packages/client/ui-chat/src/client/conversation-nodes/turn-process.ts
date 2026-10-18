@@ -15,6 +15,7 @@ import type {
   FinalAssistantChatData,
 } from "../contract/chat-nodes.ts";
 import {
+  isIndependentProcessTool,
   isSubagentDelegationTool,
   sameTurnProcessSpec,
   type TurnProcessSpec,
@@ -91,8 +92,8 @@ type ProcessEvidence =
   | { readonly kind: "assistant"; readonly seq: number; readonly step: number }
   | { readonly kind: "other"; readonly seq: number };
 
-function isContextCompactionEvent(event: ConversationEvent, calls: ReadonlySet<string>): boolean {
-  if (event.type === "tool/call") return event.data.name === "compact_context";
+function isIndependentToolEvent(event: ConversationEvent, calls: ReadonlySet<string>): boolean {
+  if (event.type === "tool/call") return isIndependentProcessTool(event.data.name);
   return event.type === "tool/result" && calls.has(String(event.data.message.source.callId));
 }
 
@@ -110,7 +111,7 @@ function processEvidence(
     return { kind: "assistant", seq: event.seq, step: event.data.step };
   }
   if (
-    !isContextCompactionEvent(event, contextCompactionCalls) &&
+    !isIndependentToolEvent(event, contextCompactionCalls) &&
     (event.type === "tool/call" ||
       (event.type === "tool/result" && event.surfaceOp === "append") ||
       event.type === "llm/retry")
@@ -220,7 +221,7 @@ function updateProcessState(state: TurnProcessState, event: ConversationEvent): 
     current = { ...current, messageCountByStep, messageCount: current.messageCount + 1 };
   }
   if (event.type === "tool/call") {
-    if (event.data.name === "compact_context") {
+    if (isIndependentProcessTool(event.data.name)) {
       const contextCompactionCalls = new Set(current.contextCompactionCalls);
       contextCompactionCalls.add(String(event.data.callId));
       current = { ...current, contextCompactionCalls };

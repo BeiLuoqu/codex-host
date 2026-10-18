@@ -12,6 +12,7 @@ import { isAppendSurfaceEvent } from "@deepseek-ai/dsh-session/surface";
 import type {} from "@deepseek-ai/dsh-tools/types";
 import { PartialArguments } from "@deepseek-ai/dsh-util-values";
 import type { ChatNode, ToolChatData } from "../contract/chat-nodes.ts";
+import { isIndependentProcessTool } from "../contract/turn-process.ts";
 import { CHAT_SYNTHETIC_SEQ_OFFSETS, chatNode, contextLocation } from "./common.ts";
 
 declare module "../contract/chat-nodes.ts" {
@@ -402,11 +403,10 @@ export const toolDefinition: ConversationNodeDefinition<ToolState> = {
     const preparing = !("kind" in projected) && projected.phase === "preparing";
     const visibility = preparing && interruptedAt !== undefined ? "hidden" : "visible";
     const eventLocation = contextLocation(context);
-    // Context compaction is a Turn-level boundary. Keeping its standard Tool
-    // transport identity while lifting it out of the Step prevents completed
-    // compaction from disappearing inside ordinary folded work details.
+    // File diffs and compaction keep Tool transport identity while sitting at
+    // Turn scope, so a settled Turn does not hide them inside work details.
     const location =
-      projected.name === "compact_context" && eventLocation.kind === "step"
+      isIndependentProcessTool(projected.name) && eventLocation.kind === "step"
         ? { kind: "turn" as const, turn: eventLocation.turn }
         : eventLocation;
     const data =

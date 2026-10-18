@@ -64,6 +64,15 @@ export function isSubagentDelegationTool(name: string): boolean {
 }
 
 /**
+ * Context compaction stays visible after a Turn settles; file edits surface
+ * through the Turn's changes card instead. Ordinary tools fold behind the
+ * duration control.
+ */
+export function isIndependentProcessTool(name: string): boolean {
+  return name === "compact_context";
+}
+
+/**
  * Keep live, stopped, and failed Turns open.
  * @param node - Node carrying the owning Turn.
  * @returns whether whole-Turn collapse is unavailable.

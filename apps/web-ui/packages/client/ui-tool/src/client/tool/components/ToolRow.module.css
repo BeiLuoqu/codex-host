@@ -76,6 +76,37 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+.fileStats {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.fileStat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+.fileStatPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileStat .diffAdded {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.fileStat .diffRemoved {
+  color: var(--dsw-alias-state-error-primary);
+}
+
 /* File-tool path: same type as .summary, with a persistent link affordance.
    Dotted dimmed underline: visible enough to say "clickable", light enough
    that a long path doesn't read as one heavy rule under the row. Shrink-to-fit

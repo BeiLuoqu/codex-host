@@ -245,6 +245,36 @@ function editMeta(name: string, args: unknown): unknown {
 }
 
 /** Name and argument JSON a DSH tool view recognizes for one Harness Item. */
+function fileChangeEntry(change: HostFileChange): Record<string, string> {
+  const texts = diffTexts(change);
+  return {
+    path: change.path,
+    kind: change.kind,
+    old_string: texts.oldText ?? "",
+    new_string: texts.newText,
+    ...(change.kind === "add" ? { content: texts.newText } : {}),
+  };
+}
+
+function fileChangeCall(changes: HostFileChange[]): { name: string; args: unknown } {
+  const usable = changes.filter((change) => change.path.trim() !== "");
+  const first = usable[0];
+  if (first === undefined) return { name: "edit", args: { file_path: "" } };
+  const files = usable.map(fileChangeEntry);
+  const texts = diffTexts(first);
+  return first.kind === "add"
+    ? { name: "write", args: { file_path: first.path, content: texts.newText, files } }
+    : {
+        name: "edit",
+        args: {
+          file_path: first.path,
+          old_string: texts.oldText ?? "",
+          new_string: texts.newText,
+          files,
+        },
+      };
+}
+
 function toolCallOf(item: HostItem, cwd: string | undefined): { name: string; args: unknown } {
   switch (item.type) {
     case "commandExecution":
@@ -255,29 +285,8 @@ function toolCallOf(item: HostItem, cwd: string | undefined): { name: string; ar
           ...(item.cwd !== undefined && item.cwd !== cwd ? { workdir: item.cwd } : {}),
         },
       };
-    case "fileChange": {
-      const first = item.changes[0];
-      if (item.changes.length === 1 && first !== undefined) {
-        const texts = diffTexts(first);
-        return first.kind === "add"
-          ? { name: "write", args: { file_path: first.path, content: texts.newText } }
-          : {
-              name: "edit",
-              args: {
-                file_path: first.path,
-                old_string: texts.oldText ?? "",
-                new_string: texts.newText,
-              },
-            };
-      }
-      return {
-        name: "edit",
-        args: {
-          file_path: first?.path ?? "",
-          changes: item.changes.map((change) => ({ path: change.path, kind: change.kind })),
-        },
-      };
-    }
+    case "fileChange":
+      return fileChangeCall(item.changes);
     case "toolExecution":
       return item.namespace === undefined
         ? normalizeTool(item.toolName, item.arguments ?? {})
@@ -644,6 +653,16 @@ export class TurnProjector {
       this.options.onToolOutput?.(tool.callId, tool.output);
     } else if (update.type === "fileChanges.replace" && tool.item.type === "fileChange") {
       tool.item = { ...tool.item, changes: update.changes };
+      const call = toolCallOf(tool.item, this.options.cwd);
+      tool.name = call.name;
+      tool.args = call.args;
+      this.log.append("tool/call", {
+        turn: this.turn,
+        step: this.step,
+        callId: tool.callId,
+        name: call.name,
+        arguments: JSON.stringify(call.args),
+      });
     } else if (update.type === "subagents.replace" && tool.item.type === "subagentDelegation") {
       tool.item = { ...tool.item, subagents: update.subagents };
     }
