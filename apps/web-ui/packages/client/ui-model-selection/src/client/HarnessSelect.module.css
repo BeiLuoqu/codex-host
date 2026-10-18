@@ -10,18 +10,20 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  padding: 4px;
+  width: 30px;
+  height: 28px;
+  padding: 0;
   border: none;
-  border-radius: var(--dsw-radius-md);
+  border-radius: 6px;
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
+  touch-action: manipulation;
 }
 
-.trigger:hover:not(:disabled) {
-  background: var(--dsw-alias-bg-module-platform);
+.trigger:hover:not(:disabled),
+.trigger[aria-expanded="true"] {
+  background: var(--dsw-alias-interactive-bg-active);
 }
 
 .trigger:focus-visible {
@@ -44,28 +46,56 @@
 }
 
 .menu[role="menu"] {
-  width: 248px;
-  min-width: min(220px, calc(100vw - 24px));
+  width: 224px;
+  min-width: min(224px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
-  max-height: min(520px, calc(100dvh - 48px));
+  max-height: min(420px, calc(100dvh - 48px));
+  border-radius: 6px;
 }
 
 .menu [role="menuitem"] {
-  min-height: 44px;
-  gap: 10px;
+  box-sizing: border-box;
+  min-height: 36px;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font:
+    500 13px/20px system-ui,
+    sans-serif;
+  letter-spacing: 0;
+  touch-action: manipulation;
 }
 
-.menu [role="menuitem"]:has([data-current]) {
-  background: var(--dsw-alias-interactive-bg-hover);
+.menu [role="menuitem"] > span:first-child,
+.menu [role="menuitem"] > span:first-child svg {
+  width: 20px;
+  height: 20px;
+}
+
+.menu [role="menuitem"]:has([data-current]),
+.menu [role="menuitem"]:has([data-current]):hover:not(:disabled),
+.menu [role="menuitem"]:has([data-current]):focus-visible {
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+.menu [role="menuitem"]:focus-visible:not(:disabled) {
+  outline: 2px solid var(--dsw-focus-ring-color);
+  outline-offset: -2px;
 }
 
 .menu [role="presentation"] {
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 600px), (pointer: coarse) {
   .trigger {
     width: 40px;
     height: 44px;
+  }
+
+  .menu [role="menuitem"] {
+    min-height: 44px;
+    padding-block: 10px;
   }
 }
