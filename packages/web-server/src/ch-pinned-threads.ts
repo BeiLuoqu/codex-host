@@ -4,6 +4,8 @@ import type { Workspaces } from "./workspaces.ts";
 
 export class ChPinnedThreads {
   private pending: Promise<unknown> = Promise.resolve();
+  private refreshing: Promise<string[]> | undefined;
+  private closed = false;
 
   constructor(
     private readonly host: ChHostClient,
@@ -16,12 +18,25 @@ export class ChPinnedThreads {
 
   sync(change?: ChPinChange): Promise<string[]> {
     const next = this.pending.then(async () => {
+      if (this.closed) return [];
       const ids = (await this.host.pins(change)).filter(this.visible);
-      this.workspaces.setReferencePins(ids);
+      if (!this.closed) this.workspaces.setReferencePins(ids);
       return ids;
     });
     // Failure preserves the previous projection but cannot poison subsequent reads/commands.
     this.pending = next.catch(() => undefined);
     return next;
+  }
+
+  /** Share background reads so a slow Desktop cannot accumulate a polling queue. */
+  refresh(): Promise<string[]> {
+    this.refreshing ??= this.sync().finally(() => {
+      this.refreshing = undefined;
+    });
+    return this.refreshing;
+  }
+
+  close(): void {
+    this.closed = true;
   }
 }

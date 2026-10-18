@@ -229,7 +229,7 @@ export class ChSessions {
     this.workspaces.setReferenceArchives([...archivedIds].filter((id) => ownership.has(id)));
     await this.publishCatalogChanges();
     // Native pins are optional and cannot delay publishing the confirmed catalog.
-    await this.pins.sync().catch(() => undefined);
+    void this.pins.refresh().catch(() => undefined);
     this.catalogReadAt = Date.now();
   }
   private async syncWorkspace(): Promise<void> {
@@ -515,8 +515,11 @@ export class ChSessions {
       projections: { kind: "cached", asOfSeq: 0, values },
     };
   }
-  private async draftSummary(draft: Draft) {
-    const inspection = await this.catalog.inspect(draft.selection.provider, draft.cwd);
+  private async draftSummary(draft: Draft, includeControls = true) {
+    // Catalog rows need only saved draft metadata; controls load when the draft is opened.
+    const inspection = includeControls
+      ? await this.catalog.inspect(draft.selection.provider, draft.cwd)
+      : undefined;
     return {
       sessionId: draft.id,
       cwd: draft.cwd,
@@ -528,7 +531,7 @@ export class ChSessions {
         kind: "cached",
         asOfSeq: 0,
         values: {
-          ...defaultProjections(),
+          ...(includeControls ? defaultProjections() : {}),
           ...(this.images
             ? {
                 attachmentInput: this.files ? WEB_FILE_INPUT : WEB_IMAGE_INPUT,
@@ -540,18 +543,22 @@ export class ChSessions {
             id: draft.selection.provider,
             name: await this.catalog.name(draft.selection.provider),
           },
-          nativePermissions: nativePermissionView(
-            draft.selection.provider,
-            inspection as Inspection,
-            false,
-          ),
-          permissions: {
-            currentValue:
-              draft.permissionModeId ??
-              (inspection.status === "ready"
-                ? (inspection.permissionModes?.defaultModeId ?? "")
-                : ""),
-          },
+          ...(inspection
+            ? {
+                nativePermissions: nativePermissionView(
+                  draft.selection.provider,
+                  inspection as Inspection,
+                  false,
+                ),
+                permissions: {
+                  currentValue:
+                    draft.permissionModeId ??
+                    (inspection.status === "ready"
+                      ? (inspection.permissionModes?.defaultModeId ?? "")
+                      : ""),
+                },
+              }
+            : {}),
         },
       },
     };
@@ -754,7 +761,7 @@ export class ChSessions {
           ...(await Promise.all(
             [...this.drafts.values()]
               .filter((d) => !d.canonicalId)
-              .map((d) => this.draftSummary(d)),
+              .map((d) => this.draftSummary(d, false)),
           )),
         ],
       };
@@ -1133,8 +1140,8 @@ export class ChSessions {
         void this.refresh().catch(() => undefined);
       } else {
         this.refreshing = this.syncWorkspace()
-          .then(async () => {
-            if (!this.closed) await this.pins.sync().catch(() => undefined);
+          .then(() => {
+            if (!this.closed) void this.pins.refresh().catch(() => undefined);
           })
           .finally(() => {
             this.refreshing = undefined;
@@ -1241,6 +1248,7 @@ export class ChSessions {
   }
   async close(): Promise<void> {
     this.closed = true;
+    this.pins.close();
     this.realtime?.close();
     this.interactions?.clear();
     clearInterval(this.timer);

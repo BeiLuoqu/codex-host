@@ -1797,6 +1797,11 @@ export function WorkspaceBrowser({
             composingRef.current = true;
           }}
           onCompositionEnd={() => {
+        {wide && list.phase === "pending" && (
+          <div className={css.empty} role="status">
+            {t("sessions.loading")}
+          </div>
+        )}
             composingRef.current = false;
           }}
           onKeyDown={(e) => {
