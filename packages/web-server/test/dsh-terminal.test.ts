@@ -31,7 +31,7 @@ it("serves Session terminals through the DSH terminal controller", async (t) => 
         "--adapters",
         "test/fake-harness",
       ],
-      { authenticated: true },
+      { authenticated: true, environment: { ...process.env, SHELL: "/bin/sh" } },
     ),
   );
   const token = url.searchParams.get("token");
