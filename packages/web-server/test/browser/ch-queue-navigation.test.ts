@@ -80,7 +80,7 @@ for (const leaveWhileSending of [false, true])
       await folder.waitFor();
       if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
       const open = async (title: string) => {
-        await page.getByRole("treeitem").filter({ hasText: title }).click();
+        await page.locator('[data-row-key^="session:"]').filter({ hasText: title }).click();
         await page.getByText("existing CH answer", { exact: true }).waitFor();
       };
       const pending = page

@@ -10,7 +10,13 @@ import {
 } from "@codexhost/shared-contracts";
 import type { ChHostClient } from "./ch-host-client.ts";
 import { ChHarnessCatalog, type ModelSelection } from "./ch-harness-catalog.ts";
-import type { SessionNotification } from "./sessions.ts";
+/** Out-of-band Web Push notification for one Session. */
+export interface SessionNotification {
+  kind: "turn" | "approval" | "question" | "error";
+  sessionId: string;
+  title: string;
+  body: string;
+}
 import type { ChThread } from "./ch-thread-view.ts";
 import type { Inspection } from "./harnesses.ts";
 import { nativePermissionView } from "./session-presentation.ts";
@@ -86,8 +92,9 @@ export class ChSessions {
     private readonly files?: WebFiles,
     displayEntries?: () => Promise<HarnessDisplayEntries>,
     private readonly preferences?: WebHarnessPreferences,
+    harnesses?: ReadonlySet<string>,
   ) {
-    this.catalog = new ChHarnessCatalog(host, displayEntries, preferences);
+    this.catalog = new ChHarnessCatalog(host, displayEntries, preferences, harnesses);
     this.attachments = images ? new ChAttachments(images, files) : undefined;
     this.fileInputs =
       files && images

@@ -73,6 +73,8 @@ Pi、OMP、OpenCode v2、Claude Code、DeepSeek Harness（dsh）、CodeBuddy、W
 
 会话用量查询可以附带 Adapter 的账号额度缓存，但它不是该历史 Thread 实际使用的 Account/Billing Source 绑定。插件通过正式可选 `credits()` / `refreshCredits()` 提供读取与刷新；Host 校验快照并隔离失败，用 `accountCreditsSupported` 声明是否存在这项能力，客户端不维护 Harness 白名单。设置页的 `inspectAccount(s)` 仍执行新鲜账号查询，两者不互相代替。
 
+Web 的 Codex CLI 插件通过原生 `account/read` 确认当前 ChatGPT 身份，再读取 `account/rateLimits/read`，复用输入框下方的账号额度百分比和详情浮窗。5 小时、7 天以及模型独立窗口按原生返回展示，缺少的窗口不补零；API Key、自定义 Provider 无 OpenAI 认证要求或查询失败时不显示套餐额度。额度查询不创建 Thread 或 Model Turn，不参与模型检查或 Session 创建前置校验。后台查询合并并限制为每 30 秒最多一次，缓存 60 秒后失效；账号设置页显式查询读取新鲜结果。
+
 每个额度窗口可提供独立 `periodType` 和稳定 `scope`。客户端用结构化周期/范围分组、本地化，不解析英文产品名。旧插件缺少字段时保留原文，不推断未声明的周期。原生百分比、数量、零上限、重置时间及会话计量算法不变。详细兼容边界见[插件运行时](../architecture/harness-plugin-runtime.md#插件拥有的展示元数据)。
 
 ## 价格表

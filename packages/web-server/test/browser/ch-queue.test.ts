@@ -75,7 +75,10 @@ for (const scenario of ["delete", "reconnect", "auto-send"] as const)
       const folder = page.getByRole("treeitem").filter({ hasText: /^queue-project$/u });
       await folder.waitFor();
       if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-      await page.getByRole("treeitem").filter({ hasText: "Queue synchronization" }).click();
+      await page
+        .locator('[data-row-key^="session:"]')
+        .filter({ hasText: "Queue synchronization" })
+        .click();
       await page.getByText("existing CH answer", { exact: true }).waitFor();
       // Keep an unsent draft on the server: control-stream reconnects must
       // prepare its metadata without allowing live updates before the baseline.
@@ -83,7 +86,10 @@ for (const scenario of ["delete", "reconnect", "auto-send"] as const)
         .getByRole("button", { name: "New session", exact: true })
         .filter({ hasText: "New Session" })
         .click();
-      await page.getByRole("treeitem").filter({ hasText: "Queue synchronization" }).click();
+      await page
+        .locator('[data-row-key^="session:"]')
+        .filter({ hasText: "Queue synchronization" })
+        .click();
       await page.getByText("existing CH answer", { exact: true }).waitFor();
       const prompt = page
         .locator("[data-queue-dock]")

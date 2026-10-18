@@ -37,7 +37,6 @@ function standardDecoratorPlugin() {
     },
   };
 }
-
 const include = [
   "packages/**/test/**/*.test.ts",
   "tests/integration/**/*.test.ts",

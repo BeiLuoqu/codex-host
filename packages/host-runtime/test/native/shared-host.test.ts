@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, writeFile, readFile, rm, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -146,26 +146,6 @@ for (const first of ["Web", "Desktop"])
         return client;
       };
       const web = await connect();
-      // Configure the isolated source without starting native Codex or creating ownership locks.
-      const isolatedCommand = path.join(root, "isolated-native-agent");
-      const isolatedHome = path.join(root, "isolated-codex-home");
-      const isolatedConfiguration = {
-        home: isolatedHome,
-        command: isolatedCommand,
-        pluginRoots: [path.join(repository, "packages/adapters")],
-      };
-      let isolatedScope: string | undefined;
-      if (process.platform !== "win32") {
-        await writeFile(isolatedCommand, `#!${process.execPath}\nprocess.exit(0);\n`);
-        await chmod(isolatedCommand, 0o700);
-        const configured = await web.configureWebCodex(isolatedConfiguration);
-        isolatedScope = configured.scope;
-        for (const file of [
-          path.join(isolatedHome, ".codexhost-source-owner-v1.lock"),
-          path.join(data, "web-codex/source-owner-v1.lock"),
-        ])
-          await assert.rejects(readFile(file), { code: "ENOENT" });
-      }
       const desktop = await connectLocalSharedHost({ launcher, runtime, dataDirectory: data });
       t.after(() => desktop.close());
       const id =
@@ -259,11 +239,6 @@ for (const first of ["Web", "Desktop"])
       await assert.rejects(readFile(path.join(data, "shared-host-exit-v1.json")), {
         code: "ENOENT",
       });
-      if (isolatedScope) {
-        const configuration = await recovered.configureWebCodex(isolatedConfiguration);
-        assert.equal(configuration.scope, isolatedScope);
-        assert.deepEqual(configuration.sessionIds, []);
-      }
       const list = await recovered.request<{ data: Array<{ id: string }> }>("thread/list", {});
       assert.equal(list.data.filter((thread) => thread.id === id).length, 1);
       assert.ok(

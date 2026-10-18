@@ -47,13 +47,27 @@ describe("Harness plugin public contracts", () => {
     expect(harnessPluginRouteSchema.safeParse({ harnessId: "codex" }).success).toBe(false);
   });
 
-  it("keeps Web Codex and external runtime scopes disjoint", () => {
-    for (const id of ["codex-usage", "sample-agent"]) {
+  it("keeps the official Codex identity outside the external runtime scope", () => {
+    for (const id of ["codex-usage", "codex-cli", "sample-agent"])
       expect(isHarnessPluginInScope(id, "external")).toBe(true);
-      expect(isHarnessPluginInScope(id, "web-codex")).toBe(false);
-    }
     expect(isHarnessPluginInScope("codex", "external")).toBe(false);
-    expect(isHarnessPluginInScope("codex", "web-codex")).toBe(true);
+  });
+
+  it("keeps declared presentation surfaces optional and rejects an invalid declaration", () => {
+    expect(harnessPluginManifestSchema.parse(manifest)).not.toHaveProperty("surfaces");
+    expect(harnessPluginManifestSchema.parse({ ...manifest, surfaces: ["web"] }).surfaces).toEqual([
+      "web",
+    ]);
+    for (const surfaces of [[], ["mobile"], ["desktop", "mobile"], ["desktop", "desktop"]]) {
+      expect(harnessPluginManifestSchema.safeParse({ ...manifest, surfaces }).success).toBe(false);
+    }
+    expect(
+      harnessPluginDescriptorSchema.parse({
+        id: "sample-agent",
+        name: "Sample Agent",
+        version: "1.0.0",
+      }),
+    ).not.toHaveProperty("surfaces");
   });
 
   it.each(["../agent", "UPPER", "", "a/b", "a..b"])("rejects identity %j", (id) => {

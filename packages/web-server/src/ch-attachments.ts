@@ -132,17 +132,43 @@ export class ChAttachments {
    * No browser path, label, metadata or guessed ID can extend that authority.
    */
   read(view: ChThreadView, attachmentId: string): { attachment: ImageRef; data: string } {
-    const message = this.message(view.log.events, attachmentId);
+    return this.readInputs(
+      view.thread.id,
+      view.thread.turns.map((turn) =>
+        turn.items
+          .filter((item) => item.type === "userMessage")
+          .flatMap((item) => (Array.isArray(item.content) ? item.content : [])),
+      ),
+      this.message(view.log.events, attachmentId),
+      attachmentId,
+    );
+  }
+
+  readEvents(threadId: string, events: readonly WireEvent[], attachmentId: string) {
+    const inputs = events
+      .filter((event) => event.type === "user/message")
+      .map((event) => (event.data as { content: unknown[] }).content);
+    const projected = inputs.map((content) => ({
+      type: "user/message",
+      data: { content: this.project(threadId, content) },
+    }));
+    const message = this.message(projected, attachmentId);
+    return message ? this.readInputs(threadId, inputs, message, attachmentId) : undefined;
+  }
+
+  private readInputs(
+    threadId: string,
+    inputs: readonly unknown[][],
+    message: ImageRef[] | undefined,
+    attachmentId: string,
+  ): { attachment: ImageRef; data: string } {
     const expected = message?.find((ref) => ref.attachmentId === attachmentId);
     if (!expected || expected.unavailable) return unavailable();
     let source: NativeImage | undefined;
-    for (const turn of view.thread.turns) {
-      const input = turn.items
-        .filter((item) => item.type === "userMessage")
-        .flatMap((item) => (Array.isArray(item.content) ? item.content : []));
+    for (const input of inputs) {
       source = nativeUserInput(input).find(
         (part): part is NativeImage =>
-          part.type === "nativeImage" && this.id(view.thread.id, part.source) === attachmentId,
+          part.type === "nativeImage" && this.id(threadId, part.source) === attachmentId,
       );
       if (source) break;
     }
@@ -163,7 +189,10 @@ export class ChAttachments {
     }
   }
 
-  private message(events: readonly WireEvent[], id: string): ImageRef[] | undefined {
+  private message(
+    events: readonly Pick<WireEvent, "type" | "data">[],
+    id: string,
+  ): ImageRef[] | undefined {
     for (const event of events) {
       if (event.type !== "user/message") continue;
       const data = event.data as { content?: Array<{ type?: string; attachment?: ImageRef }> };

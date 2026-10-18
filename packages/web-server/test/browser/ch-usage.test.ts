@@ -88,7 +88,7 @@ for (const scenario of cases) {
       const folder = page.getByRole("treeitem").filter({ hasText: /^cache-project$/u });
       await folder.waitFor();
       if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-      await page.getByRole("treeitem").filter({ hasText: "Cache example" }).click();
+      await page.locator('[data-row-key^="session:"]').filter({ hasText: "Cache example" }).click();
       await page.getByText("existing CH answer", { exact: true }).waitFor();
       const hostUsage = page.locator('[data-composer-stat="codexhost-usage"] button');
       await hostUsage.waitFor();

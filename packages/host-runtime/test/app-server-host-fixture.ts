@@ -273,6 +273,8 @@ export function createFixture(
     pluginDirectory?: string;
     codexUsage?: boolean;
     externalAdapters?: ReadonlyMap<ExternalHarnessId, FakeHarnessAdapter>;
+    /** Adapters without Fake Session state, e.g. a real plugin used by an integration test. */
+    additionalAdapters?: ReadonlyMap<ExternalHarnessId, HarnessAdapter>;
     mappingStore?: AppServerHostOptions["mappingStore"];
     mappingStoreDirectory?: string;
     closeMappingStoreOnExit?: boolean;
@@ -340,8 +342,11 @@ export function createFixture(
       ...(options.environment ?? {}),
     },
     ...(pluginDirectory ? { pluginRoots: [pluginDirectory] } : {}),
-    externalAdapters:
-      options.externalAdapters ?? new Map<ExternalHarnessId, HarnessAdapter>([["pi", adapter]]),
+    externalAdapters: new Map<ExternalHarnessId, HarnessAdapter>([
+      ...(options.externalAdapters ??
+        new Map<ExternalHarnessId, FakeHarnessAdapter>([["pi", adapter]])),
+      ...(options.additionalAdapters ?? new Map<ExternalHarnessId, HarnessAdapter>()),
+    ]),
     spawnOfficial: spawnOfficial as unknown as typeof spawn,
     // The fake process exits synchronously on kill; real-time grace only slows tests.
     officialCloseTimeoutMs: 50,

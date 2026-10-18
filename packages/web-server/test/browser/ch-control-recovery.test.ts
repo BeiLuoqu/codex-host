@@ -77,7 +77,10 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^control-project$/u });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Control recovery" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "Control recovery" })
+      .click();
     await page.getByText("Queued before disconnect", { exact: true }).waitFor();
     const meter = page.locator('[data-composer-stat="codexhost-usage"] button');
     await meter.filter({ hasText: "CH 94.3%" }).waitFor();

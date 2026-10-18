@@ -87,21 +87,21 @@ it("accepts explicit Harness ids without relaxing isolation", () => {
   assert.equal(launch.args.includes("--import-recent"), false);
 });
 
-it("allows explicit Codex selection and CLI/home configuration without inheriting Desktop routing", () => {
+it("selects Codex CLI like every other external Harness without inheriting Desktop routing", () => {
   const launch = previewLaunch(
     "/packed",
-    { harness: "codex,claude-code", "codex-command": "/native/codex", "codex-home": "/web/home" },
+    { harness: "codex-cli,claude-code" },
     { CODEXHOST_CODEX_COMMAND: "/unsafe/codex", CODEX_CLI_PATH: "/unsafe/shim" },
   );
-  assert.equal(launch.args[launch.args.indexOf("--harness") + 1], "codex,claude-code");
-  assert.equal(launch.args[launch.args.indexOf("--codex-command") + 1], "/native/codex");
-  assert.equal(launch.args[launch.args.indexOf("--codex-home") + 1], "/web/home");
+  assert.equal(launch.args[launch.args.indexOf("--harness") + 1], "codex-cli,claude-code");
+  assert.equal(launch.args.includes("--codex-command"), false);
+  assert.equal(launch.args.includes("--codex-home"), false);
   assert.deepEqual(launch.env, {});
 });
 
 it("allows Pi like every other session Harness", () => {
-  const { args } = previewLaunch("/packed", { harness: "pi,codex" }, {});
-  assert.equal(args[args.indexOf("--harness") + 1], "pi,codex");
+  const { args } = previewLaunch("/packed", { harness: "pi,codex-cli" }, {});
+  assert.equal(args[args.indexOf("--harness") + 1], "pi,codex-cli");
 });
 
 it("rejects empty ids and unsafe selection syntax before spawning", () => {

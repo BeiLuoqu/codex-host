@@ -11,10 +11,13 @@ import type {
 import {
   HARNESS_PLUGIN_API_VERSION,
   HARNESS_PLUGIN_LIMIT,
+  HARNESS_PLUGIN_SURFACES,
   harnessPluginDescriptorSchema,
   isHarnessPluginInScope,
+  type HarnessId,
   type HarnessPluginDescriptor,
   type HarnessPluginScope,
+  type HarnessPluginSurface,
 } from "@codexhost/shared-contracts";
 
 import {
@@ -69,6 +72,12 @@ export interface LoadHarnessPluginsOptions {
    * plugins start. Ownership/cleanup remains with the returned registry.
    */
   onUsageAdaptersLoaded?: (adapters: ReadonlyMap<string, HarnessUsageStatisticsAdapter>) => void;
+  /** Declared presentation surfaces, published from manifests before any import or warmup.
+   * Includes plugins this Host does not mount, so stored Threads can be filtered at once.
+   */
+  onSurfacesDeclared?: (
+    surfaces: ReadonlyMap<HarnessId, ReadonlySet<HarnessPluginSurface>>,
+  ) => void;
   diagnose?: (diagnostic: HarnessPluginDiagnostic) => void;
 }
 
@@ -95,7 +104,7 @@ function isAdapter(value: unknown): value is HarnessAdapter {
   return (
     hasValidSessionUsage(value) &&
     ["inspect", "open", "close"].every((key) => typeof Reflect.get(value, key) === "function") &&
-    ["credits", "refreshCredits", "readHistory"].every(
+    ["credits", "refreshCredits"].every(
       (key) =>
         Reflect.get(value, key) === undefined || typeof Reflect.get(value, key) === "function",
     )
@@ -278,8 +287,10 @@ export async function loadHarnessPlugins(
     const { manifest } = candidate;
     // Runtime ownership is checked before imports, factory calls, or warmup. An
     // enabled.json entry or onlyIds selection cannot widen the owner's scope.
-    if (!isHarnessPluginInScope(manifest.id, scope, manifest.kind)) continue;
+    if (!isHarnessPluginInScope(manifest.id, scope)) continue;
     if (!candidate.enabled || (options.onlyIds && !options.onlyIds.has(manifest.id))) continue;
+    if (counts.get(manifest.id) === 1 && !options.reservedIds?.has(manifest.id))
+      registry.declareSurfaces(manifest.id, manifest.surfaces ?? HARNESS_PLUGIN_SURFACES);
     if (options.sessionPlugins === false && manifest.kind !== "usage") continue;
     if (counts.get(manifest.id) !== 1 || options.reservedIds?.has(manifest.id)) {
       if (!conflicted.has(manifest.id)) diagnose({ id: manifest.id, code: "duplicateId" });
@@ -287,6 +298,11 @@ export async function loadHarnessPlugins(
       continue;
     }
     pending.push(candidate);
+  }
+  try {
+    options.onSurfacesDeclared?.(registry.surfaces());
+  } catch {
+    /* An observer cannot change loading. */
   }
   // Each plugin gets a full import/factory budget. Four workers overlap a slow
   // neighbor without shrinking later plugins to whatever time remains.
@@ -296,7 +312,11 @@ export async function loadHarnessPlugins(
   let batch = pending;
   const loaded = new Map<
     Candidate,
-    { descriptor: HarnessPluginDescriptor; adapter: PluginAdapter }
+    {
+      descriptor: HarnessPluginDescriptor;
+      adapter: PluginAdapter;
+      surfaces?: readonly HarnessPluginSurface[];
+    }
   >();
   const worker = async (): Promise<void> => {
     for (;;) {
@@ -348,7 +368,11 @@ export async function loadHarnessPlugins(
         }
       }
       if (failure) diagnose({ id: manifest.id, code: failure });
-      loaded.set(candidate, { descriptor, adapter });
+      loaded.set(candidate, {
+        descriptor,
+        adapter,
+        ...(manifest.surfaces ? { surfaces: manifest.surfaces } : {}),
+      });
     }
   };
   const batches = options.onUsageAdaptersLoaded
@@ -363,7 +387,12 @@ export async function loadHarnessPlugins(
     await Promise.all(Array.from({ length: Math.min(4, batch.length) }, () => worker()));
     for (const candidate of batch) {
       const entry = loaded.get(candidate);
-      if (entry) await registry.register(entry.descriptor, entry.adapter);
+      if (entry)
+        await registry.register(
+          entry.descriptor,
+          entry.adapter,
+          entry.surfaces ?? HARNESS_PLUGIN_SURFACES,
+        );
     }
     if (index === 0) options.onUsageAdaptersLoaded?.(registry.usageAdapters);
   }

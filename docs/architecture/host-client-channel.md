@@ -29,13 +29,13 @@ Web / App → Web 网关 → 客户端通道 ───────────�
 
 既有 GUI 项目归属由后台只读读取 `CODEX_HOME/.codex-global-state.json`；没有文件时 GUI 集合为空，损坏文件明确失败，不写原生文件。`codexhost/workspace/read` 只投影 canonical external IDs，并合并唯一 Mapping Store 中明确记录的项目/无项目事实；生成的执行目录不凭 cwd 匹配变成项目。置顶写入仍走 Desktop 的原生服务，未接入 headless 置顶操作；保存的置顶读取不等于所有 Desktop 版本的实时分区状态。远程 SSH 的原有执行所有权保持原样，公开客户端通道仍只支持本地 external Threads；移动后台推送不是此改造的能力。
 
-## 隔离 Web Codex 来源
+## Codex CLI 是普通外部 Harness
 
-显式启用的单个 Web Codex 配置由同一 shared Host 中的独立 `IsolatedSessions` owner 拥有。`session-runtime` 提供现有隔离运行/恢复和持久 journal，Web gateway 不加载该执行 Adapter 或保存第二份可写会话。external AppServerHost/MappingStore保持原边界，GUI native Codex仍使用official route。官方项目文件保持只读，external官方pin写仍依赖Desktop；Host仅保存Web自建workspace及隔离local pin/archive。
+Web 中的 Codex CLI 使用 `codex-cli` 身份，与其它 CLI Harness 一样由同一个 shared Host 的外部 Thread 运行时执行、持久化和恢复。它的 Adapter、原生引用、Mapping Store 记录、交互、跟进队列与原生会话导入都走本文描述的通用路径；Web 网关不加载第二份执行实现，也不保存第二份可写会话。原生 home 取自 `CODEX_HOME`，未设置时为 `~/.codex`，认证完全由原生 CLI 负责。
 
-隔离来源使用Host-private的配置、受限操作及follow/control通道，并携epoch和服务端返回的home散列scope。配置不注册为浏览器RPC；所有会话操作检查已配置scope/identity，不能传home/nativeRef改变执行身份。客户端通道增加 `web-codex-changed` 失效通知，继续使用既有epoch/cursor/reset机制；它不是可追加token，也不构成另一份durable journal。网关重连核对列表和待处理交互，原生交互仍由唯一owner仲裁，迟到epoch回答不生效。隔离 owner 按 Session/requestId 保留最多256个进程内提交回执；多个 gateway 的相同输入复用结果，冲突输入拒绝，淘汰或重启后不保证exactly-once。
+该插件的 Manifest 只声明 Web 界面（`surfaces: ["web"]`），因此 Desktop 的 Harness 列表、新建路由、Thread 列表和 Thread 事件都不包含它；`codexhost/harness/plugins/list` 对 Desktop 返回过滤后的目录，对 client channel 返回完整目录。界面声明只影响呈现，不改变执行归属：停止 gateway 只断开传输，后台继续执行；重连按现有 epoch/cursor/reset 规则重新读取快照和待处理交互。
 
-停止 gateway 不停止 shared 隔离执行；Push 依赖 gateway 存活。隔离来源不使用 profile/home 所有权锁、恢复抢锁或退出证明，不为不同 Host 共用同一 home 提供互斥。正常关闭仍会关闭所拥有的原生会话；重启读取当前共享来源的配置和会话文件，不检查或清理旧锁及迁移标记。不提供旧 standalone 迁移、回滚或交接入口，也不移动用户数据。结果未知的写入不自动重发，不保证跨重启 exactly-once。
+同一原生会话不要在 GUI 官方 Codex 与 Web Codex CLI 中同时打开：两者共享原生 home 和历史，但 Host 不为跨进程写入提供互斥。
 
 ## 认证与传输
 

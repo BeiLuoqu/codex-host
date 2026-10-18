@@ -43,8 +43,7 @@ for (const width of [390, 1280])
       if ((await projectFolder.getAttribute("aria-expanded")) === "false")
         await projectFolder.click();
       await page
-        .getByRole("treeitem")
-        .filter({ hasText: "From Codex GUI" })
+        .locator('[data-row-key="session:gui-existing"]')
         .waitFor()
         .catch(async (error: unknown) => {
           if (process.env.CODEXHOST_TEST_SCREENSHOTS) {
@@ -70,8 +69,8 @@ for (const width of [390, 1280])
           animations: "disabled",
         });
       }
-      await page.getByRole("treeitem").filter({ hasText: "From another worktree" }).waitFor();
-      const row = page.getByRole("treeitem").filter({ hasText: "From Codex GUI" });
+      await page.locator('[data-row-key="session:gui-worktree"]').waitFor();
+      const row = page.locator('[data-row-key="session:gui-existing"]');
       assert.equal(await row.getAttribute("data-row-key"), "session:gui-existing");
       await row.click();
       await page.getByText("existing CH answer", { exact: true }).waitFor();
@@ -167,7 +166,7 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^project$/ });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Unreadable history" }).click();
+    await page.locator('[data-row-key="session:unreadable"]').click();
     await page.getByText(/Failed to load history:.*Native history unavailable/).waitFor();
     assert.equal(await page.getByText("Loading history…", { exact: true }).count(), 0);
   },

@@ -150,7 +150,8 @@ for (const dark of [false, true]) {
         const heading = page.getByRole("treeitem").filter({ hasText: /^status-project$/u });
         await heading.waitFor();
         if ((await heading.getAttribute("aria-expanded")) === "false") await heading.click();
-        const row = (id: string) => page.locator(`[data-row-key="session:${id}"]`);
+        const row = (id: string) =>
+          page.locator(`[data-row-key="session:${id}"], [data-row-key="recent:${id}"]`).first();
         if (!mobile) await page.mouse.move(1100, 700);
         for (const id of [pinned.id, project.id, recent.id])
           await rightStatus(row(id), "ongoing", mobile);

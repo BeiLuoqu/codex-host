@@ -96,7 +96,16 @@ export function createCodexSessionUsage(
           }),
         );
         const result = {
-          usage: history.usage,
+          usage:
+            history.usage && requests.length > 0
+              ? {
+                  ...history.usage,
+                  cacheWriteInputTokens: requests.reduce(
+                    (sum, request) => sum + (request.cacheWriteInputTokens ?? 0),
+                    0,
+                  ),
+                }
+              : history.usage,
           requests,
           complete: history.complete && requests.length > 0,
           retainedTurnIds: history.retainedTurnIds,

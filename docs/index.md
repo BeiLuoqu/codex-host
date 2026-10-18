@@ -23,7 +23,7 @@
 | [`architecture/external-thread-steering.md`](architecture/external-thread-steering.md) | 外部 Thread 取消旧 Turn 后启动新 Turn 的“调整方向”语义；修改 steering 时阅读。 |
 | [`architecture/host-client-channel.md`](architecture/host-client-channel.md) | GUI、Web 与 App 按需连接独立后台的生命周期、认证通道、事件驱动快照、交互仲裁及恢复边界。 |
 | [OpenSpec：状态刷新与轮询优化](../openspec/changes/reduce-redundant-state-polling/proposal.md) | Web 目录与组织状态分别校验，远程设置页和 Console 按可见性降频；查看方案、实现进度与验收边界时阅读。 |
-| [`architecture/gui-web-shared-state-design.md`](architecture/gui-web-shared-state-design.md) | 当前所有权概览：隔离 Web Codex 的共享 Host、存储分区、启动发现及简化后的生命周期边界；不提供旧 standalone 迁移。 |
+| [`architecture/gui-web-shared-state-design.md`](architecture/gui-web-shared-state-design.md) | 当前所有权概览：共享 Host 的外部 Thread、Codex CLI 的 Web-only 界面声明、存储分区、启动发现及简化后的生命周期边界；不提供旧 standalone 迁移。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |
@@ -103,7 +103,7 @@
 
 | 文档 | 内容与阅读时机 |
 | --- | --- |
-| [`product/standalone-web.md`](product/standalone-web.md) | 同仓库 Web/PWA 的共享 CH 会话、GUI/Web 共享偏好与隔离 Codex 来源、原生项目归组、历史分页、源码构建、启动隔离及验收限制；开发 Web 或与 Desktop 并行运行时阅读。 |
+| [`product/standalone-web.md`](product/standalone-web.md) | 同仓库 Web/PWA 的共享 CH 会话、GUI/Web 共享偏好、作为普通外部 Harness 的 Codex CLI、原生项目归组、历史分页、源码构建、启动隔离及验收限制；开发 Web 或与 Desktop 并行运行时阅读。 |
 
 ## 账号与 Desktop 产品接入
 

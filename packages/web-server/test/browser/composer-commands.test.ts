@@ -111,7 +111,10 @@ for (const width of [390, 1280])
       if (await sidebar.isVisible()) await sidebar.click();
       const folder = page.getByRole("treeitem").filter({ hasText: /^commands$/u });
       if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-      await page.getByRole("treeitem").filter({ hasText: "Existing commands thread" }).click();
+      await page
+        .locator('[data-row-key^="session:"]')
+        .filter({ hasText: "Existing commands thread" })
+        .click();
       await page.getByText("existing CH answer", { exact: true }).waitFor();
       await plus.click();
       await menu.getByRole("option", { name: /^Model\b/u }).waitFor();

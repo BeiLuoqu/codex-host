@@ -123,30 +123,6 @@ it("collects archived pages only for confirmed external Threads", async (t) => {
   assert.deepEqual(bench.workspaces.archivedSessionIds(), ["archived", "older"]);
 });
 
-it("merges shared archives with Host-owned local Codex organization", async (t) => {
-  const bench = setup(t);
-  bench.workspaces.useLocalOrganizationRemote({
-    owns: (id) => id === "local-codex",
-    request: async () => {
-      throw new Error("no local mutation expected");
-    },
-    refresh: async () => {},
-  });
-  bench.workspaces.setLocalOrganization({
-    version: 1,
-    items: [],
-    pinnedSessionIds: [],
-    archivedSessionIds: ["local-codex"],
-  });
-  await bench.call("session/list");
-  assert.deepEqual(bench.workspaces.archivedSessionIds(), ["archived", "local-codex"]);
-  assert.deepEqual(await bench.call("workspace/unarchiveSession", { sessionId: "archived" }), {
-    archivedSessionIds: ["local-codex"],
-  });
-  await bench.observe();
-  assert.deepEqual(bench.frames.at(-1)?.value?.archivedSessionIds, ["local-codex"]);
-});
-
 it("routes Web workspace and session archive actions to the same Host without stopping work", async (t) => {
   const bench = setup(t);
   await bench.call("session/list");

@@ -1,14 +1,9 @@
-import type {
-  HarnessAdapter,
-  HarnessSession,
-  HarnessInspection,
-  HarnessPermissionModeCatalog,
-} from "@codexhost/harness-adapter";
-export type Adapter = HarnessAdapter;
-export type HarnessSessionLike = HarnessSession;
+import type { HarnessInspection, HarnessPermissionModeCatalog } from "@codexhost/harness-adapter";
+
 export type Inspection = HarnessInspection;
 export type PermissionModeCatalog = HarnessPermissionModeCatalog;
 
+/** JSON/file persistence used by the shared DSH session log. */
 export interface SessionDataStore {
   path(...parts: string[]): string;
   readJson<T>(relative: string, fallback: T): T;
@@ -17,6 +12,7 @@ export interface SessionDataStore {
   writeLines(relative: string, values: readonly unknown[]): void;
   appendLine(relative: string, value: unknown): void;
 }
+/** Bounded live sink for one Session's projected frames. */
 export interface SessionSink {
   readonly id: string;
   readonly closed: boolean;
@@ -33,52 +29,4 @@ export class SessionRuntimeError extends Error {
   ) {
     super(message);
   }
-}
-export function requestOf<T>(args: Record<string, unknown>): T {
-  return ("request" in args ? args.request : "_request" in args ? args._request : args) as T;
-}
-export interface SessionOrganization {
-  get(id: string): { workspaceId: string; path: string } | undefined;
-  ownerOf(id: string): { workspaceId: string } | undefined;
-  attachSession(id: string, workspaceId: string | undefined, cwd: string): void;
-}
-export interface SessionObserver {
-  changed(kind: string, ...args: unknown[]): void;
-  interaction(
-    sessionId: string,
-    interaction: Record<string, unknown> & { type: string },
-  ): { result: Promise<unknown>; cancel(): void };
-}
-export interface SessionHarnesses {
-  ids(): string[];
-  manifest(id: string): { name: string } | undefined;
-  adapter(id: string): Promise<Adapter>;
-  inspect(id: string): Promise<Inspection>;
-  preferredSelection: { provider: string; model: string; reasoningEffort?: string } | undefined;
-  modelCatalog(): Promise<{
-    default: { provider: string; model: string; reasoningEffort?: string };
-    groups: Array<{ id: string; models: Array<{ id: string }> }>;
-    routableProviders: string[];
-    failures: Array<{ id: string; name: string; message: string }>;
-  }>;
-  preferences?:
-    | {
-        configuration(id: string): Promise<
-          | {
-              permissionModeId?: string | undefined;
-              model?: { id: string } | undefined;
-              thinkingOptionId?: string | undefined;
-            }
-          | undefined
-        >;
-        remember(
-          id: string,
-          configuration: {
-            model?: { id: string };
-            thinkingOptionId?: string | undefined;
-            permissionModeId?: string | undefined;
-          },
-        ): Promise<void>;
-      }
-    | undefined;
 }

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -77,34 +77,31 @@ it("discovers Codex and usage metadata without executing either plugin", async (
     expect(existsSync(path.join(directory, "imported"))).toBe(false);
 });
 
-it.each([undefined, "external"] as const)(
-  "excludes enabled Codex before import, factory and warmup in scope %s",
-  async (scope) => {
-    const root = await plugins();
-    const diagnose = vi.fn();
-    const registry = await loadHarnessPlugins({
-      roots: [root],
-      context,
-      ...(scope ? { scope } : {}),
-      diagnose,
-    });
-    try {
-      expect([...registry.adapters.keys()]).toEqual(["external-agent"]);
-      expect([...registry.usageAdapters.keys()]).toEqual(["codex-usage"]);
-      expect(
-        registry
-          .list()
-          .map(({ id }) => id)
-          .sort(),
-      ).toEqual(["codex-usage", "external-agent"]);
-      for (const step of ["imported", "created", "warmed"])
-        expect(existsSync(path.join(root, "codex", step))).toBe(false);
-      expect(diagnose).not.toHaveBeenCalled();
-    } finally {
-      await registry.close();
-    }
-  },
-);
+it("excludes enabled Codex before import, factory and warmup", async () => {
+  const root = await plugins();
+  const diagnose = vi.fn();
+  const registry = await loadHarnessPlugins({
+    roots: [root],
+    context,
+    scope: "external",
+    diagnose,
+  });
+  try {
+    expect([...registry.adapters.keys()]).toEqual(["external-agent"]);
+    expect([...registry.usageAdapters.keys()]).toEqual(["codex-usage"]);
+    expect(
+      registry
+        .list()
+        .map(({ id }) => id)
+        .sort(),
+    ).toEqual(["codex-usage", "external-agent"]);
+    for (const step of ["imported", "created", "warmed"])
+      expect(existsSync(path.join(root, "codex", step))).toBe(false);
+    expect(diagnose).not.toHaveBeenCalled();
+  } finally {
+    await registry.close();
+  }
+});
 
 it("does not let onlyIds widen the external runtime scope", async () => {
   const root = await plugins();
@@ -116,37 +113,6 @@ it("does not let onlyIds widen the external runtime scope", async () => {
   expect(registry.list()).toEqual([]);
   expect(existsSync(path.join(root, "codex", "imported"))).toBe(false);
   await registry.close();
-});
-
-it("requires explicit enablement even for the Web Codex runtime", async () => {
-  const root = await plugins(["external-agent"]);
-  const registry = await loadHarnessPlugins({ roots: [root], context, scope: "web-codex" });
-  expect(registry.list()).toEqual([]);
-  expect(existsSync(path.join(root, "codex", "imported"))).toBe(false);
-  await registry.close();
-});
-
-it("loads and closes Web Codex independently from external and usage adapters", async () => {
-  const root = await plugins();
-  const web = await loadHarnessPlugins({ roots: [root], context, scope: "web-codex" });
-  expect([...web.adapters.keys()]).toEqual(["codex"]);
-  expect(web.usageAdapters.size).toBe(0);
-  for (const id of ["external-agent", "codex-usage"])
-    expect(existsSync(path.join(root, id, "imported"))).toBe(false);
-  for (const step of ["imported", "created", "warmed"])
-    expect(await readFile(path.join(root, "codex", step), "utf8")).toBe("yes");
-
-  const external = await loadHarnessPlugins({ roots: [root], context });
-  try {
-    await web.close();
-    expect(existsSync(path.join(root, "codex", "closed"))).toBe(true);
-    expect(existsSync(path.join(root, "external-agent", "closed"))).toBe(false);
-    expect(existsSync(path.join(root, "codex-usage", "closed"))).toBe(false);
-    expect(await [...external.adapters.values()][0]?.inspect()).toMatchObject({ status: "ready" });
-  } finally {
-    await web.close();
-    await external.close();
-  }
 });
 
 it("refuses direct Codex registration in an external registry", async () => {

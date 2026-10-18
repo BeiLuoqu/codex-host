@@ -63,7 +63,10 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^project$/u });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Original message times" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "Original message times" })
+      .click();
 
     for (let attempt = 0; attempt < 2; attempt++) {
       await page.getByText("Earlier answer", { exact: true }).waitFor();

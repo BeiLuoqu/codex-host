@@ -60,7 +60,10 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^replacement$/u });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Item replacement" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "Item replacement" })
+      .click();
     const answer = page.getByText("The final answer", { exact: true });
     await answer.waitFor();
 

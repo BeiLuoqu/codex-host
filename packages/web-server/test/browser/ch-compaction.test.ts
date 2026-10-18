@@ -57,7 +57,10 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^shared$/u });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Compaction lifecycle" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "Compaction lifecycle" })
+      .click();
 
     const recovered = page.locator('[data-tool="compact_context"][data-state="ok"]');
     await recovered.waitFor();

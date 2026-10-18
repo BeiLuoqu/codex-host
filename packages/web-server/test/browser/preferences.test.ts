@@ -81,7 +81,10 @@ it(
       const folder = page.getByRole("treeitem").filter({ hasText: basename(root) });
       await folder.waitFor();
       if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-      await page.getByRole("treeitem").filter({ hasText: "Shared conversation" }).click();
+      await page
+        .locator('[data-row-key^="session:"]')
+        .filter({ hasText: "Shared conversation" })
+        .click();
     }
     const openModels = async (page: Page) => {
       await page.getByRole("button", { name: /^Select model, current /u }).click();

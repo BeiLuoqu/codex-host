@@ -58,6 +58,7 @@ export interface ExternalThreadStore {
   replaceReadySession(input: ReplaceReadySessionInput): Promise<StoredThreadRecordV1>;
   /** Optional so a Store without this knowledge simply filters nothing. */
   supersededNativeSessionIds?(harnessId: HarnessId): string[];
+  threadHarnessId?(hostThreadId: string): string | undefined;
   replaceReadySessionAfterLastTurn(
     input: ReplaceReadySessionAfterLastTurnInput,
   ): Promise<StoredThreadRecordV1>;
@@ -135,6 +136,11 @@ export class ExternalThreadRepository {
   /** Native Sessions a Thread of this Harness left behind when a message was edited or rolled back. */
   supersededNativeSessionIds(harnessId: HarnessId): ReadonlySet<string> {
     return new Set(this.store.supersededNativeSessionIds?.(harnessId) ?? []);
+  }
+
+  /** Synchronous owner lookup for routing decisions that must not delay official requests. */
+  harnessOf(threadId: string): string | undefined {
+    return this.store.threadHarnessId?.(threadId);
   }
 
   async find(threadId: string): Promise<StoredThreadRecordV1 | null> {

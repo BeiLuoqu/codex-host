@@ -1,7 +1,4 @@
 /** Web preferences use the shared owner RPC. */
-import { createHash } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, join, resolve, basename } from "node:path";
 import {
   DEFAULT_IDLE_RELEASE_SETTINGS,
   HARNESS_PREFERENCES_GET_METHOD,
@@ -13,27 +10,17 @@ import {
   type HarnessPreferenceSnapshot,
 } from "@codexhost/shared-contracts";
 import type { ChHostClient } from "./ch-host-client.ts";
-import { type EventHub, type RpcRegistry, RpcError } from "./transport.ts";
+import { type EventHub, type RpcRegistry } from "./transport.ts";
 import type { ModelGroup } from "./harnesses.ts";
 
-function canonicalHome(value: string): string {
-  const path = resolve(value);
-  if (existsSync(path)) return realpathSync(path);
-  const parent = dirname(path);
-  return parent === path ? path : join(canonicalHome(parent), basename(path));
-}
 export class WebHarnessPreferences {
-  private readonly codexScope: string | undefined;
   private unsubscribe: (() => void) | undefined;
   private pollTimer: ReturnType<typeof setInterval> | undefined;
   private closed = false;
   constructor(
     private readonly host: ChHostClient,
     private readonly events: EventHub,
-    codexHome?: string,
   ) {
-    if (codexHome)
-      this.codexScope = `web-codex:${createHash("sha256").update(canonicalHome(codexHome)).digest("hex")}`;
     if (host.realtime)
       this.unsubscribe = host.realtime.subscribe((event) => {
         if (event.type === "preferences-changed" || event.type === "hello")
@@ -60,24 +47,13 @@ export class WebHarnessPreferences {
       this.pollTimer.unref();
     }
   }
-  private scope(harnessId?: string) {
-    if (harnessId !== "codex") return "external";
-    if (!this.codexScope)
-      throw new RpcError("preferences/unavailable", "Web Codex preferences are unavailable.");
-    return this.codexScope;
-  }
-  async get(harnessId?: string): Promise<HarnessPreferenceSnapshot> {
-    const scope = this.scope(harnessId);
+  async get(): Promise<HarnessPreferenceSnapshot> {
     return harnessPreferenceSnapshotSchema.parse(
-      await this.host.request(HARNESS_PREFERENCES_GET_METHOD, { scope }),
+      await this.host.request(HARNESS_PREFERENCES_GET_METHOD, { scope: "external" }),
     );
   }
-  private async patch(
-    harnessId: string | undefined,
-    operations: HarnessPreferenceOperation[],
-    initializeOnly = false,
-  ) {
-    const input = { scope: this.scope(harnessId), operations, initializeOnly };
+  private async patch(operations: HarnessPreferenceOperation[], initializeOnly = false) {
+    const input = { scope: "external", operations, initializeOnly };
     const result = harnessPreferenceSnapshotSchema.parse(
       await this.host.request(HARNESS_PREFERENCES_PATCH_METHOD, input),
     );
@@ -85,7 +61,7 @@ export class WebHarnessPreferences {
     return result;
   }
   async configuration(harnessId: string) {
-    return (await this.get(harnessId)).values.newThread?.byHarness[harnessId];
+    return (await this.get()).values.newThread?.byHarness[harnessId];
   }
   async remember(
     harnessId: string,
@@ -101,8 +77,8 @@ export class WebHarnessPreferences {
       harnessId: id,
       configuration,
     });
-    await this.patch(harnessId, [operation]);
-    await this.patch(undefined, [{ kind: "newThread", lastHarness: id }]);
+    await this.patch([operation]);
+    await this.patch([{ kind: "newThread", lastHarness: id }]);
   }
   async decorate<
     T extends {
@@ -112,15 +88,9 @@ export class WebHarnessPreferences {
   >(catalog: T) {
     try {
       const external = await this.get();
-      const code = this.codexScope ? await this.get("codex") : undefined;
-      const favorites = {
-        ...external.values.favorites,
-        ...(code ? { codex: code.values.favorites.codex ?? [] } : {}),
-      };
+      const favorites = external.values.favorites;
       const configurationFor = (harnessId: string) =>
-        harnessId === "codex"
-          ? code?.values.newThread?.byHarness.codex
-          : external.values.newThread?.byHarness[harnessId];
+        external.values.newThread?.byHarness[harnessId];
       const preferred =
         catalog.groups.find((group) => group.id === external.values.newThread?.lastHarness) ??
         catalog.groups.find((group) => group.id === catalog.default.provider);
@@ -167,7 +137,12 @@ export class WebHarnessPreferences {
       };
     } catch {
       // An older Host may lack preference RPCs; ordinary Sessions stay usable.
-      return { ...catalog, modelFavorites: {}, preferencesAvailable: false };
+      return {
+        ...catalog,
+        rememberedSelections: {},
+        modelFavorites: {},
+        preferencesAvailable: false,
+      };
     }
   }
   register(rpc: RpcRegistry) {
@@ -181,21 +156,19 @@ export class WebHarnessPreferences {
     });
     rpc.register("codexhost/preferences/patch", async (args) => {
       const operation = harnessPreferenceOperationSchema.parse(args.operation);
-      const harnessId = "harnessId" in operation ? operation.harnessId : undefined;
-      return this.patch(harnessId, [operation]);
+      return this.patch([operation]);
     });
     rpc.register("codexhost/preferences/migrate", async (args) => {
       const favorites = Array.isArray(args.favorites)
         ? (args.favorites as Array<{ provider: string; modelIds: string[] }>)
         : [];
       for (const entry of favorites) {
-        if (entry.provider === "codex" && !this.codexScope) continue;
         const operation = harnessPreferenceOperationSchema.parse({
           kind: "favorites",
           harnessId: entry.provider,
           modelIds: entry.modelIds,
         });
-        await this.patch(entry.provider, [operation], true);
+        await this.patch([operation], true);
       }
       return {};
     });

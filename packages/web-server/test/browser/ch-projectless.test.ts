@@ -94,7 +94,7 @@ it(
 
 for (const mobile of [false, true]) {
   it(
-    `Recents is flat and newest-first; its draft can keep, select or clear a workspace (${mobile ? "touch" : "desktop"})`,
+    `Recents includes every workspace newest-first; its draft can keep, select or clear a workspace (${mobile ? "touch" : "desktop"})`,
     { timeout: 60_000 },
     async (t) => {
       const home = mkdtempSync(join(tmpdir(), "ch-recents-gui-"));
@@ -102,7 +102,13 @@ for (const mobile of [false, true]) {
       const project = join(home, "existing-project");
       mkdirSync(project);
       const host = new FakeChHost();
-      host.add("project-session", project, "Existing project conversation");
+      const projectThread = host.add("project-session", project, "Existing project conversation");
+      projectThread.updatedAt = 1000;
+      host.add(
+        "other-project-session",
+        join(home, "other-project"),
+        "Other project conversation",
+      ).updatedAt = 5000;
       host.add(
         "loose-old",
         join(home, "generated-old"),
@@ -174,16 +180,18 @@ for (const mobile of [false, true]) {
         "0 0 16 16",
         "Recents has a chevron, not a folder",
       );
-      const looseRows = recent.locator('[data-row-key^="session:loose-"]');
+      const recentRows = recent.locator('[data-row-key^="recent:"]');
       const order = () =>
-        looseRows.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-row-key")));
+        recentRows.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-row-key")));
       assert.deepEqual(await order(), [
-        "session:loose-new",
-        "session:loose-middle",
-        "session:loose-old",
+        "recent:other-project-session",
+        "recent:loose-new",
+        "recent:loose-middle",
+        "recent:loose-old",
+        "recent:project-session",
       ]);
       assert.equal(
-        await looseRows
+        await recentRows
           .first()
           .evaluate((row) => Number.parseFloat(getComputedStyle(row).paddingInlineStart)),
         8,
@@ -193,15 +201,43 @@ for (const mobile of [false, true]) {
       await page.getByRole("menuitem", { name: "Manual", exact: true }).click();
       assert.deepEqual(
         await order(),
-        ["session:loose-new", "session:loose-middle", "session:loose-old"],
+        [
+          "recent:other-project-session",
+          "recent:loose-new",
+          "recent:loose-middle",
+          "recent:loose-old",
+          "recent:project-session",
+        ],
         "project order preferences do not change Recents",
       );
+      projectThread.updatedAt = 6000;
+      await page.reload();
+      await page.getByText("Native Model", { exact: true }).waitFor();
+      if (mobile) await openSidebar.last().click();
+      assert.deepEqual(await order(), [
+        "recent:project-session",
+        "recent:other-project-session",
+        "recent:loose-new",
+        "recent:loose-middle",
+        "recent:loose-old",
+      ]);
       const projectHeading = page.getByRole("treeitem").filter({ hasText: /^existing-project$/u });
       if ((await projectHeading.getAttribute("aria-expanded")) === "false")
         await projectHeading.click();
       await page.locator('[data-row-key="session:project-session"]').click();
       await page.getByText("existing CH answer", { exact: true }).waitFor();
       if (mobile) await openSidebar.last().click();
+      assert.equal(
+        await recent
+          .locator('[data-row-key="recent:project-session"]')
+          .getAttribute("aria-current"),
+        "page",
+        "the project and Recents rows open the same canonical conversation",
+      );
+      const rowKeys = await page
+        .locator("[data-row-key]")
+        .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-row-key")));
+      assert.equal(new Set(rowKeys).size, rowKeys.length, "every displayed row has a unique key");
       await recentHeader.getByRole("button", { name: "New session", exact: true }).click();
       await chip.getByText("No workspace", { exact: true }).waitFor();
       assert.equal(
@@ -240,7 +276,7 @@ for (const mobile of [false, true]) {
       const created = [...host.threads.values()].find((row) => row.id.startsWith("canonical-"));
       assert.ok(created);
       if (mobile) await openSidebar.last().click();
-      await recent.locator(`[data-row-key="session:${created.id}"]`).waitFor();
+      await recent.locator(`[data-row-key="recent:${created.id}"]`).waitFor();
       assert.equal(
         await page
           .getByRole("treeitem")

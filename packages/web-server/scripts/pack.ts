@@ -7,8 +7,7 @@
  *     app/host-runtime.mjs    the same independent Host implementation
  *     native/codexhost[.exe]   current-platform service lifecycle Launcher
  *     web/                    Vite shell + composed client plugins + plugins.json
- *     adapters/codex/         bundled Codex Harness adapter
- *     adapters/<id>/          optional prebuilt Harness plugins
+ *     adapters/<id>/          prebuilt Harness plugins, including Codex CLI
  *     package.json, README.md
  *
  * Requires TypeScript/plugins, native Launcher and Web UI builds in the same checkout.
@@ -37,7 +36,6 @@ import { WebAssets } from "../src/web-assets.ts";
 const serverRoot = resolve(import.meta.dirname, "..");
 const repoRoot = resolve(serverRoot, "../..");
 const frontendRoot = join(repoRoot, "apps/web-ui");
-const codexRoot = join(repoRoot, "packages/adapters/codex");
 const { values, positionals } = parseArgs({
   options: {
     adapters: { type: "string", default: join(repoRoot, "packages/host-runtime/dist/plugins") },
@@ -63,9 +61,7 @@ const extraAdapters =
     ? []
     : readPackagedAdapters(
         resolve(values.adapters),
-        values.harness === undefined
-          ? undefined
-          : new Set(values.harness.split(",").filter((id) => id !== "codex")),
+        values.harness === undefined ? undefined : new Set(values.harness.split(",")),
       );
 const servicePlugins = [
   ...extraAdapters,
@@ -190,29 +186,7 @@ execFileSync(
   { cwd: repoRoot, stdio: "inherit" },
 );
 
-// 3. Codex adapter as a self-contained plugin (entry `plugin.mjs`).
-const codexOut = join(out, "adapters/codex");
-await build({
-  entryPoints: [join(codexRoot, "src/plugin.ts")],
-  outfile: join(codexOut, "plugin.mjs"),
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node22",
-  banner: { js: banner },
-  logLevel: "warning",
-});
-cpSync(join(codexRoot, "assets"), join(codexOut, "assets"), { recursive: true });
-const manifest = JSON.parse(readFileSync(join(codexRoot, "manifest.json"), "utf8")) as Record<
-  string,
-  unknown
->;
-writeFileSync(
-  join(codexOut, "manifest.json"),
-  `${JSON.stringify({ ...manifest, entry: "./plugin.mjs" }, null, 2)}\n`,
-);
-
-// 4. Already bundled plugins retain their assets and runtime files when moved to another machine.
+// 3. Already bundled plugins retain their assets and runtime files when moved to another machine.
 for (const plugin of servicePlugins) {
   cpSync(plugin.directory, join(out, "adapters", plugin.id), {
     recursive: true,
@@ -220,14 +194,14 @@ for (const plugin of servicePlugins) {
   });
 }
 
-// The Host's plugin loader requires explicit opt-in; Codex remains the native
-// Desktop route rather than an external service plugin.
+// The Host's plugin loader requires explicit opt-in; the enabled list is data,
+// never a Host registration.
 writeFileSync(
   join(out, "adapters/enabled.json"),
   JSON.stringify({ version: 1, enabled: servicePlugins.map((plugin) => plugin.id) }) + "\n",
 );
 
-// 5. Package metadata and retained source licenses.
+// 4. Package metadata and retained source licenses.
 cpSync(join(repoRoot, "LICENSE"), join(out, "LICENSE"));
 mkdirSync(join(out, "licenses"), { recursive: true });
 cpSync(join(frontendRoot, "LICENSE"), join(out, "licenses/DSH-MIT.txt"));
@@ -256,7 +230,8 @@ writeFileSync(
     {
       name: "codexhost-web",
       version,
-      description: "Run Claude Code, Codex, Pi and other coding agents from any browser or phone.",
+      description:
+        "Run Claude Code, Codex CLI, Pi and other coding agents from any browser or phone.",
       type: "module",
       bin: { "codexhost-web": "./app/server.mjs" },
       engines: { node: ">=22.19" },
@@ -298,17 +273,15 @@ No profile/home ownership lock or exit proof is used. The existing Mapping Store
 Ctrl+C stops Web only. Explicit backend maintenance: native/codexhost host stop --node <absolute-node> --host-runtime <absolute-host-runtime.mjs> --data <absolute-ch-data>.
 Close clients first to prevent their on-demand restart; stopping the backend also stops its tasks.
 Do not launch app/server.mjs directly from a CodexHost-managed session with inherited Desktop settings.
-The preview launcher finds the Codex CLI through native installation inspection or PATH. \`--codex-command /absolute/path/to/codex\` is an optional override.
-Web Codex uses --codex-home, inherited CODEX_HOME, or ~/.codex, in that order.
-The native CLI uses local credentials directly; GUI and Web may share the home without sharing execution routing.
-There is no authentication preflight or special queue pause; native failures use the ordinary error path.
-Existing Hosts keep their configured home; pass --codex-home explicitly for older deployments using <web-data>/codex-home.
-Credentials/history are not copied. Desktop proxy/shim entrypoints and routing environment remain excluded.
-Codex is never added to the shared Host's enabled.json; GUI native Codex requests keep their official route.
+Codex CLI is an ordinary preinstalled external Harness. Its executable comes from the shared discovery rules
+and the persisted launch setting for \`codex-cli\`; \`CODEX_HOME\` selects the native home, otherwise ~/.codex.
+The native CLI uses local credentials directly; there is no authentication preflight or special queue pause.
+Codex Desktop and CodexHost.app are not required for Web external Threads. Do not open the same native Session
+in GUI Codex and Web Codex CLI at the same time.
+GUI native Codex requests keep their official route and never load this plugin.
 
-Included Harness plugins: ${["codex", ...extraAdapters.map((plugin) => plugin.id)].join(", ")}.
-External plugins load in the canonical Host in shared mode. Codex loads only in the isolated Web execution scope.
-Codex Desktop and CodexHost.app are not required for Web external Threads.
+Included Harness plugins: ${extraAdapters.map((plugin) => plugin.id).join(", ")}.
+Every external plugin, including Codex CLI, loads in the canonical Host in shared mode.
 Default plugin input is the build of this checkout, not an installed CodexHost.app.
 The packed server uses only its bundled plugins unless --adapters is supplied.
 Install and authenticate each Harness CLI separately on the server machine.
@@ -324,5 +297,5 @@ Retained license texts and dependency notices are in LICENSE and licenses/.
 `,
 );
 console.log(
-  `packed ${String(plugins.length)} client plugins and ${String(extraAdapters.length + 1)} Harness plugins into ${out}`,
+  `packed ${String(plugins.length)} client plugins and ${String(extraAdapters.length)} Harness plugins into ${out}`,
 );

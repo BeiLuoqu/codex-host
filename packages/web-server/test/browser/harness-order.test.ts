@@ -12,7 +12,6 @@ import {
   harnessDisplaySetSchema,
 } from "@codexhost/shared-contracts";
 import { startFakeChDebugger } from "../support/ch-host.ts";
-import { writeWebCodexPlugin } from "../support/web-codex.ts";
 import { FakeChChannel, startFakeChChannel } from "../support/ch-channel.ts";
 import { startServer } from "../support/server.ts";
 
@@ -29,7 +28,6 @@ it(
         { agent: "fake", section: "auto" },
       ]),
     );
-    const plugins = writeWebCodexPlugin(directory);
     const host = new FakeChChannel();
     host.add("shared", directory, "Shared conversation");
     const request = host.request.bind(host);
@@ -76,10 +74,6 @@ it(
         debug.endpoint,
         "--ch-control-directory",
         channelDirectory,
-        "--adapters",
-        plugins,
-        "--harness",
-        "codex",
       ],
     );
     const browser = await chromium.launch();
@@ -92,17 +86,19 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: basename(directory) });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Shared conversation" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "Shared conversation" })
+      .click();
     await page
       .getByRole("button", { name: "Select Harness, current CH Harness", exact: true })
       .click();
-    await page.getByRole("menuitem", { name: "Web Codex", exact: true }).waitFor();
+    await page.getByRole("menuitem", { name: "Grok", exact: true }).waitFor();
     const labels = (await page.getByRole("menuitem").allTextContents()).map((value) =>
       value.trim(),
     );
-    assert.equal(labels[0], "Web Codex");
-    assert.match(labels[1] ?? "", /^Grok/u);
-    assert.equal(labels[2], "CH Harness");
+    assert.match(labels[0] ?? "", /^Grok/u);
+    assert.equal(labels[1], "CH Harness");
     assert.equal(await page.getByRole("menuitem").filter({ hasText: "Grok" }).isDisabled(), true);
     const nativeFirst = [
       { agent: "fake", section: "main" },

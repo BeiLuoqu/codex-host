@@ -7,9 +7,7 @@ import { installedHarnessPluginIdSchema } from "./harness-plugins.js";
 export const HARNESS_PREFERENCES_GET_METHOD = "codexhost/harness/preferences/get";
 export const HARNESS_PREFERENCES_PATCH_METHOD = "codexhost/harness/preferences/patch";
 export const HARNESS_PREFERENCES_CHANGED_METHOD = "codexhost/harness/preferences/changed";
-export const harnessPreferenceScopeSchema = z
-  .string()
-  .regex(/^(?:external|web-codex:[a-f0-9]{64})$/u);
+export const harnessPreferenceScopeSchema = z.string().regex(/^external$/u);
 const preferenceHarnessKey = installedHarnessPluginIdSchema.transform((id) => String(id));
 export const harnessDefaultConfigurationSchema = z
   .strictObject({
@@ -78,21 +76,10 @@ export const harnessPreferencePatchSchema = z
           message: "A default Harness or complete configuration is required",
         });
       const harnessId = "harnessId" in operation ? operation.harnessId : undefined;
-      if (input.scope === "external" && harnessId === "codex")
+      if (harnessId === "codex")
         ctx.addIssue({
           code: "custom",
-          message: "Native Codex configuration requires an isolated Web scope",
-        });
-      if (
-        input.scope !== "external" &&
-        ((harnessId && harnessId !== "codex") ||
-          (operation.kind === "newThread" &&
-            operation.lastHarness &&
-            operation.lastHarness !== "codex"))
-      )
-        ctx.addIssue({
-          code: "custom",
-          message: "Web Codex preferences cannot configure external Harnesses",
+          message: "Official Codex is not an external Harness",
         });
     }
   });

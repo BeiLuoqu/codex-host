@@ -1,4 +1,8 @@
-export type { DraftConfiguration } from "@codexhost/session-runtime";
+/** One in-memory draft selection; never a persisted Thread configuration. */
+export interface DraftConfiguration {
+  selection: { provider: string; model: string; reasoningEffort?: string };
+  permissionModeId?: string;
+}
 
 export function draftPermissionMode(
   inspection: {

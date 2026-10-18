@@ -108,7 +108,10 @@ for (const outcome of ["deleted", "missing", "failed", "restarted"] as const)
         const folder = page.getByRole("treeitem").filter({ hasText: /^queue-project$/u });
         await folder.waitFor();
         if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-        await page.getByRole("treeitem").filter({ hasText: "Queue edit verification" }).click();
+        await page
+          .locator('[data-row-key^="session:"]')
+          .filter({ hasText: "Queue edit verification" })
+          .click();
         await page.getByText("Original queued message", { exact: true }).waitFor();
       }
       const [page, observer] = pages;

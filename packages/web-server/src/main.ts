@@ -20,8 +20,6 @@ import { registerMisc } from "./misc.ts";
 import { PushNotifier } from "./push.ts";
 import { CLIENT_GLOBALS, CLIENT_PLUGINS } from "./plugins.ts";
 import { ChSessions } from "./ch-sessions.ts";
-import { MixedSessions } from "./mixed-sessions.ts";
-import { RemoteCodexSessions } from "./remote-codex-sessions.ts";
 import { WebHarnessDisplaySettings } from "./harness-display-settings.ts";
 import { WebHarnessPreferences } from "./harness-preferences.ts";
 import { createChHostClient } from "./ch-host-client.ts";
@@ -65,8 +63,6 @@ const { values } = parseArgs({
     "ch-host-runtime": { type: "string" },
     "ch-data": { type: "string" },
     "ch-codex-home": { type: "string" },
-    "codex-command": { type: "string" },
-    "codex-home": { type: "string" },
     "ch-plugins": { type: "string" },
     port: { type: "string", default: process.env.CODEXHOST_WEB_PORT ?? "4400" },
     host: { type: "string", default: process.env.CODEXHOST_WEB_HOST ?? "127.0.0.1" },
@@ -117,13 +113,12 @@ const displayDirectory = resolve(
       : join(homedir(), ".codexhost")),
 );
 const displayEntries = () => displaySettings.entries();
-const adapterRoots = (values.adapters ?? defaultAdapterRoots())
-  .split(",")
-  .map((path) => resolve(path));
 const enabledHarnesses =
-  values.harness === undefined ? undefined : new Set(values.harness.split(","));
-const codexEnabled = enabledHarnesses?.has("codex") === true;
+  values.harness === undefined || values.harness === "all"
+    ? undefined
+    : new Set(values.harness.split(","));
 const workspaces = new Workspaces(data, resolve(values.workspace as string), true);
+const pluginSource = resolve(values["ch-plugins"] ?? values.adapters ?? defaultAdapterRoots());
 const chHost = await createChHostClient({
   launch: {
     launcher: resolve(
@@ -152,7 +147,7 @@ const chHost = await createChHostClient({
           ? dirname(resolve(values["ch-control-directory"]))
           : join(homedir(), ".codexhost")),
     ),
-    bundledPlugins: resolve(values["ch-plugins"] ?? defaultAdapterRoots()),
+    bundledPlugins: pluginSource,
     ...(values["ch-codex-home"] ? { codexHome: resolve(values["ch-codex-home"]) } : {}),
   },
   ...(values["ch-data"] && !values["ch-control-directory"]
@@ -166,41 +161,19 @@ const displaySettings: WebHarnessDisplaySettings = new WebHarnessDisplaySettings
   displayDirectory,
   events,
 );
-const codexHome = resolve(
-  values["codex-home"] ?? process.env.CODEX_HOME ?? join(homedir(), ".codex"),
-);
-const preferences: WebHarnessPreferences = new WebHarnessPreferences(
-  chHost,
-  events,
-  codexEnabled ? codexHome : undefined,
-);
-const remoteCodex = codexEnabled
-  ? await RemoteCodexSessions.connect(chHost, events, {
-      home: codexHome,
-      command: values["codex-command"] ? resolve(values["codex-command"]) : "",
-      pluginRoots:
-        values.adapters === undefined && !PACKED
-          ? [join(REPO_ROOT, "packages/adapters")]
-          : adapterRoots,
-    }).catch((error: unknown) => {
-      // A missing or disconnected optional Harness must not prevent Web from starting.
-      console.warn("[codex] unavailable:", error instanceof Error ? error.message : String(error));
-      return undefined;
-    })
-  : undefined;
-if (remoteCodex) await remoteCodex.attachOrganization(workspaces);
-const shared = new ChSessions(
+const preferences: WebHarnessPreferences = new WebHarnessPreferences(chHost, events);
+const images = new WebImages(data);
+const files = new WebFiles(data);
+const sessions = new ChSessions(
   chHost,
   workspaces,
   events,
-  new WebImages(data),
-  new WebFiles(data),
+  images,
+  files,
   displayEntries,
   preferences,
+  enabledHarnesses,
 );
-const sessions = remoteCodex
-  ? new MixedSessions(shared, remoteCodex, remoteCodex.harnesses, workspaces, events)
-  : shared;
 // The right Sidebar's DSH backend runs in this process; a failure disables the
 // panel without taking Web down.
 const dsh = await DshWebServices.open({

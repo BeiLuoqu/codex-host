@@ -52,7 +52,7 @@ describe("shared Harness preferences", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
-  it("isolates Web Codex homes and rejects native Codex configuration in the external scope", async () => {
+  it("rejects the reserved native Codex identity in the external scope", async () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-pref-scopes-"));
     const store = new HarnessPreferencesStore(directory);
     try {
@@ -61,21 +61,50 @@ describe("shared Harness preferences", () => {
           operations: [{ kind: "favorite", harnessId: "codex", modelId: "m", enabled: true }],
         }).success,
       ).toBe(false);
-      const scope = `web-codex:${"a".repeat(64)}`;
-      await store.patch(
-        harnessPreferencePatchSchema.parse({
-          scope,
-          operations: [{ kind: "favorite", harnessId: "codex", modelId: "m", enabled: true }],
-        }),
-      );
+      expect(() =>
+        harnessPreferencePatchSchema.parse({ scope: "web-codex:" + "a".repeat(64) }),
+      ).toThrow();
       expect((await store.get()).values.favorites).toEqual({});
-      expect((await store.get(`web-codex:${"b".repeat(64)}`)).values.favorites).toEqual({});
-      expect((await store.get(scope)).values.favorites.codex).toEqual(["m"]);
     } finally {
       await store.close();
       await rm(directory, { recursive: true, force: true });
     }
   });
+  it("reads external preferences beside retired scopes and keeps those scopes on write", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-preferences-"));
+    const store = new HarnessPreferencesStore(directory);
+    const retired = { favorites: { codex: ["gpt"] }, newThread: { byHarness: {} } };
+    const legacyScope = "web-codex:" + "a".repeat(64);
+    try {
+      await writeFile(
+        join(directory, "harness-preferences-v1.json"),
+        JSON.stringify({
+          version: 1,
+          revision: 7,
+          scopes: { external: { favorites: { pi: ["a"] } }, [legacyScope]: retired },
+        }),
+      );
+      expect(await store.get()).toMatchObject({
+        revision: 7,
+        values: { favorites: { pi: ["a"] } },
+      });
+      await store.patch(
+        harnessPreferencePatchSchema.parse({
+          operations: [{ kind: "favorite", harnessId: "pi", modelId: "b", enabled: true }],
+        }),
+      );
+      const saved = JSON.parse(
+        await readFile(join(directory, "harness-preferences-v1.json"), "utf8"),
+      ) as { revision: number; scopes: Record<string, unknown> };
+      expect(saved.revision).toBe(8);
+      expect(saved.scopes[legacyScope]).toEqual(retired);
+      expect(saved.scopes.external).toEqual({ favorites: { pi: ["a", "b"] } });
+    } finally {
+      await store.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("announces atomic file replacement and refuses stale revisions", async () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-pref-notifications-"));
     const writer = new HarnessPreferencesStore(directory);

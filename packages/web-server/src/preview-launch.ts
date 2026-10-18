@@ -5,8 +5,6 @@ import { defaultWebDataDirectory } from "./data-paths.ts";
 
 /** Optional preview paths, port and comma-separated Harness ids. */
 export interface PreviewOptions {
-  "codex-command"?: string;
-  "codex-home"?: string;
   host?: string;
   port?: string;
   data?: string;
@@ -55,9 +53,6 @@ export function previewLaunch(
     env,
     args: [
       resolve(distribution, "app/server.mjs"),
-      ...(["codex-command", "codex-home"] as const).flatMap((key) =>
-        options[key] ? [`--${key}`, options[key] as string] : [],
-      ),
       ...(options["ch-cdp"] ? ["--ch-cdp", options["ch-cdp"]] : []),
       ...(options["ch-control-directory"]
         ? ["--ch-control-directory", options["ch-control-directory"]]

@@ -28,12 +28,34 @@ export class HarnessPreferencesStore {
     this.file = join(directory, "harness-preferences-v1.json");
   }
 
+  /**
+   * Scopes this version does not own (such as retired `web-codex:*` entries) are neither
+   * validated nor dropped: they are carried through every write unchanged.
+   */
+  private retained: Record<string, unknown> = {};
+
   private async read(): Promise<Document> {
     try {
-      return harnessPreferencesDocumentSchema.parse(JSON.parse(await readFile(this.file, "utf8")));
+      const raw: unknown = JSON.parse(await readFile(this.file, "utf8"));
+      const scopes =
+        typeof raw === "object" && raw !== null && "scopes" in raw ? raw.scopes : undefined;
+      const owned: Record<string, unknown> = {};
+      const retained: Record<string, unknown> = {};
+      if (typeof scopes === "object" && scopes !== null && !Array.isArray(scopes))
+        for (const [scope, values] of Object.entries(scopes))
+          (harnessPreferenceScopeSchema.safeParse(scope).success ? owned : retained)[scope] =
+            values;
+      const document = harnessPreferencesDocumentSchema.parse({
+        ...(raw as object),
+        ...(scopes === undefined ? {} : { scopes: owned }),
+      });
+      this.retained = retained;
+      return document;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        this.retained = {};
         return { version: 1, revision: 0, scopes: {} };
+      }
       throw new Error("Could not read Harness preferences");
     }
   }
@@ -90,7 +112,11 @@ export class HarnessPreferencesStore {
         await mkdir(this.directory, { recursive: true, mode: 0o700 });
         const temporary = `${this.file}.${randomUUID()}.tmp`;
         try {
-          await writeFile(temporary, JSON.stringify(document) + "\n", { flag: "wx", mode: 0o600 });
+          const persisted = { ...document, scopes: { ...this.retained, ...document.scopes } };
+          await writeFile(temporary, JSON.stringify(persisted) + "\n", {
+            flag: "wx",
+            mode: 0o600,
+          });
           await rename(temporary, this.file);
         } finally {
           await rm(temporary, { force: true });

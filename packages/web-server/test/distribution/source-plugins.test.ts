@@ -36,7 +36,7 @@ it(
     });
     assert.deepEqual(
       readdirSync(join(output, "adapters")).sort(),
-      ["claude-code", "codex", "pi", "enabled.json", ...usageIds].sort(),
+      ["claude-code", "pi", "enabled.json", ...usageIds].sort(),
     );
     assert.deepEqual(JSON.parse(readFileSync(join(output, "adapters/enabled.json"), "utf8")), {
       version: 1,

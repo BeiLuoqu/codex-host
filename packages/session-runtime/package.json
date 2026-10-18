@@ -31,8 +31,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -b",
-    "test": "vitest run --config ../../tests/vitest.config.js packages/session-runtime/test"
+    "build": "tsc -b"
   },
   "dependencies": {
     "@codexhost/harness-adapter": "0.0.0",

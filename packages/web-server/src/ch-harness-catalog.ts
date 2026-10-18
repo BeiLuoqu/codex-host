@@ -18,17 +18,31 @@ import { withHarnessDisplayOrder } from "./harness-display-order.ts";
 import type { WebHarnessPreferences } from "./harness-preferences.ts";
 
 export class ChHarnessCatalog {
-  private plugins?: HarnessPluginDescriptor[];
+  private plugins: Promise<HarnessPluginDescriptor[]> | undefined;
   private inspections = new Map<string, Promise<HarnessInspection>>();
   constructor(
     private readonly host: ChHostClient,
     readonly displayEntries: () => Promise<HarnessDisplayEntries> = async () => [],
     readonly preferences?: WebHarnessPreferences,
+    /** Optional advanced subset override from `--harness`; absent means every Host plugin. */
+    private readonly restrictTo?: ReadonlySet<string>,
   ) {}
   async list(): Promise<HarnessPluginDescriptor[]> {
-    this.plugins ??= harnessPluginListResultSchema
-      .parse(await this.host.request("codexhost/harness/plugins/list", {}))
-      .plugins.filter((plugin) => plugin.kind !== "usage");
+    this.plugins ??= this.host
+      .request("codexhost/harness/plugins/list", {})
+      .then((value) =>
+        harnessPluginListResultSchema
+          .parse(value)
+          .plugins.filter(
+            (plugin) =>
+              plugin.kind !== "usage" &&
+              (this.restrictTo === undefined || this.restrictTo.has(plugin.id)),
+          ),
+      )
+      .catch((error: unknown) => {
+        this.plugins = undefined;
+        throw error;
+      });
     return this.plugins;
   }
   async inspect(id: string, cwd?: string): Promise<HarnessInspection> {

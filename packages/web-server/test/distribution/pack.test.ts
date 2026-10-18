@@ -62,16 +62,7 @@ it(
     const output = join(root, "output");
     await exec(
       process.execPath,
-      [
-        "--import",
-        "tsx",
-        "scripts/pack.ts",
-        output,
-        "--adapters",
-        input,
-        "--harness",
-        "fake,codex",
-      ],
+      ["--import", "tsx", "scripts/pack.ts", output, "--adapters", input, "--harness", "fake"],
       { cwd: serverRoot },
     );
     const moved = join(root, "relocated");
@@ -124,13 +115,22 @@ it(
         viewer,
         root,
         [join(moved, "app/server.mjs")],
-        ["--harness", "fake", "--ch-data", hostData, "--ch-codex-home", join(root, "gui-home")],
+        [
+          "--harness",
+          "fake",
+          "--adapters",
+          join(moved, "adapters"),
+          "--ch-data",
+          hostData,
+          "--ch-codex-home",
+          join(root, "gui-home"),
+        ],
         { environment },
       );
       viewer.after(stopHost);
       assert.match(
         readFileSync(join(moved, "README.md"), "utf8"),
-        /Included Harness plugins: codex, fake/u,
+        /Included Harness plugins: fake/u,
       );
       const index = await fetch(url);
       assert.equal(index.status, 200);
@@ -171,12 +171,18 @@ it(
       const officeCheck = join(moved, "app/acceptance-office.mjs");
       writeFileSync(
         officeCheck,
-        `import { statSync } from "node:fs";\n` +
-          `import { createConverter } from "@deepseek-ai/libreoffice-kit";\n` +
-          `const converter = await createConverter({ timeoutMs: 120_000 });\n` +
-          `try { await converter.render({ inputPath: process.argv[2], outputPath: process.argv[3] }); }\n` +
-          `finally { await converter.dispose(); }\n` +
-          `console.log(statSync(process.argv[3]).size);\n`,
+        `import { statSync } from "node:fs";
+` +
+          `import { createConverter } from "@deepseek-ai/libreoffice-kit";
+` +
+          `const converter = await createConverter({ timeoutMs: 120_000 });
+` +
+          `try { await converter.render({ inputPath: process.argv[2], outputPath: process.argv[3] }); }
+` +
+          `finally { await converter.dispose(); }
+` +
+          `console.log(statSync(process.argv[3]).size);
+`,
       );
       try {
         const { stdout: officeBytes } = await exec(
@@ -263,7 +269,7 @@ it(
 
     for (const [id, kind] of [
       ["pi", "session"],
-      ["codex", "session"],
+      ["codex-cli", "session"],
       ["opencode", "session"],
       ["usage", "usage"],
     ] as const) {
@@ -281,7 +287,7 @@ it(
       { cwd: root, env: previewEnv },
     );
     const all = JSON.parse(allStdout) as { args: string[]; env: NodeJS.ProcessEnv };
-    assert.equal(all.args[all.args.indexOf("--harness") + 1], "claude-code,codex,opencode,pi");
+    assert.equal(all.args[all.args.indexOf("--harness") + 1], "claude-code,codex-cli,opencode,pi");
     const { stdout: defaultStdout } = await exec(process.execPath, [join(preview, "preview.mjs")], {
       cwd: root,
       env: previewEnv,
@@ -293,21 +299,13 @@ it(
     assert.equal(all.args.includes("--import-recent"), false);
     const { stdout: codexStdout } = await exec(
       process.execPath,
-      [
-        join(preview, "preview.mjs"),
-        "--harness",
-        "codex",
-        "--codex-command",
-        "/native/codex",
-        "--codex-home",
-        join(preview, "codex-home"),
-      ],
+      [join(preview, "preview.mjs"), "--harness", "codex-cli"],
       { cwd: root, env: previewEnv },
     );
     const codex = JSON.parse(codexStdout) as { args: string[]; env: NodeJS.ProcessEnv };
-    assert.equal(codex.args[codex.args.indexOf("--harness") + 1], "codex");
-    assert.equal(codex.args[codex.args.indexOf("--codex-command") + 1], "/native/codex");
-    assert.equal(codex.args[codex.args.indexOf("--codex-home") + 1], join(preview, "codex-home"));
+    assert.equal(codex.args[codex.args.indexOf("--harness") + 1], "codex-cli");
+    assert.equal(codex.args.includes("--codex-command"), false);
+    assert.equal(codex.args.includes("--codex-home"), false);
     for (const id of ["missing", "usage"]) {
       await assert.rejects(
         exec(process.execPath, [join(preview, "preview.mjs"), "--harness", id], {

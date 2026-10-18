@@ -66,12 +66,6 @@ export const clientChannelCursorSchema = z.object({
 });
 export type ClientChannelCursor = z.infer<typeof clientChannelCursorSchema>;
 export const clientChannelEventSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("web-codex-changed"),
-    cursor: clientChannelCursorSchema,
-    scope: z.string().regex(/^web-codex:[a-f0-9]{64}$/u),
-    sessionId: z.string().min(1).optional(),
-  }),
   z.object({ type: z.literal("display-settings-changed"), cursor: clientChannelCursorSchema }),
   z.object({
     type: z.literal("preferences-changed"),

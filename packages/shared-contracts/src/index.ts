@@ -74,6 +74,7 @@ export {
   HARNESS_PLUGIN_ICON_MAX_BYTES,
   HARNESS_PLUGIN_LIMIT,
   HARNESS_PLUGIN_MANIFEST_MAX_BYTES,
+  HARNESS_PLUGIN_SURFACES,
   harnessPluginConfigurationSchema,
   harnessPluginDescriptorSchema,
   harnessPluginIconSchema,
@@ -81,6 +82,8 @@ export {
   harnessPluginListParamsSchema,
   harnessPluginListResultSchema,
   harnessPluginManifestSchema,
+  harnessPluginSurfaceSchema,
+  harnessPluginSurfacesSchema,
   installedHarnessPluginIdSchema,
   isHarnessPluginInScope,
 } from "./harness-plugins.js";
@@ -90,6 +93,7 @@ export type {
   HarnessPluginListResult,
   HarnessPluginManifest,
   HarnessPluginScope,
+  HarnessPluginSurface,
 } from "./harness-plugins.js";
 export * from "./harness-launch-settings.js";
 export * from "./harness-installation.js";
@@ -380,4 +384,3 @@ export {
 } from "./remote-connections.js";
 
 export { usageMeasurementsSchema, type UsageMeasurementsSnapshot } from "./thread-usage.js";
-export * from "./web-codex-owner.js";

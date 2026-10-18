@@ -67,7 +67,7 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^reasoning$/u });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Late reasoning" }).click();
+    await page.locator('[data-row-key^="session:"]').filter({ hasText: "Late reasoning" }).click();
     const answer = page.getByText("Visible final answer", { exact: true });
     await answer.waitFor();
 
@@ -139,7 +139,10 @@ it(
         const folder = page.getByRole("treeitem").filter({ hasText: /^shared$/u });
         await folder.waitFor();
         if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-        await page.getByRole("treeitem").filter({ hasText: "Shared GUI Thread" }).click();
+        await page
+          .locator('[data-row-key^="session:"]')
+          .filter({ hasText: "Shared GUI Thread" })
+          .click();
         await page.getByText("existing CH answer", { exact: true }).waitFor();
         await page.locator('[data-native-connection="connected"]').waitFor();
       }

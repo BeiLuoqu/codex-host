@@ -11,14 +11,12 @@ import {
 } from "@codexhost/shared-contracts";
 import { WebHarnessPreferences } from "../src/harness-preferences.ts";
 import { ChSessions } from "../src/ch-sessions.ts";
-import { MixedDrafts } from "../src/mixed-drafts.ts";
 import { DataDir } from "../src/store.ts";
 import { EventHub, RpcRegistry, StreamRegistry } from "../src/transport.ts";
 import { Workspaces } from "../src/workspaces.ts";
 import { FakeChChannel } from "./support/ch-channel.ts";
-import type { Inspection } from "../src/harnesses.ts";
 
-it("shares GUI file preferences across Web clients, restores defaults and isolates Codex homes", async (t) => {
+it("shares GUI file preferences across Web clients and ignores Web-only copies", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "web-preferences-"));
   const store = new HarnessPreferencesStore(join(root, "gui"));
   const host = new FakeChChannel();
@@ -46,8 +44,8 @@ it("shares GUI file preferences across Web clients, restores defaults and isolat
         revision,
       });
   });
-  const a = new WebHarnessPreferences(host, events, join(root, "home-a"));
-  const b = new WebHarnessPreferences(host, events, join(root, "home-b"));
+  const a = new WebHarnessPreferences(host, events);
+  const b = new WebHarnessPreferences(host, events);
   const workspaces = new Workspaces(data, root, true);
   const sessions = new ChSessions(host, workspaces, events, undefined, undefined, undefined, a);
   const rpc = new RpcRegistry();
@@ -90,10 +88,8 @@ it("shares GUI file preferences across Web clients, restores defaults and isolat
     operation: { kind: "idleRelease", value: { enabled: false, timeoutMinutes: 25 } },
   });
   assert.equal((await store.get()).values.idleRelease?.enabled, false);
-  await a.remember("codex", { model: { id: "code-a" } });
-  assert.equal((await a.configuration("codex"))?.model?.id, "code-a");
-  assert.equal(await b.configuration("codex"), undefined);
-  assert.equal((await store.get()).values.newThread?.byHarness.codex, undefined);
+  await a.remember("fake", { model: { id: "alternate" } });
+  assert.equal((await a.configuration("fake"))?.model?.id, "alternate");
   await a.remember("fake", { model: { id: "native" }, permissionModeId: "auto" });
   assert.equal((await a.configuration("fake"))?.model?.id, "native");
   const decorated = await a.decorate({
@@ -123,21 +119,6 @@ it("shares GUI file preferences across Web clients, restores defaults and isolat
     values: Record<string, unknown>;
   };
   assert.deepEqual(next.values.permissions, { currentValue: "ask" });
-  const inspection = await sessions.catalog.inspect("fake");
-  const drafts = new MixedDrafts(
-    {
-      models: () => sessions.catalog.models(),
-      inspect: async () => inspection as Inspection,
-      name: async () => "Fake",
-      preferences: a,
-    },
-    workspaces,
-    events,
-    () => ({}),
-  );
-  t.after(() => drafts.close());
-  await drafts.create({ sessionId: "mixed", cwd: root });
-  assert.equal(drafts.entries.get("mixed")?.permissionModeId, "ask");
   assert.equal(existsSync(join(data.root, "harness-preferences-v1.json")), false);
   assert.equal(
     host.requests.some((request) => ["thread/start", "turn/start"].includes(request.method)),

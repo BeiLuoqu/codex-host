@@ -54,7 +54,10 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^project$/ });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Long paged history" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "Long paged history" })
+      .click();
     await page.getByText("Question 19", { exact: true }).waitFor();
     assert.equal(await page.getByText("Question 14", { exact: true }).count(), 0);
     assert.equal(

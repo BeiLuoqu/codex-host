@@ -54,7 +54,10 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^project$/ });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Navigation example" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "Navigation example" })
+      .click();
     await page.getByText("Navigation question 11", { exact: true }).waitFor();
     const nav = page.getByRole("navigation", { name: "Turn navigation", exact: true });
     await nav.waitFor();

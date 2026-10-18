@@ -56,10 +56,10 @@ it(
   { timeout: 60_000 },
   async (t) => {
     const { page, host } = await setup(t);
-    const recent = page.locator('[data-row-key="session:recent-reference"]');
+    const recent = page.locator('[data-row-key="recent:recent-reference"]');
     assert.equal(await recent.getAttribute("draggable"), "true");
     const before = await page
-      .locator('[data-row-key^="session:"]')
+      .locator('[data-sidebar-group=""] [data-row-key^="recent:"]')
       .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-row-key")));
     await page.evaluate(() => {
       document.addEventListener("dragstart", (event) => {
@@ -85,7 +85,7 @@ it(
     assert.equal(drag.text, "[@Recent title](thread://recent-reference?hostId=local)");
     assert.deepEqual(
       await page
-        .locator('[data-row-key^="session:"]')
+        .locator('[data-sidebar-group=""] [data-row-key^="recent:"]')
         .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-row-key"))),
       before,
     );
@@ -109,7 +109,8 @@ it(
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const composer = page.locator("[data-composer-input]");
-    const row = (id: string) => page.locator(`[data-row-key="session:${id}"]`);
+    const row = (id: string) =>
+      page.locator(`[data-row-key="session:${id}"], [data-row-key="recent:${id}"]`).first();
     const order = () =>
       page
         .locator('[data-row-key^="session:"]')

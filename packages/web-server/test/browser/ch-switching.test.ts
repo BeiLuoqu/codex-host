@@ -50,7 +50,10 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^project$/ });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "first conversation" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "first conversation" })
+      .click();
     await page.getByText("first historical answer", { exact: true }).waitFor();
     // Two real polling ticks: the regression is an event storm during ordinary
     // operation, not the initial list response or a mocked click handler.
@@ -59,7 +62,7 @@ it(
     for (const id of ["second", "first", "second"]) {
       const start = performance.now();
       await page
-        .getByRole("treeitem")
+        .locator('[data-row-key^="session:"]')
         .filter({ hasText: `${id} conversation` })
         .click({ timeout: 3000 });
       await page.getByText(`${id} historical answer`, { exact: true }).waitFor({ timeout: 3000 });

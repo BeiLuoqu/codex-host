@@ -62,7 +62,10 @@ it(
     const folder = page.getByRole("treeitem").filter({ hasText: /^project$/ });
     await folder.waitFor();
     if ((await folder.getAttribute("aria-expanded")) === "false") await folder.click();
-    await page.getByRole("treeitem").filter({ hasText: "Short mobile history" }).click();
+    await page
+      .locator('[data-row-key^="session:"]')
+      .filter({ hasText: "Short mobile history" })
+      .click();
     await page.getByText("Short question 5", { exact: true }).waitFor();
     await page.setViewportSize({ width: 390, height: 1600 });
     await page.waitForTimeout(500); // responsive drawer animation/setup
@@ -70,7 +73,10 @@ it(
       .getByRole("button", { name: "New session", exact: true })
       .filter({ hasText: "New Session" });
     if (await newSession.isVisible()) {
-      await page.getByRole("treeitem").filter({ hasText: "Short mobile history" }).click();
+      await page
+        .locator('[data-row-key^="session:"]')
+        .filter({ hasText: "Short mobile history" })
+        .click();
       await newSession.waitFor({ state: "hidden" });
     }
     await page.waitForTimeout(600);

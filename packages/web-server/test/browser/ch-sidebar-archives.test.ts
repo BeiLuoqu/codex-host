@@ -62,7 +62,8 @@ for (const legacyFilter of ["show", "only"]) {
       page.on("pageerror", (error) => errors.push(error.message));
       await page.reload();
       await page.getByText("Native Model", { exact: true }).waitFor();
-      const row = (id: string) => page.locator(`[data-row-key="session:${id}"]`);
+      const row = (id: string) =>
+        page.locator(`[data-row-key="session:${id}"], [data-row-key="recent:${id}"]`).first();
       const selectView = async (name: string) => {
         await page.getByRole("button", { name: "View options", exact: true }).click();
         await page.getByRole("menuitem", { name, exact: true }).click();

@@ -93,9 +93,10 @@ for (const mobile of [false, true]) {
         await row.press("Home");
         assert.equal(
           await pins
-            .locator('[data-row-key="session:reference-pin"]')
+            .locator('[data-row-key="section:pinned"]')
             .evaluate((el) => el === document.activeElement),
           true,
+          "Home lands on the section header",
         );
         assert.equal(
           await row.getAttribute("aria-current"),
@@ -137,7 +138,7 @@ for (const mobile of [false, true]) {
         await pins
           .locator("[data-row-key]")
           .evaluateAll((rows) => rows.map((el) => el.getAttribute("data-row-key"))),
-        ["session:pin-7", "session:reference-pin"],
+        ["section:pinned", "session:pin-7", "session:reference-pin"],
       );
       await shot(page, `pins-${mobile ? "touch" : "desktop"}-gui-change`);
       await page.reload();

@@ -14,18 +14,12 @@ import type { ClientChannelEvents } from "./client-channel-events.js";
 import { WebSocketServer } from "ws";
 import { attachRemoteAppServerSession } from "./remote-app-server-session.js";
 import type { RemoteAppServerSessionStreams, RemoteAppServerSession } from "./remote-app-server.js";
-import type { SessionSink } from "@codexhost/session-runtime";
 
 export interface ClientChannelTarget {
   readonly clientEvents: ClientChannelEvents;
   handleClientRequest(method: string, params: unknown): Promise<unknown>;
   clientSnapshot(threadId: string): Promise<ClientThreadSnapshot>;
   respondClient(input: ClientChannelResponse): Promise<{ resolved: boolean }>;
-  webCodex?: {
-    configure(input: unknown): Promise<unknown>;
-    request(input: unknown): Promise<unknown>;
-    stream(input: unknown, sink: SessionSink): void;
-  };
 }
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -107,61 +101,6 @@ export async function startClientChannelServer(options: {
         return;
       }
       const input = await body(request);
-      if (url.pathname === "/v1/web-codex/configure" && options.target.webCodex) {
-        reply(200, { result: await options.target.webCodex.configure(input) });
-        return;
-      }
-      if (url.pathname === "/v1/web-codex/request" && options.target.webCodex) {
-        reply(200, { result: (await options.target.webCodex.request(input)) ?? null });
-        return;
-      }
-      if (url.pathname === "/v1/web-codex/stream" && options.target.webCodex) {
-        let closed = false;
-        const listeners: Array<() => void> = [];
-        const close = () => {
-          if (closed) return;
-          closed = true;
-          for (const listener of listeners.splice(0)) listener();
-        };
-        const send = (value: unknown) => {
-          if (closed) return;
-          if (response.writableLength > 256 * 1024) {
-            response.destroy();
-            close();
-            return;
-          }
-          if (!response.headersSent)
-            response.writeHead(200, {
-              "content-type": "application/x-ndjson",
-              "cache-control": "no-store",
-              "x-codexhost-epoch": options.target.clientEvents.epoch,
-            });
-          response.write(JSON.stringify(value) + "\n");
-        };
-        response.on("close", close);
-        options.target.webCodex.stream(input, {
-          id: `owner-stream-${Math.random()}`,
-          get closed() {
-            return closed;
-          },
-          push: (value) => send({ type: "item", value }),
-          end: () => {
-            send({ type: "end" });
-            response.end();
-            close();
-          },
-          fail: (code, message) => {
-            send({ type: "error", code, message });
-            response.end();
-            close();
-          },
-          onClose: (listener) => {
-            if (closed) listener();
-            else listeners.push(listener);
-          },
-        });
-        return;
-      }
       if (url.pathname === "/v1/shutdown" && options.shutdown) {
         response.once("finish", () => setImmediate(() => options.shutdown?.()));
         reply(200, { result: { stopping: true } });

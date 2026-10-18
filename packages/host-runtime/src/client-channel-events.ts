@@ -27,14 +27,6 @@ export class ClientChannelEvents {
       cursor: { epoch: this.epoch, sequence: ++this.sequence },
     });
   }
-  webCodexChanged(scope: string, sessionId?: string): void {
-    this.publish({
-      type: "web-codex-changed",
-      cursor: { epoch: this.epoch, sequence: ++this.sequence },
-      scope,
-      ...(sessionId ? { sessionId } : {}),
-    });
-  }
   preferencesChanged(revision: number): void {
     this.publish({
       type: "preferences-changed",

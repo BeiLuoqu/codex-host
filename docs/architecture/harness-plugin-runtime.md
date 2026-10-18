@@ -56,9 +56,11 @@ plugins/
 
 默认启用配置来自每个根目录的 `enabled.json`。发行版生成预装目录的启用文件，作为对随包交付插件的显式信任；用户目录由用户配置。发现但未启用的插件不执行，也不进入目录查询结果。缺少某个根目录或其 `enabled.json` 时不加载该根目录插件；配置无效时拒绝该根目录，不回退到硬编码内置实现。不扫描项目目录，不自动安装或下载依赖，不热替换。
 
-固定隔离 Web owner 可通过公共 Loader 的 `enabledIds` 提供服务端显式启用集合，替代读取这些根目录的 `enabled.json`；该集合不是浏览器参数，不写回 external 配置。此路径仍复用公共发现、校验、超时、工厂调用和 Registry 关闭机制。
+服务端装配的 owner 也可以通过公共 Loader 的 `enabledIds` 提供显式启用集合，替代读取这些根目录的 `enabled.json`；该集合不是浏览器参数，不写回 external 配置。此路径仍复用公共发现、校验、超时、工厂调用和 Registry 关闭机制。
 
-启用许可与运行时所有权是两个条件。公共 Manifest、配置和通用描述可以使用 `codex` ID；Desktop / CH Host 加载器及 Registry 默认使用 `external` 范围，在模块导入、工厂和预取之前排除 `codex`。`onlyIds`、`enabled.json` 或显式启用集合都不能扩大这个范围。共享 Host 中的隔离 Web Codex 执行入口显式使用 `web-codex`，仅加载 `codex` 会话插件，导入前排除 usage 插件；两种 Registry 各自管理关闭生命周期。范围由服务端装配决定，不由浏览器请求或插件自行声明。
+启用许可与运行时所有权是两个条件。公共 Manifest、配置和通用描述可以使用 `codex` ID；Desktop / CH Host 加载器和 Registry 只使用 `external` 范围，在模块导入、工厂和预取之前排除 `codex`。`onlyIds`、`enabled.json` 或显式启用集合都不能扩大这个范围，也没有第二个执行范围。范围由服务端装配决定，不由浏览器请求或插件自行声明。
+
+Manifest 可选的 `surfaces` 声明插件出现在哪些界面，取值是 `desktop` 与 `web` 的非空、无重复子集；未声明表示两者都出现。它只影响呈现：Desktop 的插件列表、新建路由、Thread 列表与 Thread 事件排除仅 Web 的 Harness，client channel 与外部 Thread 执行不受影响。取值非法或为空时 Host 拒绝加载该插件并报告 `invalidManifest`，不回退为全部界面。
 
 Desktop / CH 的公开插件目录、外部 Harness 路由、Broker 和会话导入仍拒绝 `codex`。GUI 原生 Codex 不注册成 external Thread，也不通过这个执行插件创建、恢复或操作会话；是否共用进程不改变这些边界。
 
@@ -92,6 +94,7 @@ Desktop / CH 的公开插件目录、外部 Harness 路由、Broker 和会话导
 - 资源只能是插件内部相对路径；拒绝目录遍历和解析后逃出根目录的符号链接。
 - `links.website/documentation/installation` 只接受不带用户凭据的 HTTPS 地址。
 - `installation` 提供展示用命令、下载链接和前后提示；`notice` 提供插件兼容性说明。文本以 `en` 为必需回退、`zh-CN` 为可选翻译。Renderer 仅展示/复制这些数据，绝不从元数据执行命令，自动安装仍走 Adapter 的公共原生能力。
+- `surfaces` 只声明呈现界面，未声明时同时出现在 Desktop 与 Web；它不改变执行归属、启用许可或存储。
 - 能力继续由 `HarnessAdapter.inspect()`、Session 能力和公共可选接口提供，不在 Manifest 复制第二份运行时能力真相。
 - 命令目录由可选的静态 `HarnessAdapter.commandCatalog` 声明，通过 `codexhost/harness/commands/inspect` 查询；读取目录不检查原生运行时、不连接原生服务、不创建或恢复 Session。未声明时返回空目录，不通过启动会话回退发现。执行仍走 `session.commands`。
 
@@ -118,7 +121,7 @@ Context 包含环境变量快照、平台、是否为受管远程 Host，以及�
 
 这类插件复用同一可信目录、显式启用、身份校验、加载超时、失败隔离和关闭流程；目录描述保留 `kind: "usage"`。Registry 将其与可创建 Session 的 Adapter 分开，Host 把统计能力接入公共全局统计，可选的 `sessionUsage` 能力接入会话浮窗，不将它加入聊天、模型选择、会话导入或委派路由。加载失败通过统计失败信息报告，不伪造空结果或 Session 方法。
 
-预装的 `codex-usage`（显示名 Codex）是这种插件，实现在 `packages/adapters/codex-usage`。它与 Web 的 `codex` 执行插件平行、互不依赖；GUI 的官方 `codex` 身份仍保留给原生路径。统计插件只读 rollout，并观察现有官方连接的会话用量与轮次通知，不改变 Codex 的聊天、分叉和恢复操作，也不读取账户配额。统计插件可以脱离 Desktop 加载，私有解析与公共 Host 汇总分离，详见[全局用量统计](../product/usage-statistics.md)。
+预装的 `codex-usage`（显示名 Codex）是这种插件，实现在 `packages/adapters/codex-usage`。它与 `codex-cli` 执行插件平行、互不依赖；GUI 的官方 `codex` 身份仍保留给原生路径。统计插件只读 rollout，并观察现有官方连接的会话用量与轮次通知，不改变 Codex 的聊天、分叉和恢复操作，也不读取账户配额。统计插件可以脱离 Desktop 加载，私有解析与公共 Host 汇总分离，详见[全局用量统计](../product/usage-statistics.md)。
 
 ### 可选的独立会话用量
 

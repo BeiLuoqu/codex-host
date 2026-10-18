@@ -567,10 +567,6 @@ export interface HarnessSession {
   readonly outputs: AsyncIterable<HarnessOutput>;
   readonly commands?: HarnessCommandCapability;
 
-  /** Native same-turn input, when supported; failure must not imply cancel-and-replay. */
-  steer?(
-    input: Pick<TurnStartCommand, "turnId" | "input">,
-  ): Promise<HarnessResult<InteractionRespondAccepted>>;
   refreshUsage?(): Promise<void>;
   /** Native background work (e.g. a background command) is still running; the Session must not be released. */
   hasBackgroundWork?(): boolean;
@@ -632,8 +628,6 @@ export interface HarnessAdapter {
    */
   readonly liveCommandCatalog?: boolean;
   readonly sessionImport?: HarnessSessionImportCapability;
-  /** Read persisted native history without opening an execution Session. */
-  readHistory?(nativeRef: NativeSessionRef): Promise<HarnessResult<HostThreadSnapshot>>;
   /** Read-only local usage for the machine-wide statistics; never starts a native process. */
   readonly usageStatistics?: HarnessUsageStatisticsCapability;
   /** Optional read-only usage for sessions on an already-owned native connection. */

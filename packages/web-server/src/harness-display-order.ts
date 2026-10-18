@@ -19,13 +19,28 @@ export async function readHarnessDisplayEntries(directory: string): Promise<Harn
   }
 }
 
+/**
+ * Web has no official Codex; the local Codex CLI takes the leading place Desktop gives it.
+ * A Harness that is not installed is absent from the catalog and so never leads.
+ */
+const WEB_LEADING_HARNESS = "codex-cli";
+
+function leadingFirst<T extends { id: string }>(items: readonly T[]): T[] {
+  return [
+    ...items.filter((item) => item.id === WEB_LEADING_HARNESS),
+    ...items.filter((item) => item.id !== WEB_LEADING_HARNESS),
+  ];
+}
+
 export function withHarnessDisplayOrder<
   T extends {
     groups: Array<{ id: string; name: string }>;
     failures: Array<{ id: string; name: string }>;
   },
 >(catalog: T, entries: HarnessDisplayEntries = []) {
-  const ordered = orderHarnessDisplay([...catalog.groups, ...catalog.failures], entries);
+  const ordered = leadingFirst(
+    orderHarnessDisplay([...catalog.groups, ...catalog.failures], entries),
+  );
   const rank = new Map(ordered.map((item, index) => [item.id, index]));
   return {
     ...catalog,

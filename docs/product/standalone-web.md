@@ -1,10 +1,10 @@
 # 独立 Web 应用
 
-Web 与 Codex Desktop 在同一仓库开发，浏览器通过 `packages/web-server` 的独立 Node 服务访问。默认 `codexhost` 会话来源按需启动或连接独立的本地 CH 后台，复用 CH 的 Thread 目录、创建、读取和操作；Web 网关不直接读写 Mapping Store、不为外部 Threads 启动第二份 Adapter，也不登记 Desktop 进程所有权。默认同时启用 Codex，共享后台另装配一个固定配置的隔离 Web Codex 来源，Web 网关仅连接并与 CH 外部会话合并展示。Web 网关只连接 Host，不在本地执行 Harness。Web/PWA 共用响应式界面；尚无 iOS/Android 原生封装。
+Web 与 Codex Desktop 在同一仓库开发，浏览器通过 `packages/web-server` 的独立 Node 服务访问。默认 `codexhost` 会话来源按需启动或连接独立的本地 CH 后台，复用 CH 的 Thread 目录、创建、读取和操作；Web 网关不直接读写 Mapping Store、不为外部 Threads 启动第二份 Adapter，也不登记 Desktop 进程所有权。默认启用所有打包的会话 Harness，包括 Codex CLI（`codex-cli`）；它们都由共享后台的外部 Thread 运行时执行，Web 网关只连接 Host，不在本地执行 Harness。Web/PWA 共用响应式界面；尚无 iOS/Android 原生封装。
 
 ## 代码与构建
 
-- `packages/adapters/*`：唯一的 Harness 接入实现。既有插件保持当前 CH 源码；`packages/adapters/codex` 是迁入的独立 Codex app-server Adapter，不改变 Desktop 原生 Codex 路径，也不加入 Desktop 预装清单。
+- `packages/adapters/*`：唯一的 Harness 接入实现。既有插件保持当前 CH 源码；`packages/adapters/codex-cli` 是 Codex CLI 的 app-server Adapter，作为预装外部 Harness 声明仅 Web，不改变 Desktop 原生 Codex 路径。
 - `packages/web-server`：Web 会话存储、HTTP/WebSocket、交互关联、Harness 事件到 DSH 界面协议的投影、认证与 Web Push。
 - `apps/web-ui`：从 DSH 衍生的浏览器界面、Cordis 浏览器运行时与协议源码；仅保留所选界面依赖，来源和许可见其 README。未迁入 DSH CLI、独立 Agent Loop、原仓库 CI 或 Git 历史。
 
@@ -30,7 +30,7 @@ Web 默认端口为 **4400**，控制台默认端口为 **4399**；可用 `--por
 
 Web 网关自有数据默认位于 `~/.codexhost/web/`，源码入口与打包预览使用相同默认值；指定 `--ch-data <root>` 或对应的 `--ch-control-directory <root>/client-hosts` 时，默认跟随为 `<root>/web`。显式 `--data`（直接 server 入口也支持 `CODEXHOST_WEB_DATA`）仍可选择独立目录，不修改 Host 的 Mapping Store 位置。
 
-该目录包含访问令牌、设置、Push 密钥/订阅、上传附件。默认隔离 Web Codex home 沿用 `<web-data>/codex-home`，即 `~/.codexhost/web/codex-home`；shared Codex 元数据仍在 `~/.codexhost/web-codex`。用户项目代码、GUI 官方 Codex home 与其他 Harness 的原生数据保持原位。
+该目录包含访问令牌、设置、Push 密钥/订阅、上传附件。用户项目代码、GUI 官方 Codex home、Codex CLI 与其他 Harness 的原生数据保持原位。旧的 `<ch-data>/web-codex/` 隔离来源数据不再读取，也不由 Web 删除或迁移；原生会话仍在各自的 Codex home 中，可通过通用导入重新接入。
 
 启动使用当前数据目录，不探测、合并或迁移旧 Web profile，也不解析旧根目录迁移标记或附件兼容链接。旧目录与用户文件保持原位。图片读取继续校验本 profile 自有内容寻址对象，拒绝符号链接和任意路径读取。未发送上传回执不跨网关重启恢复。备份该目录含敏感令牌和密钥，应离线停写并安全保存；只备份 codexhost 目录不等于备份全部原生会话或项目。
 
@@ -40,33 +40,27 @@ Web 网关自有数据默认位于 `~/.codexhost/web/`，源码入口与打包�
 
 变更通过 Desktop 通知和带 cursor 的 Host client channel 广播，Web 转成浏览器事件。重连读取最新快照，不用旧浏览器缓存覆盖文件。正常 GUI/Web 连接不持续轮询偏好：Host 保留文件变更监听，GUI 在恢复焦点或切回可见时读取一次快照；仅没有事件通道的旧 CDP 连接保留 3 秒读取兜底。旧 localStorage 仅作为初始化来源，已存在的文件字段优先，初始化后不再向这些 key 写入。GUI 首次偏好快照晚于 Composer 挂载时，只补初始化未编辑、未提交且未主动配置的草稿；用户已有操作不会被迟到快照覆盖；初始化资格绑定逻辑草稿身份，保留原 DOM 或跨容器重挂载不会重置它。GUI 收藏保存期间暂时禁用对应 Harness 的收藏按钮，保存确认或失败后恢复，并以确认快照回显。收藏锁按连接代次隔离；重连核对最新快照后可继续操作，旧请求结束不会解锁新连接的请求。草稿文本与队列保持各自原有行为，本次不持久化队列。
 
-`external` 作用域供两端外部 Harness 共享；允许保存“默认选择 Codex”的导航偏好，但拒绝在此保存 Codex 模型、权限或收藏。Web Codex 的配置与收藏使用规范化独立 home 的散列作用域；不同 home 互不影响。GUI 原生 Codex 模型、权限、会话执行继续由官方路径管理，共享偏好不加载或调用 Codex 执行插件。
+`external` 作用域供两端外部 Harness 共享；允许保存“默认选择”的导航偏好，但拒绝保存保留的 `codex` 身份的模型、权限或收藏。GUI 原生 Codex 模型、权限、会话执行继续由官方路径管理，共享偏好不加载或调用它的执行实现。
 
-收藏、新会话配置与共享空闲释放设置由 Host 提供，空闲释放设置适用于 CH 管理的外部会话。Web Codex 的既有资源回收策略不受该设置控制。旧 Host 不支持新接口时，普通会话仍可使用，收藏保存和共享设置不可用。
+收藏、新会话配置与共享空闲释放设置由 Host 提供，空闲释放设置适用于 CH 管理的全部外部会话，包括 Codex CLI。旧 Host 不支持新接口时，普通会话仍可使用，收藏保存和共享设置不可用。
 
-## Web Codex 加载隔离与路由
+## Codex CLI 作为外部 Harness
 
-`npm start web` 默认启用所有打包的会话 Harness，包括 Codex 与 Pi，无需指定 `--harness` 或 `--codex-command`。需要更换端口时只传 `--port`。启动入口通过原生 Launcher 的安装检查或 PATH 为现有 Codex 连接补齐 CLI 路径。Codex 连接失败时记录日志并继续启动 Web；显式迁移失败仍报错。Adapter、模型目录、会话及登录行为保持不变。
+`npm start web` 默认启用所有打包的会话 Harness，包括 Codex CLI（`codex-cli`）与 Pi，无需 `--harness` 或其他覆盖参数。Codex CLI 与其他 Harness 相同：Manifest 声明 `surfaces: ["web"]`，由共享后台的外部 Thread 运行时执行、持久化与恢复；Web 只连接 Host，不加载第二份执行实现。`--harness <id,...>` 仍是可选的 Harness 子集覆盖，`--adapters`/`--ch-plugins` 指定打包插件目录；缺少所选插件或选择用量统计插件仍会报错。原生 CLI 缺失或检查失败是普通的不可用状态，不阻止 Web 启动。
 
-高级诊断仍可指定 `--harness <id,...>`、`--codex-command /absolute/path/to/codex` 等覆盖项，但它们不再是常规启动的前提。
+Adapter 使用通用发现与持久化 launch settings 解析本地 `codex`；解析到 codexhost 代理或 shim 时报告不可用且不执行。原生 home 取自 `CODEX_HOME`，未设置时为 `~/.codex`；允许与 GUI 共用 home，由原生 CLI 直接使用本地认证和配置。子进程清理 Desktop 路由及 Node 注入环境，不复制凭据、配置或历史。
 
-共享模式中 CH 外部会话目录继续由后台提供，Host 额外拥有隔离 Codex，不把该插件加入 Desktop 预装清单或共享 `enabled.json`。Codex 与外部 Harness 复用公共 Loader/Registry；隔离 owner 以服务端固定配置提供显式启用集合，不修改 external 的 `enabled.json`。插件 Manifest 的安装身份允许 `codex`，但 GUI/CH 的 external 路由、目录和会话导入契约继续拒绝这个身份。Loader/Registry 默认 `external`，在 import、工厂和 warmup 前过滤 Codex；只有 Host 装配的 `web-codex` scope 可以加载它。`codex-usage` 仍是独立用量插件。
+未选择权限模式时，`thread/start`、`turn/start` 不下发审批或沙箱参数，使用用户原生配置；选择权限模式时只下发该模式对应的原生审批策略与沙箱模式名，不写死网络访问或可写目录。`/compact`、`/review` 等原生能力、审批与提问交互、模型和推理强度、会话导入都按普通外部 Thread 契约提供；Fork 与回退最后一个 Turn 声明为不支持。Turn 进行中追加消息使用外部 Thread 对所有 Harness 统一的 steering 规则。
 
-Web Codex 的原生 home 优先使用 `--codex-home`，其次环境 `CODEX_HOME`，否则使用 `~/.codex`；允许与 GUI 共用 home，由原生 CLI 直接使用本地认证和配置。CLI 默认自动发现，显式覆盖路径必须是绝对原生入口。插件拒绝已知代理/shim，子进程清理 Desktop 路由及 Node 注入环境；不复制凭据、配置或历史。原生引用绑定 canonical home，换 home 后不能继续使用旧引用。后台只接受一个显式 Web Codex 配置；晚到客户端不能替换 home、CLI 或插件路径。隔离来源不使用 profile/home 所有权锁、恢复抢锁或退出证明，不提供不同 Host 共用同一 home 的互斥保护。关闭 Web server 仅断开 shared 来源，后台任务继续；正常停止 Host 时仍关闭原生会话并清理子进程。重启读取共享来源自身的配置和会话文件，不检查或清理旧锁及迁移标记，不保证监管者被强杀后的安全交接。
+原生会话通过通用导入接入：Host 列出 Codex home 中的原生会话，导入后成为可继续的 Codex CLI 外部 Thread，历史仍由原生 CLI 读取。旧的 `<data>/web-codex/` 隔离来源数据不读取、不删除、不迁移，也不出现在 Web 会话列表中。同一原生会话不要在 GUI 官方 Codex 与 Web Codex CLI 中同时打开；Host 不为跨进程写入提供互斥。
 
-列表、模型目录、搜索与 control baseline 合并两来源；所有会话操作按已绑定的来源分发，不按当前模型选择猜测。草稿只保存在内存，切换 Harness 保留浏览器输入；首次提交才建立所选来源，之后禁止跨来源切换。来源创建/提交在途或结果未知时不重试、不回落另一个来源。混合入口与隔离 Host owner 分别保留有界进程内提交回执；Host 按 Session/requestId 最多保留 256 个，相同输入跨 gateway 复用结果，不同输入拒绝。不承诺跨重启或回执淘汰后的 exactly-once。CH 上传占位草稿切到 Codex 时只清理未提交占位，不修改原生 Thread。shared Codex 的元数据与展示日志位于 `<ch-data>/web-codex`，保留现有 index/events/projections 和原生 checkpoint/backfill/children 格式，不写 CH Mapping Store，由 Host 使用 `session-runtime` 实现。外部 Thread 的身份、历史和操作继续归 CH。
+## Codex CLI 原生认证
 
-Codex 未选工作区的草稿在首次发送时复用 Host 的 `projectlessWorkspace` 分配，按既有 `~/Documents/Codex/日期/任务名` 规则创建执行目录，不登记为用户项目；显式选择工作区时直接使用所选目录。当前 Codex 来源仅支持文本输入，附件入口关闭并在服务端拒绝；fork/回退仍按未支持能力处理。独立会话的显式停止先清除本地待发送队列，再取消活动轮，避免取消完成时自动启动下一条；CH 队列继续遵循后台自己的暂停规则。shared Codex 的 Web 自建 workspace、local 置顶/归档由 Host 持久化并按来源投影，不写 GUI 原生分区；CH 原生置顶与已绑定 Codex 的 local 置顶合并展示。官方 pin 离线不可写不阻止会话执行，local pin 不代表官方 GUI 分区已更新。此接入不共享或接管 GUI 原生 Codex Threads，也不声明所有原生工具、平台和高级能力已经完成验收。
-
-不提供旧 standalone 数据迁移、回滚或交接入口，不移动用户数据。草稿不共享，不恢复内存队列，不保证跨重启 exactly-once；未知 prompt 结果不自动重发。
-
-## Web Codex 本地认证
-
-Web Codex 与其他 Harness 一样，由原生 CLI 使用本地认证，不提供登录、验证码或账号管理。插件不调用 `account/read`，也不在创建会话前预检查认证。模型检查只查询原生目录，不发送测试推理；目录可读不代表认证、额度或真实推理可用。
+Codex CLI 与其他 Harness 一样，由原生 CLI 使用本地认证，不提供登录、验证码或账号管理。插件不调用 `account/read`，也不在创建会话前预检查认证。模型检查只查询原生目录，不发送测试推理；目录可读不代表认证、额度或真实推理可用。
 
 原生执行失败通过普通会话错误返回并保留错误消息，不触发认证状态联动、额外队列暂停或自动重发失败消息；后续排队消息沿用普通失败后的执行规则。原生 CLI 负责凭据刷新，Host 不保证活动进程热加载配置。
 
-GUI 原生路由仍不使用 Codex 插件，standalone 保持禁用。共享 home 也会共享原生配置与历史，但不会自动导入或恢复 GUI Thread；显式导入原生会话不提供跨进程写入互斥。已有 Host 保留固定来源和 home 绑定；旧部署使用 `<web-data>/codex-home` 时应继续显式传入该 `--codex-home`，不自动切换或迁移已有会话。
+GUI 原生路由仍不使用 Codex CLI 插件。共享 home 会共享原生配置与历史，但不会自动导入或恢复 GUI Thread；显式导入原生会话是普通外部 Thread 导入，不提供跨进程写入互斥。
 
 ## 共享 CH 会话来源
 
@@ -98,7 +92,7 @@ Host 在原生确认首轮开始后，将首条用户消息的文本规范化并
 
 首屏 snapshot 发出后，仅后台预取 **1 页**较早历史，不自动全量遍历。用户向历史顶部滚动、接近顶部 240px 时自动通过 CH 原生 cursor 补一页，无须点击“加载更早”；滚轮、触摸上翻以及真实向顶部的滚动共享同一分页入口。短页即使尚不足一屏，也能由向更早方向的触摸/滚轮意图触发。初次打开、布局变化或程序恢复滚动位置不会自动遍历旧历史；嵌套工具滚动区和输入框不抢占外层分页。加载中显示轻量状态，复用原有阅读锚点；同一边界不重复请求。失败保留已显示内容并提供“重试加载”，继续滚动不会形成自动重试循环。前台与预取共用在途请求，失败不推进 cursor。头部刷新与旧页请求独立执行，慢旧页不阻塞新消息。重新打开复用已加载窗口，不因多客户端打开而继续后台遍历。
 
-为兼容现有 Web 事件协议，内存展示日志使用从 `2 ** 40` 起始的非负局部序号/Turn 坐标，向前插入时向小序号扩展、向后追加时递增；它们不是原生 Turn 编号，不持久化、不传给 CH、不代表未加载的消息数。旧页插入不重编号现有消息、工具引用或滚动锚点；范围耗尽明确报错。隔离 Codex 的持久日志仍从零开始。界面复用原有消息组件、折叠工具详情和分页滚动锚点，不复制 Codex 私有渲染器或状态存储。
+为兼容现有 Web 事件协议，内存展示日志使用从 `2 ** 40` 起始的非负局部序号/Turn 坐标，向前插入时向小序号扩展、向后追加时递增；它们不是原生 Turn 编号，不持久化、不传给 CH、不代表未加载的消息数。旧页插入不重编号现有消息、工具引用或滚动锚点；范围耗尽明确报错。界面复用原有消息组件、折叠工具详情和分页滚动锚点，不复制 Codex 私有渲染器或状态存储。
 
 旧 CDP 入口保留 30 秒空闲复用、60 秒最近页校验及 1.5 秒运行历史查询。事件模式每次打开和重连均读取权威快照，不依赖秒级 `updatedAt` 变化；Host/网关使用有界内存事件窗口、epoch 和递增序号恢复通知。窗口不足或 Host 换代时重新读取，已显示正文保留，连接状态显示“正在重连”。新增轮数超过 5 时继续读到已知尾部，避免漏轮。重复 cursor、跨页重复 Turn、原尾部消失或已显示流式正文被改写仍明确报错，要求重新打开历史，不伪造连续性。所有历史缓冲均仅在内存中；v1 是事件驱动的绝对状态收敛，不是逐 token 差量协议，长工具输出的快照传输仍有优化空间。
 
@@ -128,7 +122,7 @@ Web 编辑排队文本消息时，先请求 Shared Host 删除原条目，确认
 
 同一会话的「···」菜单提供“复制会话链接”，复制 `thread://<canonical Thread ID>?hostId=local`，等待剪贴板写入后提示“已复制”或失败。拖入引用的剪贴板、草稿与发送文本均为 `[@标题](thread://<canonical Thread ID>?hostId=local)`；标题仅供展示并转义 Markdown 特殊字符，身份与来源不按标题猜测。同名会话保留不同 ID。已发送用户消息与队列预览中的显式 `[@标题](thread://<id>?hostId=...)` 也显示蓝色会话图标与标题，悬停可见原始引用文本；消息复制、历史原文及队列编辑仍保留完整链接，不增加点击跳转或自动读取。队列编辑沿用文本链接回填，不要求重新装饰；发送拒绝保留草稿，结果未知不自动重发。
 
-在用户输入中手工粘贴裸 ID、`codex://threads/<id>`、`thread://<id>?hostId=...` 或 Markdown 链接仍是普通文本，不自动生成蓝色引用、不补充或改写来源。只有共享 external 目录确认归属的条目提供拖入和菜单复制；未创建草稿、隔离 Web Codex、官方 Codex 与远程来源不提供冒充共享 CH Thread 的入口。蓝色只表示引用，不表示已读取。
+在用户输入中手工粘贴裸 ID、`codex://threads/<id>`、`thread://<id>?hostId=...` 或 Markdown 链接仍是普通文本，不自动生成蓝色引用、不补充或改写来源。只有共享 external 目录确认归属的条目提供拖入和菜单复制；未创建草稿、官方 Codex 与远程来源不提供冒充共享 CH Thread 的入口。蓝色只表示引用，不表示已读取。
 
 读取仍由当前 Agent 在用户明确要求时使用已有 Skill 和 `codexhost thread read`，遵循既有 CLI 的权限与错误语义；Web 不预读历史、不追加工具教程或调用指令，也不向目标启动 Turn。没有 `@` 会话候选菜单、预览面板或新 RPC。浏览器自动化使用隔离 Host 验证输入与提交，不能替代真实 Harness/CLI 的端到端读取验收。
 
@@ -244,7 +238,7 @@ Composer 模型入口采用 Codex-CH 式嵌套选择：主卡直接列出当前 
 
 `npm start web` 默认监听 `0.0.0.0:4400`，允许局域网及 Tailscale IPv4 地址访问，并保留访问令牌认证与同源校验；可通过 `npm start web -- --host 127.0.0.1` 限制为仅本机访问，默认按需启动或连接同一个独立 CH 后台，无须先打开 Desktop。服务子进程不继承 `CODEXHOST_*`、`NODE_OPTIONS` 或 `NODE_PATH`。预览默认数据目录为 `~/.codexhost/web/`，工作区为 `~/codexhost-web-preview-workspace`；支持 `--port`、`--data`、`--workspace`，以及逗号分隔的 `--harness <id,...>`。默认与 `--harness all` 一样选择全部打包的会话插件（包括 Codex、Pi，不包括用量统计专用插件）。显式选择缺失插件或用量统计插件仍会在启动前报错；机器没有安装 CLI 或检查连接失败则是正常的不可用状态，不阻止 Web 启动，也不自动安装、登录或发送模型请求。
 
-启用插件不等于机器已安装、认证对应 CLI，也不等于所有能力已完成 Web 验收。模型菜单只列检查就绪的 Harness；未安装的不会列为可用，检查失败由目录接口报告。Pi 不再被预览入口排除，但其 Web 能力仍需专项验收；Codex 的加载/路由及隔离由假原生协议和浏览器回归覆盖，真实模型与高级能力仍需专项验收；其他插件所需的可选 Host 上下文以及完整界面能力也需逐项验收。不要从 CH 承载的 Agent 会话直接启动继承原环境的 `server.mjs`，也不要把 Desktop 的环境变量恢复到预览进程。
+启用插件不等于机器已安装、认证对应 CLI，也不等于所有能力已完成 Web 验收。模型菜单只列检查就绪的 Harness；未安装的不会列为可用，检查失败由目录接口报告。Pi 不再被预览入口排除，但其 Web 能力仍需专项验收；Codex CLI 的加载、Web 呈现与 Desktop 过滤由假原生协议和浏览器回归覆盖，真实模型与高级能力仍需专项验收；其他插件所需的可选 Host 上下文以及完整界面能力也需逐项验收。不要从 CH 承载的 Agent 会话直接启动继承原环境的 `server.mjs`，也不要把 Desktop 的环境变量恢复到预览进程。
 
 共享来源由唯一后台恢复/写入 Native Session；两个界面同时打开不是两个执行所有者。数据目录隔离不等于原生文件、CLI 账号或额度隔离。不同任务也不应同时修改同一工作目录。
 
