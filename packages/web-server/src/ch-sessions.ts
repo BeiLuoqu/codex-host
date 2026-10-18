@@ -642,6 +642,20 @@ export class ChSessions {
     return draft.creating;
   }
 
+  /**
+   * Working directory of one Host-confirmed local Thread.
+   *
+   * Drafts, official Codex Threads, and remote Threads have no local directory
+   * here: the right Sidebar reports them unavailable rather than inventing one.
+   * @param sessionId - Session identity the browser addressed.
+   * @returns the Host-recorded directory, or undefined when this Thread has none.
+   */
+  localWorkspaceRoot(sessionId: string): string | undefined {
+    const id = this.id(sessionId);
+    if (this.drafts.has(id)) return undefined;
+    return this.rows.get(id)?.cwd;
+  }
+
   uploadFile(id: string, chunks: AsyncIterable<Uint8Array>, name?: string) {
     if (!this.fileInputs)
       throw new RpcError("session/attachment-invalid", "File uploads are unavailable.");

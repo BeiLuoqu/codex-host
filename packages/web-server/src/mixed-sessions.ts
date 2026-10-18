@@ -109,6 +109,17 @@ export class MixedSessions {
     this.local.notifier = value;
   }
 
+  /**
+   * Local working directory of one shared external Thread.
+   *
+   * Isolated Codex Sessions and remote Threads never resolve here.
+   * @param sessionId - Session identity the browser addressed.
+   * @returns the shared Thread's directory, or undefined.
+   */
+  localWorkspaceRoot(sessionId: string): string | undefined {
+    return this.shared.localWorkspaceRoot(sessionId);
+  }
+
   private syncLocalIds() {
     this.workspaces.setLocalSessionIds(this.local.ids());
   }

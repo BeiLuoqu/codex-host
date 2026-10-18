@@ -14,6 +14,7 @@
     "@deepseek-ai/dsh-client-resources",
     "@deepseek-ai/dsh-client-ui-sidebar",
     "@deepseek-ai/dsh-client-ui-sidebar-right",
+    "@deepseek-ai/dsh-client-ui-sidebar-files",
     "@deepseek-ai/dsh-client-ui-settings",
     "@deepseek-ai/dsh-client-ui-settings-general",
     "@deepseek-ai/dsh-client-ui-conversation",
@@ -37,7 +38,8 @@
     "@deepseek-ai/dsh-client-connection",
     "@deepseek-ai/dsh-api-workspace-controller",
     "@deepseek-ai/dsh-client-ui-directory-picker-browse",
-    "@deepseek-ai/dsh-client-ui-codexhost"
+    "@deepseek-ai/dsh-client-ui-codexhost",
+    "@deepseek-ai/dsh-api-workspace-files"
   ],
   "packages": [
     "@deepseek-ai/cordis",
@@ -146,5 +148,12 @@
     "@deepseek-ai/dsh-session-reference",
     "@deepseek-ai/dsh-subagent",
     "@deepseek-ai/dsh-user-questions"
+  ],
+  "hostPackages": [
+    "@deepseek-ai/dsh-fs",
+    "@deepseek-ai/dsh-fs-local",
+    "@deepseek-ai/dsh-sandbox-policy",
+    "@deepseek-ai/dsh-scope",
+    "@deepseek-ai/dsh-timeout"
   ]
 }

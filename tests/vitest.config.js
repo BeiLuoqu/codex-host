@@ -1,12 +1,47 @@
 import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import ts from "typescript";
 import { configDefaults, defineConfig } from "vitest/config";
 
 const root = path.resolve(import.meta.dirname, "..");
+
+const decoratorSyntax = /^\s*@[A-Za-z_$][\w$]*/m;
+
+/**
+ * Lower TypeScript standard decorators before Vite's default parser sees them.
+ * Imported DSH Remote methods declare their endpoints with `@Remote`, and
+ * Vite's SSR transform leaves standard decorators as syntax Node cannot parse.
+ * Mirrors the imported repository's `standardDecoratorPlugin`.
+ */
+function standardDecoratorPlugin() {
+  return {
+    name: "dsh-standard-decorators",
+    enforce: "pre",
+    transform(code, id) {
+      const file = id.split("?", 1)[0];
+      if (!/\.[cm]?tsx?$/.test(file) || !decoratorSyntax.test(code)) return;
+      const result = ts.transpileModule(code, {
+        fileName: file,
+        compilerOptions: {
+          target: ts.ScriptTarget.ES2024,
+          module: ts.ModuleKind.ESNext,
+          jsx: file.endsWith("x") ? ts.JsxEmit.ReactJSX : undefined,
+          sourceMap: true,
+        },
+      });
+      return {
+        code: result.outputText.replace(/\n?\/\/# sourceMappingURL=.*$/u, "\n"),
+        map: result.sourceMapText,
+      };
+    },
+  };
+}
+
 const include = [
   "packages/**/test/**/*.test.ts",
   "tests/integration/**/*.test.ts",
+  "tests/dsh/**/*.spec.ts",
   "packages/repository-automation/test/**/*.test.mjs",
   "tests/release/**/*.test.mjs",
   "tools/**/*.test.mjs",
@@ -30,12 +65,16 @@ const platformOnly = process.env.CODEXHOST_TEST_SCOPE === "platform";
 
 export default defineConfig({
   root,
+  plugins: [standardDecoratorPlugin()],
   build: {
     assetsInlineLimit: 100000,
   },
   test: {
     environment: "node",
     include,
+    // Imported DSH packages expose their TypeScript sources; Vite must transform
+    // them instead of handing them to Node's native loader.
+    server: { deps: { inline: [/@deepseek-ai\//] } },
     // The Web Host owns Node test-runner suites, invoked by npm run test:web.
     exclude: [
       ...configDefaults.exclude,

@@ -7,11 +7,14 @@
 
 import { randomUUID } from "node:crypto";
 import { Context, Service, symbols } from "@deepseek-ai/cordis";
-import {
-  OperatorPeer,
-  type ConnectionRpcAttachment,
-  type ConnectionRpcHandler,
-} from "@deepseek-ai/dsh-client-connection";
+// codexhost: import the runtime Peer from its module rather than the Connection
+// plugin root, whose browser-auth chain pulls the DSH credentials service that
+// the embedded Web backend does not mount.
+import { OperatorPeer } from "@deepseek-ai/dsh-client-connection/src/operator-peer.ts";
+import type {
+  ConnectionRpcAttachment,
+  ConnectionRpcHandler,
+} from "@deepseek-ai/dsh-client-connection/src/rpc.ts";
 import { Deque } from "@deepseek-ai/dsh-deque";
 import type { WebUpgradeRoute } from "@deepseek-ai/dsh-host-webserver";
 import { MAX_TIMER_DELAY_MS } from "@deepseek-ai/dsh-timeout";

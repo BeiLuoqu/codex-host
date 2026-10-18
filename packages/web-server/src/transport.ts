@@ -113,12 +113,25 @@ export type StreamHandler = (
   sink: StreamSink,
 ) => void | Promise<void>;
 
+/** Fallback owner for a stream no Web endpoint registered: the embedded DSH gateway. */
+export type StreamFallback = (
+  endpoint: string,
+  args: Record<string, unknown>,
+  sink: StreamSink,
+) => boolean;
+
 export class StreamRegistry {
   private readonly handlers = new Map<string, StreamHandler>();
+  private fallback: StreamFallback | undefined;
   readonly unhandled = new Map<string, number>();
 
   register(endpoint: string, handler: StreamHandler): void {
     this.handlers.set(endpoint, handler);
+  }
+
+  /** Install the owner consulted for endpoints this registry does not register. */
+  setFallback(fallback: StreamFallback): void {
+    this.fallback = fallback;
   }
 
   /** Attach the mux protocol to one WebSocket. */
@@ -175,14 +188,16 @@ export class StreamRegistry {
           },
         };
         streams.set(streamId, { sink, close });
+        const payload = message.payload as { args?: Record<string, unknown> } | undefined;
+        const args = payload?.args ?? {};
         const handler = this.handlers.get(endpoint);
         if (handler === undefined) {
+          if (this.fallback?.(endpoint, args, sink) === true) return;
           this.unhandled.set(endpoint, (this.unhandled.get(endpoint) ?? 0) + 1);
           // Keep unknown streams open and silent: most DSH followers tolerate an idle stream better than an error.
           return;
         }
-        const payload = message.payload as { args?: Record<string, unknown> } | undefined;
-        Promise.resolve(handler(payload?.args ?? {}, sink)).catch((error: unknown) => {
+        Promise.resolve(handler(args, sink)).catch((error: unknown) => {
           console.error(`[mux] ${endpoint} failed`, error);
           sink.fail("gateway/internal", error instanceof Error ? error.message : String(error));
         });

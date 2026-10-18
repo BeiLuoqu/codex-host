@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@codexhost/desktop-control": "0.0.0",
+    "@codexhost/dsh-web-backend": "0.0.0",
     "@codexhost/session-runtime": "0.0.0",
     "@codexhost/shared-contracts": "0.0.0",
     "image-size": "2.0.2",

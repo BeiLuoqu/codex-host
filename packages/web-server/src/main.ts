@@ -26,6 +26,7 @@ import { WebHarnessDisplaySettings } from "./harness-display-settings.ts";
 import { WebHarnessPreferences } from "./harness-preferences.ts";
 import { createChHostClient } from "./ch-host-client.ts";
 import { serveChClientGateway } from "./ch-client-gateway.ts";
+import { DshWebServices } from "./dsh-web-services.ts";
 import { harnessIconStyles } from "./harness-icon-styles.ts";
 import { Settings } from "./settings.ts";
 import { formatWebStartup, type NetworkAccessUrl } from "./startup-display.ts";
@@ -194,6 +195,19 @@ const shared = new ChSessions(
 const sessions = remoteCodex
   ? new MixedSessions(shared, remoteCodex, remoteCodex.harnesses, workspaces, events)
   : shared;
+// The right Sidebar's DSH backend runs in this process; a failure disables the
+// panel without taking Web down.
+const dsh = await DshWebServices.open({
+  workspaceRoot: resolve(values.workspace as string),
+  threadWorkspace: (id) => sessions.localWorkspaceRoot(id),
+}).catch((error: unknown) => {
+  console.warn(
+    "[right-sidebar] unavailable:",
+    error instanceof Error ? error.message : String(error),
+  );
+  return undefined;
+});
+if (dsh) streams.setFallback((endpoint, args, sink) => dsh.stream(endpoint, args, sink));
 const settings = new Settings(data, events);
 const push = new PushNotifier(data);
 sessions.notifier = (notification) => {
@@ -360,6 +374,7 @@ const server = createServer((request, response) => {
       }
       const body = await readBody(request, response);
       if (body === undefined) return;
+      if (dsh && (await dsh.handleApiRequest(request, body, response))) return;
       const reply = await rpc.handleHttp(body);
       response
         .writeHead(200, {
@@ -463,6 +478,7 @@ server.listen(Number(values.port), values.host, () => {
 
 async function shutdown(): Promise<void> {
   server.close();
+  await dsh?.close();
   await sessions.close();
   await preferences?.close();
   displaySettings.close();
