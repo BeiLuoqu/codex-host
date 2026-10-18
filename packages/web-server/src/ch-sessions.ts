@@ -174,6 +174,9 @@ export class ChSessions {
     return this.refreshing;
   }
   private async listAll(): Promise<void> {
+    // A Thread a draft binds while this read is in flight is missing from its
+    // snapshot; it must not be dropped, or the first history read fails.
+    const known = new Set(this.rows.keys());
     const found = new Map<string, ChThread>();
     const archivedIds = new Set<string>();
     for (const archived of [false, true]) {
@@ -205,8 +208,15 @@ export class ChSessions {
         if (item.owner === "external" && item.harnessId)
           ownership.set(item.threadId, item.harnessId);
     }
+    const rows = new Map([...found].filter(([id]) => ownership.has(id)));
+    for (const [id, row] of this.rows) {
+      const harnessId = this.ownership.get(id);
+      if (known.has(id) || found.has(id) || !harnessId) continue;
+      rows.set(id, row);
+      ownership.set(id, harnessId);
+    }
     this.ownership = ownership;
-    this.rows = new Map([...found].filter(([id]) => ownership.has(id)));
+    this.rows = rows;
     await this.syncWorkspace();
     if (this.closed) return;
     this.workspaces.setReferenceArchives([...archivedIds].filter((id) => ownership.has(id)));

@@ -289,3 +289,74 @@ it("uses existing Desktop routing without installing code, and does not retry re
   assert.equal(host.requests.filter((req) => req.method === "turn/start").length, 1);
   await assert.rejects(client.request("shell/execute", {}), /Unsupported CH method/);
 });
+
+it("keeps a Thread created during an in-flight catalog read for its first history read", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ch-first-history-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const host = new FakeChHost();
+  host.add("existing", root);
+  const sessions = new ChSessions(
+    host,
+    new Workspaces(new DataDir(root), root),
+    new EventHub(root),
+  );
+  t.after(() => sessions.close());
+  const rpc = new RpcRegistry();
+  sessions.register(rpc, new StreamRegistry());
+  assert.ok((await rpc.dispatch("session/list", { args: {} })).ok);
+  // The next catalog read snapshots the Host before the first message creates a Thread,
+  // then stays in flight past replacing the catalog.
+  const request = host.request.bind(host);
+  const projects = host.projects.bind(host);
+  let releaseList!: () => void;
+  const listHeld = new Promise<void>((resolve) => {
+    releaseList = resolve;
+  });
+  let releaseProjects!: () => void;
+  const projectsHeld = new Promise<void>((resolve) => {
+    releaseProjects = resolve;
+  });
+  let replaced!: () => void;
+  const catalogReplaced = new Promise<void>((resolve) => {
+    replaced = resolve;
+  });
+  let holding = true;
+  host.request = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
+    const result = await request<T>(method, params);
+    if (method === "thread/list" && holding) await listHeld;
+    return result;
+  };
+  host.projects = async (ids) => {
+    if (holding) {
+      replaced();
+      await projectsHeld;
+    }
+    return projects(ids);
+  };
+  const staleList = rpc.dispatch("session/list", { args: {} });
+  const draft = await rpc.dispatch("session/create", { args: { request: { cwd: root } } });
+  assert.ok(draft.ok);
+  const prompt = await rpc.dispatch("session/prompt", {
+    args: {
+      request: {
+        sessionId: (draft.value as { sessionId: string }).sessionId,
+        requestId: "first",
+        content: [{ type: "text", text: "first message" }],
+        mode: "queue",
+      },
+    },
+  });
+  assert.ok(prompt.ok, prompt.ok ? undefined : prompt.error.message);
+  const created = [...host.threads.values()].find((row) => row.id !== "existing");
+  assert.ok(created);
+  releaseList();
+  await catalogReplaced;
+  holding = false;
+  const history = rpc.dispatch("session/projections", {
+    args: { request: { sessionId: created.id } },
+  });
+  releaseProjects();
+  const result = await history;
+  assert.ok(result.ok, result.ok ? undefined : result.error.message);
+  assert.ok((await staleList).ok);
+});
