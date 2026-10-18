@@ -8,12 +8,22 @@
     "outDir": "dist",
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
-    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "disableSourceOfProjectReferenceRedirect": true
   },
   "references": [
-    { "path": "../session-runtime/tsconfig.json" },
-    { "path": "../desktop-control/tsconfig.json" },
-    { "path": "../shared-contracts/tsconfig.json" }
+    {
+      "path": "../session-runtime/tsconfig.json"
+    },
+    {
+      "path": "../desktop-control/tsconfig.json"
+    },
+    {
+      "path": "../shared-contracts/tsconfig.json"
+    },
+    {
+      "path": "../../apps/web-ui/packages/host/dsh-web-backend/tsconfig.build.json"
+    }
   ],
   "include": ["src/**/*.ts"]
 }

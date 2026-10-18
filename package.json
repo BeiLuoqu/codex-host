@@ -86,7 +86,8 @@
     "audit:codex-desktop": "npm run build:typescript && npm run build:renderer && node tools/codex-desktop-contract-audit/run.mjs",
     "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets --locked --features codexhost-shim/test-utils,codexhost-gate-a-native/gate-tools -- -D warnings && cargo test --workspace --locked --features codexhost-shim/test-utils,codexhost-gate-a-native/gate-tools",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:typescript && npm run check:rust",
-    "clean": "node tools/clean.mjs"
+    "clean": "node tools/clean.mjs",
+    "postinstall": "node scripts/apply-dependency-patches.mjs"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
@@ -98,19 +99,20 @@
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "24.13.3",
     "@types/ws": "8.18.1",
-    "tsx": "4.22.4",
-    "vite": "8.1.5",
     "@vitest/coverage-v8": "4.1.10",
     "diff": "8.0.2",
     "esbuild": "0.28.1",
     "eslint": "10.8.0",
     "globals": "17.7.0",
+    "jsdom": "^30.1.3",
     "postcss": "8.5.28",
     "prettier": "3.9.6",
     "smol-toml": "^1.8.0",
     "tailwindcss": "4.3.3",
+    "tsx": "4.22.4",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
+    "vite": "8.1.5",
     "vitest": "4.1.10",
     "zod": "4.4.3"
   }

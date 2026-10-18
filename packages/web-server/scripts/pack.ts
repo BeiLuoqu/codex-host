@@ -14,7 +14,15 @@
  * Requires TypeScript/plugins, native Launcher and Web UI builds in the same checkout.
  */
 
-import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,7 +122,48 @@ await build({
   format: "esm",
   target: "node22",
   banner: { js: `#!/usr/bin/env node\n${banner}` },
-  external: ["bufferutil", "utf-8-validate"],
+  // The Office engine is a platform-native package with worker files and a
+  // prebuilt executable; it stays a real install beside the server bundle.
+  external: ["bufferutil", "utf-8-validate", "@deepseek-ai/libreoffice-kit"],
+  logLevel: "warning",
+});
+
+/**
+ * Copy one installed package and its installed dependency closure.
+ * @param name - package name to copy.
+ * @param copied - names already copied.
+ */
+function copyRuntimePackage(name: string, copied: Set<string>): void {
+  if (copied.has(name)) return;
+  const source = join(repoRoot, "node_modules", name);
+  if (!existsSync(source)) return;
+  copied.add(name);
+  cpSync(source, join(out, "node_modules", name), { recursive: true, dereference: true });
+  const manifest = JSON.parse(readFileSync(join(source, "package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+  };
+  for (const dependency of [
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.optionalDependencies ?? {}),
+  ])
+    copyRuntimePackage(dependency, copied);
+}
+// The Office conversion provider resolves the engine package and its worker
+// files at runtime, so the current platform's engine must ship beside app/.
+copyRuntimePackage("@deepseek-ai/libreoffice-kit", new Set());
+copyRuntimePackage("node-pty", new Set());
+
+// The terminal provider spawns its private runner as a separate process; the
+// source-mode entry cannot run under plain Node, so ship a bundled entry.
+await build({
+  entryPoints: [join(frontendRoot, "packages/subprocess/subprocess-local/src/bin.ts")],
+  outfile: join(out, "app/subprocess-runner.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  external: ["node-pty"],
   logLevel: "warning",
 });
 
@@ -187,6 +236,20 @@ cpSync(
   join(out, "licenses/image-size-MIT.txt"),
 );
 cpSync(join(frontendRoot, "THIRD_PARTY_NOTICES.md"), join(out, "licenses/THIRD_PARTY_NOTICES.md"));
+for (const [name, file] of [
+  ["@deepseek-ai/libreoffice-kit", "LICENSE"],
+  ["@deepseek-ai/libreoffice-kit", "NOTICE"],
+] as const) {
+  const source = join(repoRoot, "node_modules", name, file);
+  if (existsSync(source)) cpSync(source, join(out, `licenses/libreoffice-kit-${file}`));
+}
+for (const name of readdirSync(join(repoRoot, "node_modules/@deepseek-ai"))) {
+  if (!name.startsWith("libreoffice-kit-")) continue;
+  const directory = join(repoRoot, "node_modules/@deepseek-ai", name);
+  for (const file of readdirSync(join(directory, "licenses"))) {
+    cpSync(join(directory, "licenses", file), join(out, "licenses", `${name}-${file}`));
+  }
+}
 writeFileSync(
   join(out, "package.json"),
   `${JSON.stringify(

@@ -114,11 +114,12 @@ it("serves the right Sidebar file tree from a local Thread's Host directory", as
   assert.match(binary.headers.get("content-type") ?? "", /^multipart\/form-data/u);
   assert.match(await binary.text(), /line one/u);
 
-  // A draft has a browser-side cwd but no Host-confirmed Thread: it stays unavailable.
+  // A draft has a browser-side cwd but no Host-confirmed Thread. An unknown
+  // identity follows the same path; neither case creates a Session.
   const draft = await call("session/create", { cwd: workspace });
   assert.equal(draft.envelope?.result.ok, true);
   const draftId = String(draft.envelope?.result.value?.sessionId);
-  for (const sessionId of [draftId, "official-codex-thread", "remote-thread"]) {
+  for (const sessionId of [draftId, "unknown-thread"]) {
     const missing = await call("workspaceFiles/list", {
       workspaceFileScopeId: sessionId,
       path: workspace,

@@ -44,6 +44,12 @@ const DISTRIBUTION_ROOT = resolve(import.meta.dirname, "..");
 const PACKED_WEB = join(DISTRIBUTION_ROOT, "web");
 const PACKED = existsSync(join(PACKED_WEB, "plugins.json"));
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
+// A packed Web distribution ships the subprocess runner as JavaScript beside
+// the server bundle; the source package's TypeScript entry is not runnable.
+if (PACKED) {
+  const runner = join(DISTRIBUTION_ROOT, "app/subprocess-runner.mjs");
+  if (existsSync(runner)) process.env.CODEXHOST_SUBPROCESS_RUNNER ??= runner;
+}
 function defaultAdapterRoots(): string {
   return PACKED
     ? join(DISTRIBUTION_ROOT, "adapters")

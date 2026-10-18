@@ -66,6 +66,16 @@ const platformOnly = process.env.CODEXHOST_TEST_SCOPE === "platform";
 export default defineConfig({
   root,
   plugins: [standardDecoratorPlugin()],
+  resolve: {
+    alias: {
+      // The built browser bundle registers into window.__ModuleLoader__, which
+      // unit tests do not install; source mode is the same implementation.
+      "@deepseek-ai/dsh-api-gateway/client": path.resolve(
+        root,
+        "apps/web-ui/packages/api/gateway/src/client/index.ts",
+      ),
+    },
+  },
   build: {
     assetsInlineLimit: 100000,
   },

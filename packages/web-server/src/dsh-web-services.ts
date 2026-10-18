@@ -50,27 +50,42 @@ export class DshWebServices {
       return false;
     }
     if (typeof method !== "string" || !this.backend.handles(method)) return false;
-    const url = new URL(request.url ?? "/", "http://localhost");
-    const answered = await this.backend.fetch(
-      new Request(url, {
-        method: "POST",
-        headers: {
-          "content-type":
-            typeof request.headers["content-type"] === "string"
-              ? request.headers["content-type"]
-              : "application/json",
-        },
-        body,
-      }),
-    );
-    const bytes = Buffer.from(await answered.arrayBuffer());
-    const headers: Record<string, string> = { "cache-control": "no-store" };
-    answered.headers.forEach((value, name) => {
-      if (name !== "content-length" && name !== "cache-control") headers[name] = value;
-    });
-    headers["content-length"] = String(bytes.length);
-    response.writeHead(answered.status, headers).end(bytes);
-    return true;
+    // A browser that navigates away must cancel the DSH read or conversion it
+    // started instead of leaving it running to completion.
+    const lifetime = new AbortController();
+    const abort = (): void => {
+      lifetime.abort(new Error("Web request closed"));
+    };
+    request.once("close", abort);
+    response.once("close", abort);
+    try {
+      const url = new URL(request.url ?? "/", "http://localhost");
+      const answered = await this.backend.fetch(
+        new Request(url, {
+          method: "POST",
+          headers: {
+            "content-type":
+              typeof request.headers["content-type"] === "string"
+                ? request.headers["content-type"]
+                : "application/json",
+          },
+          body,
+          signal: lifetime.signal,
+        }),
+      );
+      const bytes = Buffer.from(await answered.arrayBuffer());
+      if (lifetime.signal.aborted || response.destroyed) return true;
+      const headers: Record<string, string> = { "cache-control": "no-store" };
+      answered.headers.forEach((value, name) => {
+        if (name !== "content-length" && name !== "cache-control") headers[name] = value;
+      });
+      headers["content-length"] = String(bytes.length);
+      response.writeHead(answered.status, headers).end(bytes);
+      return true;
+    } finally {
+      request.off("close", abort);
+      response.off("close", abort);
+    }
   }
 
   /**

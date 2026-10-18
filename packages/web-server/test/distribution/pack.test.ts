@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
   copyFileSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -156,6 +157,63 @@ it(
         response.result.value.groups.map((group) => group.id),
         ["fake"],
       );
+
+      // Acceptance for the right Sidebar's packaged runtime pieces: the
+      // terminal runner, node-pty, the Office engine, and the four client tabs.
+      assert.equal(existsSync(join(moved, "app/subprocess-runner.mjs")), true);
+      assert.equal(existsSync(join(moved, "node_modules/node-pty")), true);
+      const acceptanceWorkspace = join(root, "acceptance-workspace");
+      mkdirSync(acceptanceWorkspace, { recursive: true });
+      copyFileSync(
+        join(serverRoot, "test/fixtures/office/sample.docx"),
+        join(acceptanceWorkspace, "sample.docx"),
+      );
+      const officeCheck = join(moved, "app/acceptance-office.mjs");
+      writeFileSync(
+        officeCheck,
+        `import { statSync } from "node:fs";\n` +
+          `import { createConverter } from "@deepseek-ai/libreoffice-kit";\n` +
+          `const converter = await createConverter({ timeoutMs: 120_000 });\n` +
+          `try { await converter.render({ inputPath: process.argv[2], outputPath: process.argv[3] }); }\n` +
+          `finally { await converter.dispose(); }\n` +
+          `console.log(statSync(process.argv[3]).size);\n`,
+      );
+      try {
+        const { stdout: officeBytes } = await exec(
+          process.execPath,
+          [
+            officeCheck,
+            join(acceptanceWorkspace, "sample.docx"),
+            join(acceptanceWorkspace, "sample.pdf"),
+          ],
+          { cwd: join(moved, "app"), timeout: 120_000 },
+        );
+        assert.ok(Number(officeBytes.trim()) > 0);
+      } finally {
+        rmSync(officeCheck, { force: true });
+      }
+      const { stdout: ptyType } = await exec(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import { createRequire } from "node:module"; const require = createRequire(process.cwd() + "/x.js"); console.log(typeof require("node-pty").spawn);`,
+        ],
+        { cwd: join(moved, "app"), timeout: 60_000 },
+      );
+      assert.equal(ptyType.trim(), "function");
+
+      const packaged = JSON.parse(readFileSync(join(moved, "web/plugins.json"), "utf8")) as Array<{
+        id: string;
+      }>;
+      const ids = packaged.map((plugin) => plugin.id);
+      for (const id of [
+        "@deepseek-ai/dsh-client-ui-sidebar-files",
+        "@deepseek-ai/dsh-client-ui-sidebar-documentpreview",
+        "@deepseek-ai/dsh-client-ui-sidebar-terminal",
+        "@deepseek-ai/dsh-client-ui-sidebar-browser",
+      ])
+        assert.ok(ids.includes(id), `missing packed client plugin ${id}`);
     });
 
     // Exercise the shipped launcher with a fake server; never invoke Desktop or a real Harness.

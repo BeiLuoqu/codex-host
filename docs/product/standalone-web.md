@@ -194,6 +194,26 @@ Desktop 离线时，独立后台可读取保存的置顶 ID，但尚不提供置
 
 状态继续来自已有投影；原生审批按事件通道能力呈现，完成提醒仅是当前浏览器观测到的运行结束状态，不冒充 Codex 的持久未读状态或跨端已读同步。正文通用运行文案使用“正在处理 / Working”，不暗示某个 Model、推理模式或深度研究能力。
 
+## 右侧栏
+
+右侧栏直接装配 DSH Web 的文件树、文档预览、终端和浏览器插件，并复用其宿主服务、限额、错误提示和恢复行为；CodexHost 只补充本地 Thread 的工作目录、沙箱策略的工作区根目录和终端所属会话适配，不新增设置项、开关或协议。文件树、预览和终端的作用域都取该 Thread 在 Host 上记录的工作目录，不采信浏览器提交的目录；未发送草稿、官方 Codex Thread、远程/未知 Thread 显示 DSH 原有的不可用状态，不会因此创建 Thread、Native Session 或提交 Turn。右侧栏请求沿用现有 Web 登录认证与同源校验；不要以 `--no-auth` 暴露到不可信网络。
+
+文件和预览请求、终端进程都以运行 Web 服务的系统用户权限执行，没有额外的 OS 用户隔离或容器边界。文件树列出目录时限制在 Thread 工作目录内，但 DSH 的文本/字节读取按文件系统读取权限运行，可读取该用户可访问的工作目录外绝对路径。终端使用系统用户默认 shell 与权限；关闭标签会结束对应进程，Web 服务退出时清理其保留的终端。浏览器标签是 Web 页面内的沙箱 iframe，只接受 HTTP(S) 地址，不启动外部浏览器进程。
+
+文档预览支持文本、代码、Markdown、图片、PDF、HTML、CSV/TSV/XLSX 表格，以及经本地 LibreOffice 引擎转换的 DOC/DOCX/PPT/PPTX。Office 引擎按平台以 npm 可选依赖提供：macOS/Windows 使用原生包，Linux 使用 WASM 包；缺少对应引擎或终端原生预构建时，对应能力按 DSH 原有提示显示不可用，不回退为其他引擎，也不影响文件树、预览和浏览器。原生 Office 引擎约 150 MB，发行目录会包含当前平台引擎及其许可证；发行包因此明显增大，且必须与目标 OS/CPU 匹配，不能把 macOS 或 Windows 的发行目录直接复制到其他平台运行。终端依赖 node-pty 预构建；没有对应平台预构建的平台不提供终端。
+
+打包时 `packages/web-server/scripts/pack.ts` 将 LibreOffice 引擎、node-pty 和终端私有 runner 一并放入发行目录的 `node_modules`/`app`，并在缺少引擎时保留 DSH 的 `unavailable` 错误。验证命令：
+
+```sh
+npx vitest run --config tests/vitest.config.js tests/dsh
+node --import tsx --test packages/web-server/test/dsh-right-sidebar.test.ts
+node --import tsx --test packages/web-server/test/dsh-terminal.test.ts
+node --import tsx --test --test-name-pattern="right Sidebar" packages/web-server/test/browser/*.test.ts
+npm run test:web:distribution
+```
+
+其中 `tests/dsh` 为迁入的 DSH workspace-files 与 terminal-controller 测试；浏览器测试覆盖文件树、聊天文件链接预览、DOCX/PPTX 转换、终端创建/输入/尺寸/重连/关闭和浏览器标签。自动化测试使用假 Harness 与模拟 CH Host，不替代真实 Office 文档、所有平台引擎或真机终端验收。
+
 ## 对话轮次导航
 
 正文左侧的轮次导航参考已安装 Codex 的 `thread-user-message-navigation-rail` 与 `floating-navigation-rail-layout` 行为实现：距离正文滚动区左边缘 12px、每项间距 10px；根据正文实际左侧留白判断，少于 48px 时隐藏，不挤占窄屏内容。平时为短刻度，当前阅读轮次加深；悬停目标及相邻三项按距离依次加长。预览向右展开，限制一行提问和三行回复，悬停短暂延迟后出现，键盘聚焦立即显示。

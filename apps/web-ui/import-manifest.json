@@ -15,6 +15,9 @@
     "@deepseek-ai/dsh-client-ui-sidebar",
     "@deepseek-ai/dsh-client-ui-sidebar-right",
     "@deepseek-ai/dsh-client-ui-sidebar-files",
+    "@deepseek-ai/dsh-client-ui-sidebar-documentpreview",
+    "@deepseek-ai/dsh-client-ui-sidebar-terminal",
+    "@deepseek-ai/dsh-client-ui-sidebar-browser",
     "@deepseek-ai/dsh-client-ui-settings",
     "@deepseek-ai/dsh-client-ui-settings-general",
     "@deepseek-ai/dsh-client-ui-conversation",
@@ -35,6 +38,7 @@
     "@deepseek-ai/dsh-client-file-upload",
     "@deepseek-ai/dsh-api-remotes",
     "@deepseek-ai/dsh-api-session-controller",
+    "@deepseek-ai/dsh-api-terminal-controller",
     "@deepseek-ai/dsh-client-connection",
     "@deepseek-ai/dsh-api-workspace-controller",
     "@deepseek-ai/dsh-client-ui-directory-picker-browse",
@@ -120,7 +124,10 @@
     "@deepseek-ai/dsh-util-crypto",
     "@deepseek-ai/dsh-util-values",
     "@deepseek-ai/dsh-util-workspace-path",
-    "@deepseek-ai/schemastery"
+    "@deepseek-ai/schemastery",
+    "@deepseek-ai/dsh-client-ui-sidebar-terminal",
+    "@deepseek-ai/dsh-client-ui-sidebar-documentpreview",
+    "@deepseek-ai/dsh-client-ui-sidebar-browser"
   ],
   "generatedCodecs": [
     "@deepseek-ai/dsh-agent-preset-registry",
@@ -148,12 +155,5 @@
     "@deepseek-ai/dsh-session-reference",
     "@deepseek-ai/dsh-subagent",
     "@deepseek-ai/dsh-user-questions"
-  ],
-  "hostPackages": [
-    "@deepseek-ai/dsh-fs",
-    "@deepseek-ai/dsh-fs-local",
-    "@deepseek-ai/dsh-sandbox-policy",
-    "@deepseek-ai/dsh-scope",
-    "@deepseek-ai/dsh-timeout"
   ]
 }
