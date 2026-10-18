@@ -297,12 +297,18 @@ describe("development Desktop start", () => {
     const macOsInvocation = runningDesktopCleanupInvocation("darwin");
     expect(macOsInvocation?.command).toBe("/bin/sh");
     expect(macOsInvocation?.arguments.at(-1)).toContain(
-      "^/Applications/(ChatGPT|Codex)\\.app/Contents/",
+      "system_desktop_pattern='^/Applications/(ChatGPT|Codex)\\.app/Contents/(MacOS|Frameworks)/'",
     );
     expect(macOsInvocation?.arguments.at(-1)).toContain(
-      "^$HOME/Applications/(ChatGPT|Codex)\\.app/Contents/",
+      'user_desktop_pattern="^$HOME/Applications/(ChatGPT|Codex)\\.app/Contents/(MacOS|Frameworks)/"',
     );
     const macOsScript = macOsInvocation?.arguments.at(-1);
+    expect(macOsScript).not.toContain(
+      "system_desktop_pattern='^/Applications/(ChatGPT|Codex)\\.app/Contents/'",
+    );
+    expect(macOsScript).not.toContain(
+      'user_desktop_pattern="^$HOME/Applications/(ChatGPT|Codex)\\.app/Contents/"',
+    );
     expect(macOsScript).toContain("desktop-runtime-v1.json");
     expect(macOsScript).toContain("lsof -nP -t -iTCP:");
     expect(macOsScript).toContain("ps -p");

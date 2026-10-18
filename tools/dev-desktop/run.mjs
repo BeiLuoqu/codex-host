@@ -60,8 +60,8 @@ Write-Output "codexhost dev: stopped $($desktopProcessIds.Count) Codex Desktop p
 const macOsDesktopCleanupScript = String.raw`
 set -eu
 
-system_desktop_pattern='^/Applications/(ChatGPT|Codex)\.app/Contents/'
-user_desktop_pattern="^$HOME/Applications/(ChatGPT|Codex)\.app/Contents/"
+system_desktop_pattern='^/Applications/(ChatGPT|Codex)\.app/Contents/(MacOS|Frameworks)/'
+user_desktop_pattern="^$HOME/Applications/(ChatGPT|Codex)\.app/Contents/(MacOS|Frameworks)/"
 desktop_running() {
   /usr/bin/pgrep -f "$system_desktop_pattern" >/dev/null 2>&1 ||
     /usr/bin/pgrep -f "$user_desktop_pattern" >/dev/null 2>&1
