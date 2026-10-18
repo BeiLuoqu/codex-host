@@ -6405,29 +6405,7 @@ export class AppServerHost {
   /** Host-observed Turn timing; returns true when a derived metric changed. */
   #meterTurnTiming(thread: ExternalThread, event: HostEvent): boolean {
     if (this.#externalRuntime.get(thread.id) !== thread) return false;
-    const meter = thread.usageMeter;
-    switch (event.type) {
-      case "turn.started":
-      case "turn.autonomous.started":
-        meter.turnStarted(event.turnId, Date.now());
-        return false;
-      case "item.updated":
-        return event.update.type === "text.append" && event.update.text.length > 0
-          ? meter.outputObserved(event.turnId, Date.now())
-          : false;
-      case "item.started":
-      case "item.completed": {
-        const item = event.type === "item.started" ? event.item : event.snapshot.item;
-        return (item.type === "agentMessage" || item.type === "reasoning") && item.text.length > 0
-          ? meter.outputObserved(event.turnId, Date.now())
-          : false;
-      }
-      case "turn.completed":
-        meter.turnCompleted(event.turnId);
-        return true;
-      default:
-        return false;
-    }
+    return thread.usageMeter.observeTurn(event);
   }
 
   async #replayExternalUsage(thread: ExternalThread): Promise<void> {

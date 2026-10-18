@@ -17,6 +17,10 @@
       "types": "./dist/projector.d.ts",
       "import": "./dist/projector.js"
     },
+    "./usage-metering": {
+      "types": "./dist/usage-metering.d.ts",
+      "import": "./dist/usage-metering.js"
+    },
     "./usage-projection": {
       "types": "./dist/usage-projection.d.ts",
       "import": "./dist/usage-projection.js"

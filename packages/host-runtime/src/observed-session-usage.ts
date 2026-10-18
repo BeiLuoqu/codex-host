@@ -2,7 +2,7 @@ import { jsonObjectSchema, type JsonObject } from "@codexhost/shared-contracts";
 import { parseHostUsage, type HostUsage } from "@codexhost/harness-adapter";
 import type { HarnessSessionUsageCapability } from "@codexhost/harness-adapter/plugin";
 import type { UsageMeasurementsStore } from "./usage-measurements-store.js";
-import { UsageMeter } from "./usage-metering.js";
+import { UsageMeter } from "@codexhost/session-runtime/usage-metering";
 import type { ModelPriceCatalog } from "./model-prices.js";
 
 interface State {

@@ -5,14 +5,30 @@ import {
   parseHostUsageRequest,
   type HostUsage,
   type HostUsageRequest,
+  type HostEvent,
 } from "@codexhost/harness-adapter";
 
-import { cacheWrite1hPrice, type ModelPriceLookup } from "./model-prices.js";
+export interface ModelPrice {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cacheWrite1h?: number;
+}
+
+export interface UsagePriceLookup {
+  find(model: string, provider?: string): ModelPrice | null;
+}
+
+/** One-hour cache writes use twice the input price unless explicitly overridden. */
+export function cacheWrite1hPrice(price: ModelPrice): number {
+  return price.cacheWrite1h ?? price.input * 2;
+}
 
 const TOKENS_PER_PRICE_UNIT = 1_000_000;
 
 /**
- * In-memory usage metering for one External Thread's current HarnessSession. It derives cost,
+ * In-memory usage metering for one Thread's current HarnessSession. It derives cost,
  * session cache hit rate, time to first output and Turn output speed from the Adapter's
  * request records; it never persists and never rewrites the Adapter's native fields.
  */
@@ -41,6 +57,32 @@ export class UsageMeter {
 
   get metered(): boolean {
     return this.#metered;
+  }
+
+  /** Host-observed Turn timing; returns true when a displayed metric changes. */
+  observeTurn(event: HostEvent, nowMs = Date.now()): boolean {
+    switch (event.type) {
+      case "turn.started":
+      case "turn.autonomous.started":
+        this.turnStarted(event.turnId, nowMs);
+        return false;
+      case "item.updated":
+        return event.update.type === "text.append" && event.update.text.length > 0
+          ? this.outputObserved(event.turnId, nowMs)
+          : false;
+      case "item.started":
+      case "item.completed": {
+        const item = event.type === "item.started" ? event.item : event.snapshot.item;
+        return (item.type === "agentMessage" || item.type === "reasoning") && item.text.length > 0
+          ? this.outputObserved(event.turnId, nowMs)
+          : false;
+      }
+      case "turn.completed":
+        this.turnCompleted(event.turnId);
+        return true;
+      default:
+        return false;
+    }
   }
 
   /** Records one request; returns false only for a duplicate, which changes nothing. */
@@ -283,7 +325,7 @@ export class UsageMeter {
   }
 
   /** The Thread's published usage: native fields plus Host-derived metrics. */
-  derive(native: HostUsage | null, prices: ModelPriceLookup): HostUsage | null {
+  derive(native: HostUsage | null, prices: UsagePriceLookup): HostUsage | null {
     // Fields only Host may publish are dropped from the Adapter's snapshot.
     const usage = Object.fromEntries(
       Object.entries(native ?? {}).filter(
@@ -341,7 +383,7 @@ export class UsageMeter {
    * named, so the total is a lower bound; a request without Model or cache data voids the total,
    * as does a Session with no priced request at all.
    */
-  #cost(prices: ModelPriceLookup): { total: number; unpricedModels: string[] } | null {
+  #cost(prices: UsagePriceLookup): { total: number; unpricedModels: string[] } | null {
     let total = 0;
     let priced = 0;
     const unpriced = new Set<string>();

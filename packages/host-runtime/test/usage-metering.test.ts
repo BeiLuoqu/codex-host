@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ModelPriceLookup } from "../src/model-prices.js";
 import { bundledModelPrices } from "../src/model-prices.generated.js";
-import { UsageMeter } from "../src/usage-metering.js";
+import { UsageMeter } from "@codexhost/session-runtime/usage-metering";
 
 const prices = new ModelPriceLookup({
   fetchedAtMs: 0,

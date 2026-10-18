@@ -41,7 +41,7 @@ import {
   ExternalSessionReleaseError,
   ExternalThreadLifecycle,
 } from "./external-thread-lifecycle.js";
-import { UsageMeter } from "./usage-metering.js";
+import { UsageMeter } from "@codexhost/session-runtime/usage-metering";
 
 export interface TurnProjectionGate {
   promise: Promise<void>;
