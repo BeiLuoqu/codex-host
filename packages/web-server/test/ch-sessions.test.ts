@@ -326,12 +326,12 @@ it("keeps a Thread created during an in-flight catalog read for its first histor
     if (method === "thread/list" && holding) await listHeld;
     return result;
   };
-  host.projects = async (ids) => {
+  host.projects = async () => {
     if (holding) {
       replaced();
       await projectsHeld;
     }
-    return projects(ids);
+    return projects();
   };
   const staleList = rpc.dispatch("session/list", { args: {} });
   const draft = await rpc.dispatch("session/create", { args: { request: { cwd: root } } });
