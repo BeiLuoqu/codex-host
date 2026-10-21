@@ -57,7 +57,10 @@ class JsonCollector {
   }> = [];
   #buffer = "";
 
-  constructor(stream: PassThrough) {
+  constructor(
+    stream: PassThrough,
+    readonly onHostRequest?: (request: JsonObject) => void,
+  ) {
     stream.setEncoding("utf8");
     stream.on("data", (chunk: string) => {
       this.#buffer += chunk;
@@ -69,6 +72,9 @@ class JsonCollector {
         if (!line) continue;
         const message = JSON.parse(line) as JsonObject;
         this.messages.push(message);
+        if (typeof message.method === "string" && message.id !== undefined) {
+          this.onHostRequest?.(message);
+        }
         for (const waiter of [...this.#waiters]) {
           if (!waiter.predicate(message)) continue;
           this.#waiters.splice(this.#waiters.indexOf(waiter), 1);
@@ -369,7 +375,12 @@ describe.skipIf(!RUN_REAL)("AppServerHost real Claude projection", () => {
       const mappingStoreDirectory = await fs.mkdtemp(path.join(tmpdir(), "codexhost-steer-real-"));
       const desktopInput = new PassThrough();
       const desktopOutput = new PassThrough();
-      const collector = new JsonCollector(desktopOutput);
+      // Claude Code runs the scripted `sleep` without an Approval in the default permission mode;
+      // decline any native action that does ask, so the test never grants extra permissions.
+      const collector = new JsonCollector(desktopOutput, (request) => {
+        if (request.method !== "mcpServer/elicitation/request") return;
+        writeRequest(desktopInput, { id: request.id ?? null, result: { action: "decline" } });
+      });
       const official = new OfficialProcess();
       const claudeAdapter = new ClaudeCodeAdapter({ closeTimeoutMs: 10_000 });
       const host = new AppServerHost({
@@ -393,7 +404,7 @@ describe.skipIf(!RUN_REAL)("AppServerHost real Claude projection", () => {
           method: "thread/start",
           params: {
             model: encodeExternalTransportSelection("claude-code", {
-              permissionModeId: harnessPermissionModeIdSchema.parse("bypassPermissions"),
+              permissionModeId: harnessPermissionModeIdSchema.parse("default"),
             }),
             cwd: workspace,
           },
