@@ -722,6 +722,83 @@ describe("OMP Adapter inspection", () => {
   });
 });
 
+describe("OMP Adapter availability inspection", () => {
+  const listedModels: OmpNativeModel[] = [
+    { provider: "openai-codex", id: "gpt-5.6-luna", reasoning: true },
+  ];
+
+  it("answers from the Model list without starting a Session or caching the result", async () => {
+    const createTransport = vi.fn(() => new FakeOmpTransport());
+    const listModels = vi.fn().mockResolvedValue({ kind: "models", models: listedModels });
+    const adapter = new OmpAdapter({}, { createTransport, listModels });
+    try {
+      await expect(
+        adapter.inspect({ cwd: "/synthetic", purpose: "availability" }),
+      ).resolves.toMatchObject({
+        status: "ready",
+        catalog: { models: [expect.objectContaining({ label: "openai-codex / gpt-5.6-luna" })] },
+      });
+      expect(listModels).toHaveBeenCalledWith({ cwd: "/synthetic" });
+      expect(createTransport).not.toHaveBeenCalled();
+
+      // A full inspection still starts a Session: the availability result is not its cache.
+      await expect(adapter.inspect({ cwd: "/synthetic" })).resolves.toMatchObject({
+        status: "ready",
+      });
+      expect(createTransport).toHaveBeenCalledOnce();
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it("reuses a cached full inspection instead of listing Models", async () => {
+    const createTransport = vi.fn(() => new FakeOmpTransport());
+    const listModels = vi.fn();
+    const adapter = new OmpAdapter({}, { createTransport, listModels });
+    try {
+      const full = await adapter.inspect({ cwd: "/synthetic" });
+      await expect(adapter.inspect({ cwd: "/synthetic", purpose: "availability" })).resolves.toBe(
+        full,
+      );
+      expect(listModels).not.toHaveBeenCalled();
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it.each([
+    [{ kind: "notInstalled", message: "omp missing" }, "notInstalled", "notInstalled", false],
+    [{ kind: "timedOut" }, "error", "unavailable", true],
+  ] as const)("reports %j without starting a Session", async (listed, status, code, retryable) => {
+    const createTransport = vi.fn(() => new FakeOmpTransport());
+    const adapter = new OmpAdapter({}, { createTransport, listModels: async () => listed });
+    try {
+      await expect(
+        adapter.inspect({ cwd: "/synthetic", purpose: "availability" }),
+      ).resolves.toMatchObject({ status, error: { code, retryable, stage: "model-list" } });
+      expect(createTransport).not.toHaveBeenCalled();
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it.each([{ kind: "unanswered" }, { kind: "models", models: [] }] as const)(
+    "falls back to Session inspection for %j",
+    async (listed) => {
+      const createTransport = vi.fn(() => new FakeOmpTransport());
+      const adapter = new OmpAdapter({}, { createTransport, listModels: async () => listed });
+      try {
+        await expect(
+          adapter.inspect({ cwd: "/synthetic", purpose: "availability" }),
+        ).resolves.toMatchObject({ status: "ready" });
+        expect(createTransport).toHaveBeenCalledOnce();
+      } finally {
+        await adapter.close();
+      }
+    },
+  );
+});
+
 describe("OMP Adapter Fork", () => {
   it("forks the requested completed prefix from the next OMP User Entry", async () => {
     const firstTurn = historyTurn({

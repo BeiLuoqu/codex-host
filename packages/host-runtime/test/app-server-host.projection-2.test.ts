@@ -104,6 +104,17 @@ describe("AppServerHost HarnessAdapter projection", () => {
     expect(claude.inspectionCalls).toBe(1);
     expect(pi.inspectionCalls).toBe(0);
 
+    const inspect = vi.spyOn(pi, "inspect");
+    writeRequest(fixture.desktopInput, {
+      id: 33,
+      method: "codexhost/harness/inspect",
+      params: { harnessId: "pi", refresh: true, purpose: "availability" },
+    });
+    await expect(
+      fixture.collector.waitFor((message) => requestId(message, 33)),
+    ).resolves.toMatchObject({ result: { status: "ready" } });
+    expect(inspect).toHaveBeenCalledWith({ refresh: true, purpose: "availability" });
+
     writeRequest(fixture.desktopInput, {
       id: 32,
       method: "codexhost/harness/inspect",

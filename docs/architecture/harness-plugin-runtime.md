@@ -87,6 +87,7 @@ plugins/
 - `links.website/documentation/installation` 只接受不带用户凭据的 HTTPS 地址。
 - `installation` 提供展示用命令、下载链接和前后提示；`notice` 提供插件兼容性说明。文本以 `en` 为必需回退、`zh-CN` 为可选翻译。Renderer 仅展示/复制这些数据，绝不从元数据执行命令，自动安装仍走 Adapter 的公共原生能力。
 - 能力继续由 `HarnessAdapter.inspect()`、Session 能力和公共可选接口提供，不在 Manifest 复制第二份运行时能力真相。
+- `codexhost/harness/inspect` 可带 `purpose: "availability"`，表示调用方只使用状态和错误。Renderer 启动时对所有已注册 Harness 的后台可用性检测使用该标记；用户选中 Harness 后加载 Model 目录仍做完整 inspection。Adapter 可据此不启动原生 Session 回答，避免用户未选用的 Harness 执行 Session 启动副作用；这种结果可以缺少原生默认 Model 和 Thinking 选项，不得写入完整 inspection 的缓存。未处理该标记的 Adapter 照常做完整 inspection。旧版 Host 按未知参数以 -32602 拒绝时，Renderer 去掉该标记重试一次。目前 OMP 用 `omp models --json` 回答（不创建 Session，因此不触发 OMP 的 Provider 连接预热）；命令不可用、输出无法识别或列表为空时回到 Session inspection，由原生启动报告原因。
 - 命令目录由可选的静态 `HarnessAdapter.commandCatalog` 声明，通过 `codexhost/harness/commands/inspect` 查询；读取目录不检查原生运行时、不连接原生服务、不创建或恢复 Session。未声明时返回空目录，不通过启动会话回退发现。执行仍走 `session.commands`。
 
 入口导出 [`HarnessPluginModule`](../../packages/harness-adapter/src/plugin.ts) 定义的工厂，不通过模块全局副作用注册：

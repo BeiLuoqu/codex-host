@@ -1,4 +1,9 @@
 import { createOmpUsageStatistics } from "./omp-usage-statistics.js";
+import {
+  listOmpModels,
+  type OmpModelListInput,
+  type OmpModelListResult,
+} from "./omp-model-list.js";
 import { createTwoFilesPatch, parsePatch } from "diff";
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
@@ -16,6 +21,7 @@ import {
   type HarnessCommandInvocation,
   type HarnessError,
   type HarnessInspection,
+  type HarnessModelCatalog,
   type HarnessModelRef,
   type HarnessOutput,
   type HarnessResult,
@@ -163,6 +169,22 @@ export interface OmpTurnTransport {
 
 export interface OmpAdapterDependencies {
   createTransport(options: OmpRpcSessionOptions): OmpTurnTransport;
+  listModels?(input: OmpModelListInput): Promise<OmpModelListResult>;
+}
+
+function ompInspectionCapabilities(
+  selectThinkingOption: boolean,
+): Extract<HarnessInspection, { status: "ready" }>["capabilities"] {
+  return {
+    configuration: {
+      selectModel: true,
+      selectThinkingOption,
+      selectPermissionMode: true,
+      permissionModeScope: "live",
+    },
+    history: { fork: true, forkAcrossCwd: true, rollbackLastTurn: true },
+    subagents: { observe: true, readTranscript: true },
+  };
 }
 
 interface ActiveTool {
@@ -2351,6 +2373,7 @@ export class OmpAdapter implements HarnessAdapter {
   readonly #inspectionCache = new Map<string, Extract<HarnessInspection, { status: "ready" }>>();
   readonly #inspectionInFlight = new Map<string, Promise<HarnessInspection>>();
   readonly #inspections = new Set<OmpTurnTransport>();
+  readonly #listModels: (input: { cwd: string }) => Promise<OmpModelListResult>;
   readonly #sessions = new Set<OmpHarnessSession>();
   readonly #toolOutputLimit: number;
   #closePromise: Promise<void> | null = null;
@@ -2363,6 +2386,13 @@ export class OmpAdapter implements HarnessAdapter {
     },
   ) {
     this.#createTransport = dependencies.createTransport;
+    const listModels = dependencies.listModels ?? listOmpModels;
+    this.#listModels = ({ cwd }) =>
+      listModels({
+        cwd,
+        ...(options.command ? { command: options.command } : {}),
+        ...(options.environment ? { environment: options.environment } : {}),
+      });
     this.sessionImport = new OmpSessionImport({ ...process.env, ...options.environment });
     this.usageStatistics = createOmpUsageStatistics({ ...process.env, ...options.environment });
     this.#closeTimeoutMs = options.closeTimeoutMs ?? 2_000;
@@ -2387,6 +2417,10 @@ export class OmpAdapter implements HarnessAdapter {
       const cached = this.#inspectionCache.get(cwd);
       if (cached) return cached;
     }
+    if (input.purpose === "availability") {
+      const availability = await this.#inspectAvailability(cwd);
+      if (availability) return availability;
+    }
 
     const inspection = this.#inspectCwd(cwd).then((result) => {
       if (result.status === "ready") this.#inspectionCache.set(cwd, result);
@@ -2398,6 +2432,58 @@ export class OmpAdapter implements HarnessAdapter {
         this.#inspectionInFlight.delete(cwd);
       }
     });
+  }
+
+  /**
+   * Availability without a Session: a Session startup runs OMP's own startup work, including
+   * Provider connection prewarm, for a Harness the user may never select. The result carries no
+   * native default Model or Thinking option, so it is neither cached nor used to update
+   * `#thinkingSelectionSupported`. Returns null when a Session must answer instead: this OMP cannot
+   * list Models, or lists none.
+   */
+  async #inspectAvailability(cwd: string): Promise<HarnessInspection | null> {
+    const startedAt = Date.now();
+    const stage = "model-list";
+    const listed = await this.#listModels({ cwd });
+    if (listed.kind === "unanswered") return null;
+    if (listed.kind === "notInstalled") {
+      return {
+        status: "notInstalled",
+        error: {
+          code: "notInstalled",
+          message: listed.message,
+          retryable: false,
+          stage,
+          durationMs: Date.now() - startedAt,
+        },
+      };
+    }
+    if (listed.kind === "timedOut") {
+      return {
+        status: "error",
+        error: {
+          code: "unavailable",
+          message: "Oh My Pi did not list its models in time",
+          retryable: true,
+          stage,
+          durationMs: Date.now() - startedAt,
+        },
+      };
+    }
+    // An empty list alone does not prove missing configuration; the Session reports the cause.
+    if (listed.models.length === 0) return null;
+    let catalog: HarnessModelCatalog;
+    try {
+      catalog = normalizeOmpModelCatalog(listed.models, null, null, null);
+    } catch {
+      return null;
+    }
+    return {
+      status: "ready",
+      catalog,
+      permissionModes: OMP_PERMISSION_MODE_CATALOG,
+      capabilities: ompInspectionCapabilities(false),
+    };
   }
 
   async #inspectCwd(cwd: string): Promise<HarnessInspection> {
@@ -2428,16 +2514,7 @@ export class OmpAdapter implements HarnessAdapter {
         status: "ready",
         catalog,
         permissionModes: OMP_PERMISSION_MODE_CATALOG,
-        capabilities: {
-          configuration: {
-            selectModel: true,
-            selectThinkingOption: thinkingLevels !== null,
-            selectPermissionMode: true,
-            permissionModeScope: "live",
-          },
-          history: { fork: true, forkAcrossCwd: true, rollbackLastTurn: true },
-          subagents: { observe: true, readTranscript: true },
-        },
+        capabilities: ompInspectionCapabilities(thinkingLevels !== null),
       };
     } catch (error) {
       await transport.close().catch(() => undefined);
