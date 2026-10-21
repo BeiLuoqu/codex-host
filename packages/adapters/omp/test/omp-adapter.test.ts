@@ -849,6 +849,29 @@ describe("OMP Adapter availability inspection", () => {
     }
   });
 
+  it("reuses a full inspection that finished while the Model list ran", async () => {
+    const createTransport = vi.fn(() => new FakeOmpTransport());
+    let answer: (value: { kind: "unanswered" }) => void = () => undefined;
+    const listModels = vi.fn(
+      () =>
+        new Promise<{ kind: "unanswered" }>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const adapter = new OmpAdapter({}, { createTransport, listModels });
+    try {
+      const availability = adapter.inspect({ cwd: "/synthetic", purpose: "availability" });
+      await vi.waitFor(() => expect(listModels).toHaveBeenCalledOnce());
+      const full = await adapter.inspect({ cwd: "/synthetic" });
+      answer({ kind: "unanswered" });
+
+      await expect(availability).resolves.toBe(full);
+      expect(createTransport).toHaveBeenCalledOnce();
+    } finally {
+      await adapter.close();
+    }
+  });
+
   it.each([{ kind: "unanswered" }, { kind: "models", models: [] }] as const)(
     "falls back to Session inspection for %j",
     async (listed) => {

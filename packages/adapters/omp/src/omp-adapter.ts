@@ -2429,8 +2429,8 @@ export class OmpAdapter implements HarnessAdapter {
    * Availability without a Session: a Session startup runs OMP's own startup work, including
    * Provider connection prewarm, for a Harness the user may never select. The listed result
    * carries no native default Model or Thinking option, so it is neither cached nor used to
-   * update `#thinkingSelectionSupported`. When the list cannot answer, the shared full inspection
-   * answers instead, joining one already in flight.
+   * update `#thinkingSelectionSupported`. When the list cannot answer, a full inspection answers
+   * instead, reusing one that is in flight or finished meanwhile.
    */
   async #inspectAvailability(cwd: string, refresh = false): Promise<HarnessInspection> {
     // An explicit re-check must not leave an older full catalog to answer the next catalog load.
@@ -2446,7 +2446,12 @@ export class OmpAdapter implements HarnessAdapter {
     const listed = await pending;
     if (listed) return listed;
     if (this.#closePromise) return closedInspection();
-    return this.#inspectionInFlight.get(cwd) ?? this.#startFullInspection(cwd);
+    // A full inspection may have started or finished while the list ran; it is newer than this check.
+    return (
+      this.#inspectionInFlight.get(cwd) ??
+      this.#inspectionCache.get(cwd) ??
+      this.#startFullInspection(cwd)
+    );
   }
 
   #startFullInspection(cwd: string): Promise<HarnessInspection> {
