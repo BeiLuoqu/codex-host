@@ -3738,6 +3738,27 @@ export class AppServerHost {
       if (!projected.effectiveModel) {
         throw new Error("Harness Session did not report an effective Model");
       }
+      // Resume and Fork read the saved selection, so keep it on the confirmed Model.
+      const transportModelId = encodeExternalTransportSelection(thread.harnessId, {
+        ...(decodeExternalTransportSelection(thread.harnessId, thread.transportModelId) ?? {}),
+        model: projected.effectiveModel,
+      });
+      thread.transportModelId = transportModelId;
+      thread.requestedModel = projected.effectiveModel;
+      try {
+        thread.record = await this.#repository.setTransportModelId(
+          thread.record.hostThreadId,
+          transportModelId,
+        );
+      } catch (error) {
+        this.#diagnose(error);
+      }
+      thread.thread = externalThreadValue({
+        record: { ...thread.record, transportModelId },
+        turns: thread.turns,
+        sessionId: thread.sessionId,
+        running: thread.running,
+      });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(projected) }));
     } catch (error) {
       await this.#writer.json(
