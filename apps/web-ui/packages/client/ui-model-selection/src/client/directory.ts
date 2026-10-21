@@ -16,6 +16,7 @@ import type { RemoteResult, TypertClientRemote } from "@deepseek-ai/dsh-typert-p
 import type { ObservableSnapshot, SnapshotStore } from "@deepseek-ai/dsh-client-store";
 import { createSnapshotStore } from "@deepseek-ai/dsh-client-store";
 import type { ModelCatalogDirectory } from "./catalog.ts";
+import { isModelRoute } from "./fast-model.ts";
 
 /** Directory snapshot both entries render from. */
 export interface ModelDirectoryState {
@@ -236,7 +237,7 @@ export class ModelDirectory {
     const routable = groups.some(
       (group) =>
         group.id === selection.provider &&
-        group.models.some((model) => model.id === selection.model),
+        group.models.some((model) => isModelRoute(model, selection.model)),
     );
     this.store.set({
       current: selection,

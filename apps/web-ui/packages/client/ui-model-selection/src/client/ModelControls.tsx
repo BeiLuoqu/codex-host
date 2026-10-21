@@ -1,6 +1,7 @@
-/** One composer seat with separate model/effort and native Harness controls. */
+/** One composer seat with separate Fast, model/effort and native Harness controls. */
 import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ModelSelectInjected } from "./slots.ts";
+import { FastToggle } from "./FastToggle.tsx";
 import { HarnessSelect } from "./HarnessSelect.tsx";
 import { ModelSelect } from "./ModelSelect.tsx";
 import css from "./HarnessSelect.module.css";
@@ -11,6 +12,7 @@ export function ModelControls(
 ) {
   return (
     <div className={css.controls}>
+      <FastToggle {...props} />
       <ModelSelect {...props} />
       <HarnessSelect {...props} />
     </div>

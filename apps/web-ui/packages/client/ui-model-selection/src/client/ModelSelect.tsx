@@ -60,6 +60,7 @@ import type { PropsLocale } from "@deepseek-ai/dsh-client-ui-slots";
 import type { ModelSelectInjected } from "./slots.ts";
 import css from "./ModelSelect.module.css";
 import { orderModelProviders } from "./provider-order.ts";
+import { isModelRoute } from "./fast-model.ts";
 
 /** The primary Thinking card stays mounted while its Model sibling is open. */
 type Pane = "root" | "model";
@@ -182,13 +183,14 @@ export function ModelSelect({
       filteredGroups.flatMap((group) =>
         group.models.map((model) => ({
           provider: group.id,
-          model: model.id,
+          model,
         })),
       ),
     [filteredGroups],
   );
   const currentVisibleIndex = visibleModels.findIndex(
-    (model) => model.provider === state.current?.provider && model.model === state.current.model,
+    (row) =>
+      row.provider === state.current?.provider && isModelRoute(row.model, state.current.model),
   );
   const activeModelIndex = Math.min(
     highlightedIndex ?? Math.max(0, currentVisibleIndex),
@@ -200,7 +202,7 @@ export function ModelSelect({
       : choices.findIndex(
           (c) =>
             c.selection.provider === state.current?.provider &&
-            c.selection.model === state.current.model,
+            isModelRoute(c.model, state.current.model),
         );
   const currentChoice = choices[selectedIndex];
   const reasoning = currentChoice?.model.reasoning;
@@ -453,7 +455,8 @@ export function ModelSelect({
       if (event.key === "Tab" && visibleModels.length === 0) return;
       event.preventDefault();
       const highlighted = visibleModels[activeModelIndex];
-      if (!busy && highlighted !== undefined) choose(highlighted);
+      if (!busy && highlighted !== undefined)
+        choose({ provider: highlighted.provider, model: highlighted.model.id });
       return;
     }
     // Tab settles like Enter and Shift+Tab leaves like Escape, so the menu's
@@ -548,7 +551,11 @@ export function ModelSelect({
   };
 
   const choose = (selection: ModelSelection): void => {
-    if (state.current?.provider === selection.provider && state.current.model === selection.model) {
+    // Re-picking the current Model (plain or Fast) keeps the selection unchanged.
+    if (
+      state.current?.provider === selection.provider &&
+      currentChoice?.selection.model === selection.model
+    ) {
       closeAfterSelection();
       return;
     }
@@ -779,7 +786,8 @@ export function ModelSelect({
                     group.models.map((model) => {
                       const index = modelIndex++;
                       const selected =
-                        state.current?.provider === group.id && state.current.model === model.id;
+                        state.current?.provider === group.id &&
+                        isModelRoute(model, state.current.model);
                       const favorite = favorites.has(modelKey(group.id, model.id));
                       return (
                         <div
@@ -822,7 +830,8 @@ export function ModelSelect({
                               <span className={css.modelName}>{model.name}</span>
                             </span>
                             <span className={css.check}>
-                              {pending?.provider === group.id && pending.model === model.id ? (
+                              {pending?.provider === group.id &&
+                              isModelRoute(model, pending.model) ? (
                                 <StateDot state="ongoing" />
                               ) : selected ? (
                                 <IconCheckOutlineRegular />

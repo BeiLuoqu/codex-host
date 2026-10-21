@@ -11,9 +11,18 @@ import { createHarnessAdapter as createOther } from "../fake-harness/other/plugi
 const selectionUrl = "**/api/session/selectModel";
 const composerLabel = "Describe what you want to build, / commands, @ files or sessions";
 
-async function startPicker(t: TestContext, width: number): Promise<Page> {
+async function startPicker(t: TestContext, width: number, fast = false): Promise<Page> {
   const host = new FakeChHost();
   const adapters = { fake: createFake(), other: createOther() };
+  if (fast) {
+    const inspect = adapters.other.inspect;
+    adapters.other.inspect = async () => {
+      const inspection = await inspect();
+      const [first] = inspection.catalog.models;
+      if (first) Object.assign(first, { fastModel: { id: "other-model-priority" } });
+      return inspection;
+    };
+  }
   t.after(async () => {
     await Promise.all(Object.values(adapters).map((adapter) => adapter.close()));
   });
@@ -262,4 +271,66 @@ for (const width of [390, 1280]) {
       },
     );
   }
+
+  it(`Fast toggles the current Model's variant at ${width}px`, { timeout: 60_000 }, async (t) => {
+    const page = await startPicker(t, width, true);
+    type Selection = { provider: string; model: string; reasoningEffort?: string };
+    const selections: Selection[] = [];
+    await page.route(selectionUrl, async (route) => {
+      const body = route.request().postDataJSON() as {
+        payload: { args: { request: Selection & { sessionId: string } } };
+      };
+      const { provider, model, reasoningEffort } = body.payload.args.request;
+      selections.push({ provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) });
+      await route.continue();
+    });
+    const fast = page.getByRole("button", { name: "Fast", exact: true });
+    const current = (effort: string) =>
+      page
+        .getByRole("button", {
+          name: `Select model, current Other Model, reasoning effort ${effort}`,
+          exact: true,
+        })
+        .waitFor();
+    assert.equal(await fast.getAttribute("aria-pressed"), "false");
+
+    await fast.hover();
+    await page.getByRole("tooltip").getByText("Fast is off · Click to enable").waitFor();
+    await fast.click();
+    await page.locator('[aria-label="Fast"][aria-pressed="true"]').waitFor();
+    // The variant is the same Model: label, Thinking and menu state are unchanged.
+    await current("High");
+    assert.equal(await trigger(page).getAttribute("aria-expanded"), "false");
+    assert.deepEqual(selections.at(-1), {
+      provider: "other",
+      model: "other-model-priority",
+      reasoningEffort: "high",
+    });
+
+    // Thinking keeps Fast; the Model menu checks the base Model row.
+    await trigger(page).click();
+    await page.getByRole("menuitemradio", { name: "Low", exact: true }).click();
+    await current("Low");
+    assert.equal(selections.at(-1)?.model, "other-model-priority");
+    assert.equal(await fast.getAttribute("aria-pressed"), "true");
+    await openModels(page, "Other Model");
+    assert.equal(
+      await page
+        .getByRole("menuitemradio", { name: "Other Model", exact: true })
+        .getAttribute("aria-checked"),
+      "true",
+    );
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+
+    await fast.click();
+    await page.locator('[aria-label="Fast"][aria-pressed="false"]').waitFor();
+    assert.equal(selections.at(-1)?.model, "other-model");
+    assert.equal(selections.at(-1)?.reasoningEffort, "low");
+
+    // Models without a Fast variant hide the control.
+    await openModels(page, "Other Model");
+    await page.getByRole("menuitemradio", { name: "Other Alternate", exact: true }).click();
+    await fast.waitFor({ state: "detached" });
+  });
 }

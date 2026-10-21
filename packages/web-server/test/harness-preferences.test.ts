@@ -108,6 +108,25 @@ it("shares GUI file preferences across Web clients and ignores Web-only copies",
   assert.deepEqual(decorated.rememberedSelections, {
     fake: { provider: "fake", model: "native" },
   });
+  // A remembered Fast ref restores its base Model, so new Threads start with Fast off.
+  await a.remember("fake", { model: { id: "native-fast" }, permissionModeId: "auto" });
+  const fastDecorated = await a.decorate({
+    default: { provider: "fake", model: "alternate" },
+    groups: [
+      {
+        id: "fake",
+        name: "Fake",
+        models: [
+          { id: "alternate", name: "Alternate" },
+          { id: "native", name: "Native", fastModel: "native-fast" },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(fastDecorated.rememberedSelections, {
+    fake: { provider: "fake", model: "native" },
+  });
+  await a.remember("fake", { model: { id: "native" }, permissionModeId: "auto" });
   await call("session/create", { sessionId: "first", cwd: root });
   const projection = (await call("session/projections", { sessionId: "first" })) as {
     values: Record<string, unknown>;

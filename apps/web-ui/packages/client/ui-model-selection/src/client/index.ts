@@ -29,6 +29,7 @@ import type { ModelSelectInjected } from "./slots.ts";
 import { ModelControls } from "./ModelControls.tsx";
 import { en, zh, type ModelKey } from "./locales.ts";
 import { orderModelProviders } from "./provider-order.ts";
+import { isModelRoute } from "./fast-model.ts";
 
 export { ModelDirectory } from "./directory.ts";
 export type { ModelDirectoryState } from "./directory.ts";
@@ -60,7 +61,7 @@ function optionsOf(directory: ModelDirectoryState, t: TranslateNS<"model">): Sel
         group: { name: group.id, label: name },
         ...(directory.current !== null &&
         directory.current.provider === group.id &&
-        directory.current.model === model.id
+        isModelRoute(model, directory.current.model)
           ? { active: true }
           : {}),
       });
@@ -89,13 +90,15 @@ function selectionOf(state: ModelDirectoryState, id: string): ModelSelection | u
   for (const group of state.groups) {
     for (const model of group.models) {
       if (rowId(group.id, model.id) !== id) continue;
-      const sameRoute = state.current?.provider === group.id && state.current.model === model.id;
+      const { current } = state;
+      const sameRoute = current?.provider === group.id && isModelRoute(model, current.model);
       const reasoningEffort = sameRoute
-        ? (state.current?.reasoningEffort ?? model.reasoning?.defaultEffort)
+        ? (current.reasoningEffort ?? model.reasoning?.defaultEffort)
         : model.reasoning?.defaultEffort;
       return {
         provider: group.id,
-        model: model.id,
+        // Re-picking the current Model keeps its Fast variant.
+        model: sameRoute ? current.model : model.id,
         ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
       };
     }

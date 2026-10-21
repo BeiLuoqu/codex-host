@@ -42,6 +42,9 @@ export const zh = {
   "search.empty": "没有匹配的模型。",
   "empty.models": "没有可用的模型。",
   "empty.efforts": "当前模型未提供推理等级。",
+  "fast.off": "Fast 已关闭 · 点击开启",
+  "fast.on": "Fast 已开启 · 点击关闭",
+  "fast.description": "Codex Fast 模式：优先处理请求，可能增加额度消耗。",
 } satisfies Record<string, string>;
 
 /** The model namespace key union. */
@@ -82,4 +85,7 @@ export const en = {
   "search.empty": "No matching models.",
   "empty.models": "No models available.",
   "empty.efforts": "This model provides no reasoning effort levels.",
+  "fast.off": "Fast is off · Click to enable",
+  "fast.on": "Fast is on · Click to disable",
+  "fast.description": "Codex Fast mode prioritizes requests and may increase usage.",
 } satisfies Record<ModelKey, string>;

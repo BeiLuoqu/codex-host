@@ -23,6 +23,8 @@ export interface ModelGroup {
     id: string;
     name: string;
     description?: string;
+    /** Native Fast variant of this Model; selected through the same Model RPC. */
+    fastModel?: string;
     reasoning?: { efforts: Array<{ id: string; name: string }>; defaultEffort?: string };
   }>;
 }
@@ -116,6 +118,7 @@ export function groupOf(
         ...(model.resolvedModelLabel !== undefined && model.resolvedModelLabel !== model.label
           ? { description: model.resolvedModelLabel }
           : {}),
+        ...(model.fastModel ? { fastModel: model.fastModel.id } : {}),
         ...(efforts.length > 0
           ? {
               reasoning: {

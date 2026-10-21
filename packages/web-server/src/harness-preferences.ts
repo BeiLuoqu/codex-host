@@ -100,7 +100,11 @@ export class WebHarnessPreferences {
       ): { provider: string; model: string; reasoningEffort?: string } | undefined => {
         const configuration = configurationFor(group.id);
         const model =
-          group.models.find((model) => model.id === configuration?.model?.id) ??
+          // A remembered Fast ref restores its base Model: new Threads start with Fast off.
+          group.models.find(
+            (model) =>
+              model.id === configuration?.model?.id || model.fastModel === configuration?.model?.id,
+          ) ??
           group.models.find((model) => model.id === fallbackModelId) ??
           group.models[0];
         if (!model) return undefined;

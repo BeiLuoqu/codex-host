@@ -81,6 +81,8 @@ export class ModelCatalogDirectory {
         for (const group of response.value.groups) {
           for (const model of group.models) {
             this.reasoning.set(JSON.stringify([group.id, model.id]), model.reasoning);
+            if (model.fastModel !== undefined)
+              this.reasoning.set(JSON.stringify([group.id, model.fastModel]), model.reasoning);
           }
         }
         this.store.set({ value: response.value, status: "ready", error: null });
