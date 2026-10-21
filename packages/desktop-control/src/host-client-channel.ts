@@ -5,6 +5,7 @@ import {
   clientChannelDescriptorSchema,
   clientChannelEventSchema,
   clientThreadSnapshotSchema,
+  harnessInstallationRequestTimeoutMs,
   type ClientChannelDescriptor,
   type ClientChannelCursor,
   type ClientChannelEvent,
@@ -185,7 +186,7 @@ export class HostClientChannel {
       }
     }
   }
-  private async post<T>(route: string, body: unknown): Promise<T> {
+  private async post<T>(route: string, body: unknown, timeoutMs = 120_000): Promise<T> {
     if (this.stopped || !this.online)
       throw new Error("CH is disconnected; reconnect before submitting an operation");
     const generation = this.generation;
@@ -200,7 +201,7 @@ export class HostClientChannel {
           "content-type": "application/json",
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       const parsed: unknown = await response.json();
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
@@ -227,7 +228,11 @@ export class HostClientChannel {
     return value.result as T;
   }
   request<T>(method: string, params: Record<string, unknown>): Promise<T> {
-    return this.post("/v1/rpc", { method, params });
+    return this.post(
+      "/v1/rpc",
+      { method, params },
+      harnessInstallationRequestTimeoutMs(method, params) ?? 120_000,
+    );
   }
   get epoch(): string {
     return this.descriptor.epoch;

@@ -46,6 +46,8 @@ Web 网关自有数据默认位于 `~/.codexhost/web/`，源码入口与打包�
 
 收藏、新会话配置与共享空闲释放设置由 Host 提供，空闲释放设置适用于 CH 管理的全部外部会话，包括 Codex CLI。旧 Host 不支持新接口时，普通会话仍可使用，收藏保存和共享设置不可用。
 
+Web 设置在“通用”之后提供连接、账号、用量统计、更新和关于，直接复用控制台的设置页代码（`renderer-extension` 的 `web-settings.js`，构建时复制为 Web 的 `codexhost-settings.js`，打开对应分区时按需加载并渲染在 Shadow DOM 中）。设置弹窗宽 1040px（不超过视口宽度减 48px）；页面声明 `codexhost-settings-page` 容器，宽度不足 720px 时沿用控制台的窄屏布局。请求经 Web 认证的 `/api/ch/v1/rpc` 发到 Host 客户端通道，所需设置方法已加入 `CLIENT_CHANNEL_METHODS`；Harness 安装更新沿用安装请求的长超时。会话导入继续使用 Web 侧栏的导入页；远程连接（SSH）依赖 Desktop，不在 Web 提供。Harness 排序在设置打开期间每 3 秒与 Host 核对。手机等非本机访问暂不限制安装与更新操作。
+
 ## Codex CLI 作为外部 Harness
 
 `npm start web` 默认启用所有打包的会话 Harness，包括 Codex CLI（`codex-cli`）与 Pi，无需 `--harness` 或其他覆盖参数。Codex CLI 与其他 Harness 相同：Manifest 声明 `surfaces: ["web"]`，由共享后台的外部 Thread 运行时执行、持久化与恢复；Web 只连接 Host，不加载第二份执行实现。`--harness <id,...>` 仍是可选的 Harness 子集覆盖，`--adapters`/`--ch-plugins` 指定打包插件目录；缺少所选插件或选择用量统计插件仍会报错。原生 CLI 缺失或检查失败是普通的不可用状态，不阻止 Web 启动。

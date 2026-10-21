@@ -1,5 +1,5 @@
 /** Build the selected browser plugins directly from the imported frontend sources. */
-import { globSync, readFileSync } from "node:fs";
+import { copyFileSync, globSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build as buildShell } from "vite";
@@ -34,3 +34,8 @@ for (const name of plugins) {
 }
 console.log("codexhost web: building browser shell");
 await buildShell({ root: resolve(root, "apps/web") });
+// CodexHost settings pages shared with the console (built by `build:renderer`).
+copyFileSync(
+  resolve(root, "../../packages/renderer-extension/dist/web-settings.js"),
+  resolve(root, "apps/web/dist/codexhost-settings.js"),
+);

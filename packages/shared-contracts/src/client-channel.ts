@@ -44,6 +44,25 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/harness/session-import/sources",
   "codexhost/harness/session-import/list",
   "codexhost/harness/session-import/import",
+  // Settings pages shared with the console (connections, accounts, usage, updates).
+  "codexhost/harness/installation",
+  "codexhost/harness/launch-settings/get",
+  "codexhost/harness/launch-settings/set",
+  "codexhost/harness/web-ui/open",
+  "codexhost/harness/accounts/sources",
+  "codexhost/harness/accounts/list",
+  "codexhost/harness/accounts/inspect",
+  "codexhost/harness/credential-imports",
+  "codexhost/account/list",
+  "codexhost/account/refresh",
+  "codexhost/account/usage/inspect",
+  "codexhost/usage/model-prices/get",
+  "codexhost/usage/model-prices/set",
+  "codexhost/usage/model-prices/default",
+  "codexhost/usage/statistics/get",
+  "codexhost/update/check",
+  "codexhost/update/start",
+  "codexhost/update/status",
 ] as const;
 /** Explicit no-project creation; naming input is not a cwd or a project ID. */
 export const clientProjectlessWorkspaceSchema = z

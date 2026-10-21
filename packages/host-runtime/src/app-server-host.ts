@@ -1421,7 +1421,7 @@ export class AppServerHost {
       const reply = await this.#handleControlRequest(
         method,
         method === "thread/list" ? { ...params, modelProviders: ["codexhost"] } : params,
-        CONSOLE_REQUEST_TIMEOUT_MS,
+        harnessInstallationRequestTimeoutMs(method, params) ?? CONSOLE_REQUEST_TIMEOUT_MS,
         "client",
       );
       return "error" in reply && [-32090, -32093].includes(reply.error.code)

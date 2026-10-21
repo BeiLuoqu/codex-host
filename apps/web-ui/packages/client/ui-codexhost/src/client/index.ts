@@ -29,6 +29,8 @@ import { ensureServiceWorker } from "./notifications.ts";
 import { NotificationsRow } from "./NotificationsRow.tsx";
 import { IdleReleaseRow } from "./IdleReleaseRow.tsx";
 import { ImportPage, type ImportPageFace } from "./ImportPage.tsx";
+import { HostSettingsSection, type HostSettingsSectionFace } from "./HostSettingsSection.tsx";
+import type {} from "@deepseek-ai/dsh-client-ui-theme/client";
 import { en, zh, type ImportLocaleKey } from "./locales.ts";
 
 declare module "@deepseek-ai/dsh-client-ui-slots" {
@@ -53,7 +55,17 @@ export const inject = [
   "sessions",
   "remote",
   "inputTriggers",
+  "theme",
 ];
+
+/** Console settings pages shown in Web settings, after General. */
+const HOST_SETTINGS_PAGES = [
+  ["connections", "settings.connections"],
+  ["accounts", "settings.accounts"],
+  ["usage-statistics", "settings.usage"],
+  ["updates", "settings.updates"],
+  ["about", "settings.about"],
+] as const;
 
 /**
  * Contribute the sidebar entry and its main-column page.
@@ -158,6 +170,30 @@ export function apply(ctx: ClientContext): void {
       IdleReleaseRow,
     ),
   );
+
+  const locale: HostSettingsSectionFace["locale"] = {
+    get: () => ctx.locale.getLocale().active,
+    subscribe: (listener) => ctx.locale.subscribe(listener),
+  };
+  const colorScheme: HostSettingsSectionFace["colorScheme"] = {
+    get: () => ctx.theme.getTheme().active.colorScheme,
+    subscribe: (listener) => ctx.on("theme/change", listener),
+  };
+  HOST_SETTINGS_PAGES.forEach(([pageId, label], index) => {
+    ctx.slots.inject("settings.section", () =>
+      ctx.slots.register(
+        {
+          name: "settings.section",
+          id: `codexhost-${pageId}`,
+          order: 10 + index,
+          label: () => t(label),
+          locale: NS,
+          inject: (): HostSettingsSectionFace => ({ pageId, locale, colorScheme }),
+        },
+        HostSettingsSection,
+      ),
+    );
+  });
 
   ctx.slots.inject("sidebar.session.row.identity", () =>
     ctx.slots.register(

@@ -1,5 +1,11 @@
 /** Copy for the CodexHost import panel. */
 export const en = {
+  "settings.connections": "Connections",
+  "settings.accounts": "Accounts",
+  "settings.usage": "Usage",
+  "settings.updates": "Updates",
+  "settings.about": "About",
+  "settings.unavailable": "Could not load this page: {message}",
   "preferences.idle.title": "Release idle external Harness sessions",
   "preferences.idle.description":
     "Shared with Desktop. Running tasks and pending interactions are kept active.",
@@ -73,6 +79,12 @@ export const en = {
 export type ImportLocaleKey = keyof typeof en;
 
 export const zh: Record<ImportLocaleKey, string> = {
+  "settings.connections": "连接",
+  "settings.accounts": "账号",
+  "settings.usage": "用量统计",
+  "settings.updates": "更新",
+  "settings.about": "关于",
+  "settings.unavailable": "无法加载此页面：{message}",
   "preferences.idle.title": "释放空闲的外部 Harness 会话",
   "preferences.idle.description": "与桌面端共享。运行中的任务和待处理交互保持活动。",
   "preferences.idle.minutes": "空闲超时（分钟）",

@@ -37,11 +37,13 @@ const CONNECTING_MIN_VISIBLE_MS = 800;
 
 /** Nav glyph by section id; unknown ids fall back to the settings gear. */
 function navIcon(id: string) {
-  if (id === "account") return <IconUserOutlineMedium className={css.navIcon} size={16} />;
-  if (id === "models") return <IconDataOutlineMedium className={css.navIcon} size={16} />;
+  if (id === "account" || id === "codexhost-accounts")
+    return <IconUserOutlineMedium className={css.navIcon} size={16} />;
+  if (id === "models" || id === "codexhost-usage-statistics")
+    return <IconDataOutlineMedium className={css.navIcon} size={16} />;
   if (id === "agent-presets")
     return <IconAgentPresetOutlineMedium className={css.navIcon} size={16} />;
-  if (id === "plugins")
+  if (id === "plugins" || id === "codexhost-connections")
     return <IconPersonalizationOutlineMedium className={css.navIcon} size={16} />;
   if (id === "archived-sessions")
     return <IconArchiveOutlineMedium className={css.navIcon} size={16} />;
