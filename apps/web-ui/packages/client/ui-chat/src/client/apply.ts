@@ -35,7 +35,6 @@ import { EMPTY_CHAT_SNAPSHOT } from "./contract/snapshot.ts";
 import { ApprovalCommand } from "./chat/ApprovalCommand.tsx";
 import { ChatView } from "./chat/ChatView.tsx";
 import { registerChatNodeRenderers } from "./chat/register-node-renderers.ts";
-import { ActivityPill, UsagePill } from "./chat/StatsPills.tsx";
 import { registerConversationNodes } from "./conversation-nodes/register.ts";
 import { QuotaNoticeHost } from "./chat/QuotaNoticeHost.tsx";
 import { en, NS, zh } from "./locale.ts";
@@ -53,11 +52,6 @@ import {
   type ChatSettings,
 } from "../chat-settings.ts";
 import { LinkOpeningRow, type LinkOpeningRowInjected } from "./settings/LinkOpeningRow.tsx";
-import {
-  PerformanceUsageRow,
-  type PerformanceUsageRowInjected,
-} from "./settings/PerformanceUsageRow.tsx";
-import { PerformanceUsagePolicy } from "./performance-usage.ts";
 import { useTurnDataValue } from "./chat/use-turn-data.ts";
 import { bindDisclosure } from "./chat/use-disclosure.ts";
 
@@ -190,31 +184,10 @@ export function apply(ctx: Context): void {
     "dshDesktop" in globalThis ? "standard" : DEFAULT_TRANSCRIPT_VIEW_MODE,
   );
   const presentation = derivePresentationPolicy(transcriptView.mode);
-  const performancePolicy = new PerformanceUsagePolicy(chatSettings);
   ctx.effect(() => () => {
     transcriptView.dispose();
-    performancePolicy.dispose();
   });
-  const performanceUsage = performancePolicy.mode;
-  registerChatNodeRenderers(ctx, performanceUsage, presentation);
-
-  ctx.slots.inject("settings.general.item", () =>
-    ctx.slots.register(
-      {
-        name: "settings.general.item",
-        id: "performance-usage",
-        order: 30,
-        locale: NS,
-        inject: (): PerformanceUsageRowInjected => ({
-          hooks: { performanceUsage },
-          setPerformanceUsage: (mode) => {
-            performancePolicy.setMode(mode);
-          },
-        }),
-      },
-      PerformanceUsageRow,
-    ),
-  );
+  registerChatNodeRenderers(ctx, presentation);
 
   ctx.slots.inject("settings.general.item", () =>
     ctx.slots.register(
@@ -384,31 +357,6 @@ export function apply(ctx: Context): void {
       QuotaNoticeHost,
     ),
   );
-
-  // One dock entry per pill, so a plugin replaces or adds a single pill by id.
-  const statPillInject = () => ({ hooks: { performanceUsage } });
-  ctx.slots.inject("conversation.composer.dock", function* () {
-    yield ctx.slots.register(
-      {
-        name: "conversation.composer.dock",
-        id: "activity",
-        order: 0,
-        locale: NS,
-        inject: statPillInject,
-      },
-      ActivityPill,
-    );
-    yield ctx.slots.register(
-      {
-        name: "conversation.composer.dock",
-        id: "usage",
-        order: 1,
-        locale: NS,
-        inject: statPillInject,
-      },
-      UsagePill,
-    );
-  });
 
   ctx.slots.inject("conversation.input.dock", () =>
     ctx.slots.register(

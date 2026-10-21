@@ -41,7 +41,6 @@ import type {
   ChatTurnProcessPresentation,
 } from "./snapshot.ts";
 import type { TurnProcessSpec } from "./turn-process.ts";
-import type { PerformanceUsageMode } from "../../chat-settings.ts";
 
 /** Selector hook over the current Conversation binding's Chat target. */
 export type UseChat = SnapshotSelectorHook<ChatSnapshot>;
@@ -242,14 +241,6 @@ export interface ChatScrollPosition {
   readonly anchorKey: string;
   readonly anchorTop: number;
   readonly scrollTop: number;
-}
-
-/** Shared settings source for the performance row, composer, and turn tail. */
-export interface PerformanceUsageInjected {
-  hooks: {
-    /** Accepted performance and usage detail preference. */
-    performanceUsage: ObservableSnapshot<PerformanceUsageMode>;
-  };
 }
 
 /** Business callbacks injected into the Chat view. */

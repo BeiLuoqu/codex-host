@@ -1,13 +1,8 @@
 import { memo, useRef, useState } from "react";
-import type { InjectFace, PropsRenderSlots } from "@deepseek-ai/dsh-client-ui-slots";
-import type {
-  ChatNodeViewProps,
-  PerformanceUsageInjected,
-  TurnTailOwnerProps,
-} from "../contract/slots.ts";
+import type { PropsRenderSlots } from "@deepseek-ai/dsh-client-ui-slots";
+import type { ChatNodeViewProps, TurnTailOwnerProps } from "../contract/slots.ts";
 import { MessageIconActions } from "./MessageIconActions.tsx";
 import { TurnChangesCard } from "./TurnChangesCard.tsx";
-import { TurnUsagePanel } from "./TurnUsagePanel.tsx";
 import { assistantText } from "./turn-assistant.ts";
 import { hasAssistantReplyContent } from "../contract/assistant-content.ts";
 import type { ChatNode } from "../contract/chat-nodes.ts";
@@ -15,8 +10,7 @@ import type { ChatSnapshot } from "../contract/snapshot.ts";
 import css from "./TurnTailNodeView.module.css";
 
 type TurnTailNodeViewProps = ChatNodeViewProps<"turn-tail"> &
-  PropsRenderSlots<"conversation.chat.turnTail" | "conversation.chat.assistant-actions"> &
-  InjectFace<PerformanceUsageInjected>;
+  PropsRenderSlots<"conversation.chat.turnTail" | "conversation.chat.assistant-actions">;
 
 function lastContent(
   snapshot: ChatSnapshot,
@@ -46,12 +40,10 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
   renderSlot,
   t,
   useChat,
-  usePerformanceUsage,
 }: TurnTailNodeViewProps) {
   const forking = useRef(false);
   const [forkPending, setForkPending] = useState(false);
   const [forkError, setForkError] = useState<string>();
-  const detailed = usePerformanceUsage((mode) => mode) === "detailed";
   const data = node.data;
   const nodeStore = useChat((snapshot) => snapshot.nodes);
   const hasLaterChatNode = useChat(
@@ -122,11 +114,6 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
         branchUnavailable={forkPending || data.branchUnavailable || hasLaterChatNode}
         className={css.actions}
         extraActions={assistantActions}
-        usageAction={
-          detailed && data.tokenUsage !== undefined ? (
-            <TurnUsagePanel usage={data.tokenUsage} t={t} />
-          ) : null
-        }
         t={t}
       />
       {forkError !== undefined && (

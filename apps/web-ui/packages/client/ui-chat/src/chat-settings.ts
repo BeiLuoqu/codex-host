@@ -33,15 +33,6 @@ const TRANSCRIPT_VIEW_SETTING_VALUES = [
 /** Default work details for non-Desktop Web clients. */
 export const DEFAULT_TRANSCRIPT_VIEW_MODE: TranscriptViewMode = "detailed";
 
-/** Performance and usage detail levels accepted by user settings. */
-export const PERFORMANCE_USAGE_MODES = ["compact", "detailed"] as const;
-
-/** Performance and usage presentation. */
-export type PerformanceUsageMode = (typeof PERFORMANCE_USAGE_MODES)[number];
-
-/** Preserve detailed accounting for users without an explicit preference. */
-export const DEFAULT_PERFORMANCE_USAGE: PerformanceUsageMode = "detailed";
-
 /** Destinations for ordinary clicks on Chat HTTP(S) links. */
 export type LinkOpening = "sidebar" | "new-tab";
 
@@ -56,8 +47,6 @@ export interface ChatSettings {
     | typeof LEGACY_TRANSCRIPT_VIEW_MODE
     | typeof LEGACY_EXPANDED_TRANSCRIPT_VIEW_MODE
     | null;
-  /** Detail level for composer statistics and completed-Turn usage. */
-  performanceUsage: PerformanceUsageMode;
   /** Default destination for Chat HTTP(S) links. */
   linkOpening: LinkOpening;
 }
@@ -65,7 +54,6 @@ export interface ChatSettings {
 /** Durable Chat schema; also the wire envelope the browser scope validates against. */
 export const ChatSettingsFields = {
   linkOpening: z.union(["sidebar", "new-tab"]).default(DEFAULT_LINK_OPENING),
-  performanceUsage: z.union([...PERFORMANCE_USAGE_MODES]).default(DEFAULT_PERFORMANCE_USAGE),
   // Missing and unrecognized modes defer to the client's default.
   [TRANSCRIPT_VIEW_FIELD]: z.union([...TRANSCRIPT_VIEW_SETTING_VALUES]).loose(),
 };

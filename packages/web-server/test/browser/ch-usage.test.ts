@@ -11,7 +11,6 @@ import { startServer } from "../support/server.ts";
 const cases: Array<{
   name: string;
   usage: ThreadUsageSnapshot;
-  genericCache: string | null;
   latest: string;
   average: string;
 }> = [
@@ -23,7 +22,6 @@ const cases: Array<{
       cacheHitRatePercent: 99.51685747295453,
       sessionCacheHitRatePercent: 97.56966586569621,
     },
-    genericCache: null,
     latest: "99.5%",
     average: "97.6%",
   },
@@ -37,7 +35,6 @@ const cases: Array<{
       cacheHitRatePercent: 0,
       sessionCacheHitRatePercent: 0,
     },
-    genericCache: "Cache hit 0%",
     latest: "0%",
     average: "0%",
   },
@@ -51,7 +48,6 @@ const cases: Array<{
       cacheHitRatePercent: 95,
       sessionCacheHitRatePercent: 90,
     },
-    genericCache: "Cache hit 90%",
     latest: "95%",
     average: "90%",
   },
@@ -97,8 +93,7 @@ for (const scenario of cases) {
         new RegExp(`CH ${scenario.latest.replace(".", "\\.")}`),
       );
       const generic = page.locator('[data-composer-stat="usage"]');
-      if (scenario.genericCache === null) assert.equal(await generic.count(), 0);
-      else assert.ok((await generic.innerText()).includes(scenario.genericCache));
+      assert.equal(await generic.count(), 0);
       const screenshots = process.env.CODEXHOST_TEST_SCREENSHOTS;
       if (screenshots) {
         mkdirSync(screenshots, { recursive: true });
