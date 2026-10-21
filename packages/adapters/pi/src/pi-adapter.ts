@@ -2212,7 +2212,7 @@ export class PiAdapter implements HarnessAdapter {
         transport.state.thinkingLevel,
       );
       const fastModels = (await transport.supportsFastMode?.())
-        ? await piFastModelKeys(models, this.#environment)
+        ? piFastModelKeys(models)
         : new Set<string>();
       const catalog = withPiFast(normalized, fastModels);
       await transport.close();
@@ -2549,10 +2549,7 @@ export class PiAdapter implements HarnessAdapter {
           // The picker may have inspected another cwd. Check the live Session instead
           // of treating a cache miss as unsupported or spawning another Pi process.
           if (!(await transport.supportsFastMode?.())) return false;
-          const fastModels = await piFastModelKeys(
-            await transport.getAvailableModels(),
-            environment ?? this.#environment,
-          );
+          const fastModels = piFastModelKeys(await transport.getAvailableModels());
           return fastModels.has(encodePiModelRef({ ...decodePiModelRef(ref), fast: false }).id);
         },
         ...(options.startedTransport ? { startedTransport: options.startedTransport } : {}),
