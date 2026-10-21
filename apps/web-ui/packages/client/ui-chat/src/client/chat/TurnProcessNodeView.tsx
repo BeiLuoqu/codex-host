@@ -21,8 +21,10 @@ export const TurnProcessNodeView = memo(function TurnProcessNodeView({
   const canCollapse =
     turnProcess.foldable && turnProcess.hasContent && !turnProcessAlwaysOpen(node);
   const reason = turn.end?.data.reason.kind;
+  // Native history without Turn timing replays both boundaries at one instant;
+  // show no duration rather than an invented minimum.
   const elapsedMs =
-    turn.start === undefined || turn.end === undefined
+    turn.start === undefined || turn.end === undefined || turn.end.time <= turn.start.time
       ? undefined
       : Math.max(1000, turn.end.time - turn.start.time);
   const duration =
