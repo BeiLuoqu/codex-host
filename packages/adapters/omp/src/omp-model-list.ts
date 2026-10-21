@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { commandInvocation } from "@codexhost/harness-discovery";
 import { resolveOmpExecutable, withNodeRuntimeOnPath } from "./command.js";
 import type { OmpNativeModel } from "./omp-model-catalog.js";
+import { signalProcessTree } from "./omp-rpc-session.js";
 
 const OMP_MODEL_LIST_TIMEOUT_MS = 15_000;
 const OMP_MODEL_LIST_OUTPUT_LIMIT = 4 * 1024 * 1024;
@@ -10,6 +11,9 @@ export interface OmpModelListInput {
   cwd: string;
   command?: string;
   environment?: NodeJS.ProcessEnv;
+  /** Aborting stops the command and resolves `unanswered`. */
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 /**
@@ -41,31 +45,43 @@ export function listOmpModels(input: OmpModelListInput): Promise<OmpModelListRes
   });
   const invocation = commandInvocation(executable, ["models", "--json"], environment);
   return new Promise((resolve) => {
-    let settled = false;
-    const finish = (result: OmpModelListResult): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    };
+    if (input.signal?.aborted) return resolve({ kind: "unanswered" });
     const child = spawn(invocation.command, invocation.arguments, {
       cwd: input.cwd,
       env: environment,
+      // A process group lets a stop reach OMP and its descendants, not only a launcher shim.
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish({ kind: "timedOut" });
-    }, OMP_MODEL_LIST_TIMEOUT_MS);
+    let settled = false;
     let stdout = "";
+    const finish = (result: OmpModelListResult, stop = false): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      input.signal?.removeEventListener("abort", onAbort);
+      child.stdout.removeAllListeners("data");
+      if (stop) {
+        child.stdout.destroy();
+        try {
+          signalProcessTree(child, "SIGKILL");
+        } catch {
+          // The tree may already be gone; the result does not depend on it.
+        }
+      }
+      resolve(result);
+    };
+    const onAbort = (): void => finish({ kind: "unanswered" }, true);
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(
+      () => finish({ kind: "timedOut" }, true),
+      input.timeoutMs ?? OMP_MODEL_LIST_TIMEOUT_MS,
+    );
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
       stdout += chunk;
-      if (stdout.length > OMP_MODEL_LIST_OUTPUT_LIMIT) {
-        child.kill("SIGKILL");
-        finish({ kind: "unanswered" });
-      }
+      if (stdout.length > OMP_MODEL_LIST_OUTPUT_LIMIT) finish({ kind: "unanswered" }, true);
     });
     child.once("error", (error: NodeJS.ErrnoException) => {
       finish(

@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -65,6 +65,30 @@ printf '{"models":[{"provider":"p","id":"%s","reasoning":false}]}' "$(basename "
     });
   });
 
+  it("stops the whole process tree on timeout", async () => {
+    const command = await fakeOmp(`sleep 30 &
+echo $! > "$PWD/descendant.pid"
+wait`);
+    const cwd = path.dirname(command);
+    await expect(listOmpModels({ cwd, command, timeoutMs: 2_000 })).resolves.toEqual({
+      kind: "timedOut",
+    });
+    const descendant = Number((await readFile(path.join(cwd, "descendant.pid"), "utf8")).trim());
+    await expect.poll(() => isRunning(descendant)).toBe(false);
+  });
+
+  it("stops on abort and reports unanswered", async () => {
+    const command = await fakeOmp("sleep 30");
+    const controller = new AbortController();
+    const pending = listOmpModels({
+      cwd: path.dirname(command),
+      command,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).resolves.toEqual({ kind: "unanswered" });
+  });
+
   it("reports a missing executable as not installed", async () => {
     directory = await mkdtemp(path.join(tmpdir(), "omp-model-list-"));
     await expect(
@@ -72,3 +96,12 @@ printf '{"models":[{"provider":"p","id":"%s","reasoning":false}]}' "$(basename "
     ).resolves.toMatchObject({ kind: "notInstalled" });
   });
 });
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

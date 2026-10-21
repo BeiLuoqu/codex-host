@@ -172,6 +172,13 @@ export interface OmpAdapterDependencies {
   listModels?(input: OmpModelListInput): Promise<OmpModelListResult>;
 }
 
+function closedInspection(): HarnessInspection {
+  return {
+    status: "unavailable",
+    error: { code: "invalidState", message: "Omp Adapter is closed", retryable: false },
+  };
+}
+
 function ompInspectionCapabilities(
   selectThinkingOption: boolean,
 ): Extract<HarnessInspection, { status: "ready" }>["capabilities"] {
@@ -2373,7 +2380,12 @@ export class OmpAdapter implements HarnessAdapter {
   readonly #inspectionCache = new Map<string, Extract<HarnessInspection, { status: "ready" }>>();
   readonly #inspectionInFlight = new Map<string, Promise<HarnessInspection>>();
   readonly #inspections = new Set<OmpTurnTransport>();
-  readonly #listModels: (input: { cwd: string }) => Promise<OmpModelListResult>;
+  readonly #availabilityInFlight = new Map<string, Promise<HarnessInspection | null>>();
+  readonly #availabilityListings = new Set<AbortController>();
+  readonly #listModels: (input: {
+    cwd: string;
+    signal: AbortSignal;
+  }) => Promise<OmpModelListResult>;
   readonly #sessions = new Set<OmpHarnessSession>();
   readonly #toolOutputLimit: number;
   #closePromise: Promise<void> | null = null;
@@ -2387,9 +2399,10 @@ export class OmpAdapter implements HarnessAdapter {
   ) {
     this.#createTransport = dependencies.createTransport;
     const listModels = dependencies.listModels ?? listOmpModels;
-    this.#listModels = ({ cwd }) =>
+    this.#listModels = ({ cwd, signal }) =>
       listModels({
         cwd,
+        signal,
         ...(options.command ? { command: options.command } : {}),
         ...(options.environment ? { environment: options.environment } : {}),
       });
@@ -2400,16 +2413,7 @@ export class OmpAdapter implements HarnessAdapter {
   }
 
   async inspect(input: InspectHarnessInput = {}): Promise<HarnessInspection> {
-    if (this.#closePromise) {
-      return {
-        status: "unavailable",
-        error: {
-          code: "invalidState",
-          message: "Omp Adapter is closed",
-          retryable: false,
-        },
-      };
-    }
+    if (this.#closePromise) return closedInspection();
     const cwd = input.cwd ?? process.cwd();
     const inFlight = this.#inspectionInFlight.get(cwd);
     if (inFlight) return inFlight;
@@ -2417,11 +2421,35 @@ export class OmpAdapter implements HarnessAdapter {
       const cached = this.#inspectionCache.get(cwd);
       if (cached) return cached;
     }
-    if (input.purpose === "availability") {
-      const availability = await this.#inspectAvailability(cwd);
-      if (availability) return availability;
-    }
+    if (input.purpose === "availability") return this.#inspectAvailability(cwd, input.refresh);
+    return this.#startFullInspection(cwd);
+  }
 
+  /**
+   * Availability without a Session: a Session startup runs OMP's own startup work, including
+   * Provider connection prewarm, for a Harness the user may never select. The listed result
+   * carries no native default Model or Thinking option, so it is neither cached nor used to
+   * update `#thinkingSelectionSupported`. When the list cannot answer, the shared full inspection
+   * answers instead, joining one already in flight.
+   */
+  async #inspectAvailability(cwd: string, refresh = false): Promise<HarnessInspection> {
+    // An explicit re-check must not leave an older full catalog to answer the next catalog load.
+    if (refresh) this.#inspectionCache.delete(cwd);
+    let pending = this.#availabilityInFlight.get(cwd);
+    if (!pending) {
+      const listing = this.#listAvailability(cwd);
+      pending = listing.finally(() => {
+        if (this.#availabilityInFlight.get(cwd) === pending) this.#availabilityInFlight.delete(cwd);
+      });
+      this.#availabilityInFlight.set(cwd, pending);
+    }
+    const listed = await pending;
+    if (listed) return listed;
+    if (this.#closePromise) return closedInspection();
+    return this.#inspectionInFlight.get(cwd) ?? this.#startFullInspection(cwd);
+  }
+
+  #startFullInspection(cwd: string): Promise<HarnessInspection> {
     const inspection = this.#inspectCwd(cwd).then((result) => {
       if (result.status === "ready") this.#inspectionCache.set(cwd, result);
       return result;
@@ -2434,17 +2462,18 @@ export class OmpAdapter implements HarnessAdapter {
     });
   }
 
-  /**
-   * Availability without a Session: a Session startup runs OMP's own startup work, including
-   * Provider connection prewarm, for a Harness the user may never select. The result carries no
-   * native default Model or Thinking option, so it is neither cached nor used to update
-   * `#thinkingSelectionSupported`. Returns null when a Session must answer instead: this OMP cannot
-   * list Models, or lists none.
-   */
-  async #inspectAvailability(cwd: string): Promise<HarnessInspection | null> {
+  /** Returns null when a Session must answer: this OMP cannot list Models, or lists none. */
+  async #listAvailability(cwd: string): Promise<HarnessInspection | null> {
     const startedAt = Date.now();
     const stage = "model-list";
-    const listed = await this.#listModels({ cwd });
+    const controller = new AbortController();
+    this.#availabilityListings.add(controller);
+    let listed: OmpModelListResult;
+    try {
+      listed = await this.#listModels({ cwd, signal: controller.signal });
+    } finally {
+      this.#availabilityListings.delete(controller);
+    }
     if (listed.kind === "unanswered") return null;
     if (listed.kind === "notInstalled") {
       return {
@@ -2795,6 +2824,7 @@ export class OmpAdapter implements HarnessAdapter {
 
   close(): Promise<void> {
     if (!this.#closePromise) {
+      for (const listing of this.#availabilityListings) listing.abort();
       this.#closePromise = Promise.all([
         this.sessionImport.close(),
         ...[...this.#inspections].map((transport) => transport.close()),
