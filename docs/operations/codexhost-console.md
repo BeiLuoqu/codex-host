@@ -40,8 +40,8 @@ type: warning
 
 | 启动方式 | 行为 |
 |---|---|
-| 安装包（macOS 打开应用、Windows 开始菜单） | 先启动控制台并在默认浏览器打开总览，再启动 Codex Desktop；启动失败或注入持续失败时另外打开总览查看原因 |
-| 终端（npm 的 `codexhost`、`codexhost launch`、`npm start`） | 控制台在后台与 Codex Desktop 一同启动，启动结束时在终端输出 `codexhost console: http://127.0.0.1:4399/` |
+| 安装包（macOS 打开应用、Windows 开始菜单） | 控制台在后台与 Codex Desktop 一同启动，默认不打开浏览器；启动失败或注入持续失败时在默认浏览器打开总览查看原因 |
+| 终端（npm 的 `codexhost`、`codexhost launch`、`npm start`） | 控制台在后台与 Codex Desktop 一同启动，成功时不输出；启动失败时在终端输出 `codexhost console: http://127.0.0.1:4399/` |
 
 控制台在校验 Shim、Host Runtime、Desktop Controller 和 Renderer 等 Codex 启动资源之前启动；这些文件缺失时，仍能提供故障恢复入口。npm 包装脚本将这部分校验交给 Launcher，不提前拦截。Launcher、Node 和控制台自身文件仍须可用，端口占用等控制台自身故障不保证能打开网页；命令参数解析失败也不进入启动流程。
 

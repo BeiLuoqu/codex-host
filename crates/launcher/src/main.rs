@@ -234,7 +234,6 @@ fn emit_ready_line(output: &mut impl Write) -> std::io::Result<()> {
 fn notify_ready_and_detach() -> Result<(), Box<dyn Error>> {
     startup_trace("publishing ready");
     startup_record::finish(StartupOutcome::Ready, None);
-    // Before `ready`: a terminal launch must still see the printed address.
     console::show_for_launch(None);
     emit_ready_line(&mut std::io::stdout())?;
     codexhost_platform::detach_from_terminal()?;
