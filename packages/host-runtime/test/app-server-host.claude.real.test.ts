@@ -8,9 +8,10 @@ import type { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { ClaudeCodeAdapter } from "@codexhost/adapter-claude-code";
 import { MappingStore } from "@codexhost/mapping-store";
-import { hostThreadIdSchema } from "@codexhost/shared-contracts";
+import { harnessPermissionModeIdSchema, hostThreadIdSchema } from "@codexhost/shared-contracts";
 import {
   CLAUDE_CODE_NATIVE_TRANSPORT_MODEL_ID,
+  encodeExternalTransportSelection,
   type ExternalHarnessId,
   type JsonObject,
 } from "@codexhost/protocol-core";
@@ -355,6 +356,151 @@ describe.skipIf(!RUN_REAL)("AppServerHost real Claude projection", () => {
         desktopInput.end();
         await running;
         await claudeAdapter.close();
+      }
+    },
+    REAL_TIMEOUT_MS,
+  );
+
+  it(
+    "steers a running real Claude Turn natively without starting another Turn",
+    async () => {
+      const workspace = path.resolve(".codexhost", "claude-host-real", "steer-workspace");
+      await fs.mkdir(workspace, { recursive: true });
+      const mappingStoreDirectory = await fs.mkdtemp(path.join(tmpdir(), "codexhost-steer-real-"));
+      const desktopInput = new PassThrough();
+      const desktopOutput = new PassThrough();
+      const collector = new JsonCollector(desktopOutput);
+      const official = new OfficialProcess();
+      const claudeAdapter = new ClaudeCodeAdapter({ closeTimeoutMs: 10_000 });
+      const host = new AppServerHost({
+        stockCodexPath: "/synthetic/codex",
+        arguments: [],
+        desktopInput,
+        desktopOutput,
+        diagnosticOutput: new PassThrough(),
+        externalAdapters: new Map<ExternalHarnessId, ClaudeCodeAdapter>([
+          ["claude-code", claudeAdapter],
+        ]),
+        mappingStore: new MappingStore({ directory: mappingStoreDirectory }),
+        spawnOfficial: (() =>
+          official as unknown as ChildProcessWithoutNullStreams) as unknown as typeof spawn,
+      });
+      const running = host.run();
+
+      try {
+        writeRequest(desktopInput, {
+          id: 1,
+          method: "thread/start",
+          params: {
+            model: encodeExternalTransportSelection("claude-code", {
+              permissionModeId: harnessPermissionModeIdSchema.parse("bypassPermissions"),
+            }),
+            cwd: workspace,
+          },
+        });
+        const started = await collector.waitFor((message) => requestId(message, 1));
+        const threadId = ((started.result as JsonObject).thread as JsonObject).id;
+        if (typeof threadId !== "string") throw new Error("Host returned no Thread ID");
+
+        writeRequest(desktopInput, {
+          id: 2,
+          method: "turn/start",
+          params: {
+            threadId,
+            input: [
+              {
+                type: "text",
+                text: "Run exactly three Bash commands one after another: `sleep 6`, then `sleep 6`, then `sleep 6`. Do not run them in parallel or in one command. After all three, reply with exactly DONE.",
+              },
+            ],
+          },
+        });
+        const turnResponse = await collector.waitFor((message) => requestId(message, 2));
+        const turnId = ((turnResponse.result as JsonObject).turn as JsonObject).id;
+        if (typeof turnId !== "string") throw new Error("Host returned no Turn ID");
+        await collector.waitFor(
+          (message) =>
+            method(message, "item/started") &&
+            ((message.params as JsonObject).item as JsonObject).type === "commandExecution",
+        );
+
+        writeRequest(desktopInput, {
+          id: 3,
+          method: "codexhost/thread/steering/inspect",
+          params: { threadId },
+        });
+        await expect(collector.waitFor((message) => requestId(message, 3))).resolves.toMatchObject({
+          result: { delivery: "activeTurn" },
+        });
+
+        writeRequest(desktopInput, {
+          id: 4,
+          method: "turn/steer",
+          params: {
+            threadId,
+            expectedTurnId: turnId,
+            clientUserMessageId: "real-steer-message",
+            input: [
+              {
+                type: "text",
+                text: "Change of plan: skip any remaining sleeps and reply with exactly STEERED.",
+              },
+            ],
+          },
+        });
+        await expect(collector.waitFor((message) => requestId(message, 4))).resolves.toMatchObject({
+          result: { turnId, delivery: "activeTurn" },
+        });
+        await expect(
+          collector.waitFor(
+            (message) =>
+              method(message, "item/started") &&
+              (message.params as JsonObject).turnId === turnId &&
+              ((message.params as JsonObject).item as JsonObject).type === "userMessage" &&
+              ((message.params as JsonObject).item as JsonObject).clientId === "real-steer-message",
+          ),
+        ).resolves.toBeDefined();
+        await expect(
+          collector.waitFor(
+            (message) =>
+              method(message, "turn/completed") &&
+              ((message.params as JsonObject).turn as JsonObject).id === turnId,
+          ),
+        ).resolves.toMatchObject({ params: { turn: { status: "completed" } } });
+
+        const turnsStarted = collector.messages.filter((message) =>
+          method(message, "turn/started"),
+        );
+        expect(turnsStarted).toHaveLength(1);
+        const commands = collector.messages.filter(
+          (message) =>
+            method(message, "item/started") &&
+            ((message.params as JsonObject).item as JsonObject).type === "commandExecution",
+        );
+        expect(commands.length).toBeLessThan(3);
+        const reply = collector.messages
+          .filter(
+            (message) =>
+              method(message, "item/completed") &&
+              ((message.params as JsonObject).item as JsonObject).type === "agentMessage",
+          )
+          .map((message) => ((message.params as JsonObject).item as JsonObject).text)
+          .join("\n");
+        expect(reply).toContain("STEERED");
+
+        writeRequest(desktopInput, {
+          id: 5,
+          method: "thread/fork",
+          params: { threadId, lastTurnId: turnId },
+        });
+        await expect(collector.waitFor((message) => requestId(message, 5))).resolves.toMatchObject({
+          error: { code: -32080 },
+        });
+      } finally {
+        desktopInput.end();
+        await running;
+        await claudeAdapter.close();
+        await fs.rm(mappingStoreDirectory, { recursive: true, force: true });
       }
     },
     REAL_TIMEOUT_MS,
