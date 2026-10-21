@@ -255,7 +255,7 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
 
   finish(result: ClaudeTransportTurnResult): void {
     if (this.#active) {
-      this.#rejectPendingSteers();
+      // A written steer stays Claude's to deliver after the Turn ends, like the SDK transport.
       this.#active.resolve(result);
       this.#active = undefined;
       this.#assistantMessageId = null;
@@ -999,14 +999,16 @@ describe("Claude Code HarnessAdapter", () => {
       }),
     ).resolves.toMatchObject({ ok: false, error: { code: "invalidRequest" } });
     expect(transports[0]?.steers).toHaveLength(1);
-    const missed = session.execute({
+    const late = session.execute({
       type: "turn.steer",
       turnId: hostTurnIdSchema.parse("turn-1"),
       input: [{ type: "text", text: "late" }],
     });
     await vi.waitFor(() => expect(transports[0]?.steers).toHaveLength(2));
     transports[0]?.finish({ status: "succeeded" });
-    await expect(missed).resolves.toMatchObject({ ok: false, error: { code: "invalidState" } });
+    // Claude already holds the written input and runs it next, so it is still accepted.
+    transports[0]?.recordSteer("claude-id-4");
+    await expect(late).resolves.toEqual({ ok: true, value: { accepted: true } });
     await vi.waitFor(() =>
       expect(
         outputs.some((output) => output.kind === "event" && output.event.type === "turn.completed"),

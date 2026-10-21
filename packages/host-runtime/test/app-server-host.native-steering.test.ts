@@ -22,6 +22,44 @@ function steeredUserMessage(message: JsonObject, turnId: string): JsonObject | n
 }
 
 describe("Native steering", () => {
+  it("sends rewritten Delegation mentions to the Harness and shows the typed text", async () => {
+    const fixture = createFixture();
+    fixture.adapter.supportsSteer = true;
+    try {
+      const threadId = await startPiThread(fixture);
+      const turnId = await startPiTurn(fixture, threadId);
+      const session = fixture.adapter.sessions[0];
+      if (!session) throw new Error("Fake Session was not opened");
+      const typed = "ask [@Grok](subagent://codexhost.grok) to review";
+
+      writeRequest(fixture.desktopInput, {
+        id: 30,
+        method: "turn/steer",
+        params: {
+          threadId,
+          expectedTurnId: turnId,
+          clientUserMessageId: "mention-message",
+          input: [{ type: "text", text: typed }],
+        },
+      });
+      await expect(
+        fixture.collector.waitFor((message) => requestId(message, 30)),
+      ).resolves.toMatchObject({ result: { turnId, delivery: "activeTurn" } });
+      const sent = session.steers[0]?.input[0]?.text ?? "";
+      expect(sent).toContain("@Grok to review");
+      expect(sent).toContain("[codexhost delegation]");
+      const item = await fixture.collector.waitFor(
+        (message) => steeredUserMessage(message, turnId) !== null,
+      );
+      expect(steeredUserMessage(item, turnId)).toMatchObject({
+        clientId: "mention-message",
+        content: [{ type: "text", text: typed }],
+      });
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+
   it("takes a Desktop steer into the active Turn and settles Desktop's optimistic message", async () => {
     const fixture = createFixture();
     fixture.adapter.supportsSteer = true;

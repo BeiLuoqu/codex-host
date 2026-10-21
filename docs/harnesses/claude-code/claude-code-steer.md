@@ -6,7 +6,7 @@ Host 在原生接受后自己发当前 Turn 的 `userMessage` Item。Adapter 不
 
 ## 接受
 
-CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；工具调用结束后发 `started`，这时插入进入正在运行的 Turn。Adapter 在 `queued` 时返回 `{ accepted: true }`：此后由 Claude 负责送达，不等 `started`，否则调用方要被整段工具调用挂住（Desktop 提交约 30 秒超时）。若本轮在插入前结束，Claude 会把已排队的输入作为下一次运行执行，由现有自主 Turn 路径呈现。`queued` 之前 Turn 的 `result` 先到，或会话已关闭、目标不是当前 Turn，返回 `invalidState`。空文本返回 `invalidRequest`。忙时 `turn.start` 仍是 `sessionBusy`。
+CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；工具调用结束后发 `started`，这时插入进入正在运行的 Turn。Adapter 在 `queued` 时返回 `{ accepted: true }`：此后由 Claude 负责送达，不等 `started`，否则调用方要被整段工具调用挂住（Desktop 提交约 30 秒超时）。若本轮在插入前结束，Claude 会把已排队的输入作为下一次运行执行，由现有自主 Turn 路径呈现。输入一旦写入就无法撤回，所以本轮的 `result` 先于 `queued` 到达时不拒绝，仍按接受处理；`queued` 回执迟迟不到时，等待 5 秒后同样按接受处理，避免串行处理请求的调用方（如 Harness Broker）被无限期占住。只有目标不是当前 Turn、输入写入失败，或会话在接受前关闭或出错时，才返回 `invalidState`。空文本返回 `invalidRequest`。忙时 `turn.start` 仍是 `sessionBusy`。
 
 ## 版本
 

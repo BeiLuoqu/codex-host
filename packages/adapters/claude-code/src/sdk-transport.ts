@@ -65,6 +65,8 @@ const SESSION_ENTRYPOINT = "codexhost-sdk";
 const APPROVAL_TITLE_MAX_LENGTH = 120;
 const APPROVAL_DESCRIPTION_MAX_LENGTH = 500;
 const DEFAULT_ABORT_TIMEOUT_MS = 2_000;
+/** Claude Code emits `queued` as soon as it reads a steer; this only bounds a missing receipt. */
+const DEFAULT_STEER_QUEUED_TIMEOUT_MS = 5_000;
 /** Bounds the Workflow agent labels kept to name agent approvals. */
 const WORKFLOW_AGENT_LABEL_LIMIT = 1_000;
 const INTERRUPT_TIMEOUT_MESSAGE = "Claude SDK interrupt timed out";
@@ -145,6 +147,7 @@ export interface ClaudeSdkTransportOptions {
   allowDangerouslySkipPermissions?: boolean;
   closeTimeoutMs: number;
   abortTimeoutMs?: number;
+  steerQueuedTimeoutMs?: number;
   onPermissionModeChanged(permissionMode: ClaudePermissionMode): void;
   onFault(error: unknown): void;
   onPlanLimit(planLimit: ClaudePlanLimitEvent): void;
@@ -478,9 +481,14 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
   readonly #queryFactory: typeof query;
   #thinkingOptionId: HarnessThinkingOptionId;
   #active: ActiveTurn | null = null;
+  readonly #steerQueuedTimeoutMs: number;
   readonly #pendingSteers = new Map<
     string,
-    { resolve(): void; reject(error: ClaudeSteerMissedTurnError): void }
+    {
+      resolve(): void;
+      reject(error: ClaudeSteerMissedTurnError): void;
+      timer: ReturnType<typeof setTimeout> | undefined;
+    }
   >();
   #autonomous: AutonomousSegment | null = null;
   #autonomousTurnHandler: ClaudeAutonomousTurnHandler | null = null;
@@ -506,6 +514,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
     this.sessionId = options.sessionId;
     this.#cwd = options.cwd;
     this.#abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_ABORT_TIMEOUT_MS;
+    this.#steerQueuedTimeoutMs = options.steerQueuedTimeoutMs ?? DEFAULT_STEER_QUEUED_TIMEOUT_MS;
     this.#closeTimeoutMs = options.closeTimeoutMs;
     this.#command = options.command;
     this.#environment = options.environment ?? process.env;
@@ -792,13 +801,17 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
    * Claude accepts the input with `queued`; Claude Code 2.1.280 then emits `started` after the
    * current tool call, when `priority: "next"` joins the running Turn. Waiting for `started` would
    * hold the caller for a whole tool call.
+   *
+   * Once written, the input cannot be recalled: Claude delivers it in this Turn or runs it next.
+   * The Turn ending first therefore does not reject it, and a missing `queued` receipt resolves
+   * after a bounded wait so callers that serialize requests are never held indefinitely.
    */
   steer(text: string, messageId: string): Promise<void> {
     if (this.#closePromise || !this.#started || !this.#query || !this.#active) {
       return Promise.reject(new ClaudeSteerMissedTurnError());
     }
     const promise = new Promise<void>((resolve, reject) => {
-      this.#pendingSteers.set(messageId, { resolve, reject });
+      this.#pendingSteers.set(messageId, { resolve, reject, timer: undefined });
     });
     try {
       this.#input.push({
@@ -814,7 +827,20 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
       this.#pendingSteers.delete(messageId);
       return Promise.reject(new ClaudeSteerMissedTurnError());
     }
+    const pending = this.#pendingSteers.get(messageId);
+    if (pending) {
+      pending.timer = setTimeout(() => this.#acceptSteer(messageId), this.#steerQueuedTimeoutMs);
+      pending.timer.unref?.();
+    }
     return promise;
+  }
+
+  #acceptSteer(messageId: string): void {
+    const pending = this.#pendingSteers.get(messageId);
+    if (!pending) return;
+    this.#pendingSteers.delete(messageId);
+    clearTimeout(pending.timer);
+    pending.resolve();
   }
 
   respondToInteraction(response: ClaudeInteractionResponse): Promise<void> {
@@ -1184,7 +1210,10 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
     const pending = [...this.#pendingSteers.values()];
     this.#pendingSteers.clear();
     const error = new ClaudeSteerMissedTurnError();
-    for (const entry of pending) entry.reject(error);
+    for (const entry of pending) {
+      clearTimeout(entry.timer);
+      entry.reject(error);
+    }
   }
 
   /** `queued` is Claude's acceptance of this message into the running Session. */
@@ -1198,10 +1227,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
     }
     if (message.state !== "queued") return;
     if (typeof message.command_uuid !== "string" || message.command_uuid.length === 0) return;
-    const pending = this.#pendingSteers.get(message.command_uuid);
-    if (!pending) return;
-    this.#pendingSteers.delete(message.command_uuid);
-    pending.resolve();
+    this.#acceptSteer(message.command_uuid);
   }
 
   #observeBackgroundTasks(message: unknown): void {
@@ -1267,7 +1293,6 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
           const interpreted = active.accumulator.consume(message);
           for (const event of interpreted.events) active.onEvent(event);
           if (interpreted.terminal) {
-            this.#rejectPendingSteers();
             this.#closeInteractions("root", "superseded");
             this.#active = null;
             active.resolve(interpreted.terminal);

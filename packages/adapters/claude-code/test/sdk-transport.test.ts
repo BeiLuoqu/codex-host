@@ -3220,7 +3220,7 @@ describe("ClaudeSdkTransport steer", () => {
     await value.transport.close();
   });
 
-  it("rejects a steer when the Turn ends before Claude queues it", async () => {
+  it("keeps a written steer accepted when the Turn ends before Claude queues it", async () => {
     const value = fixture();
     await value.transport.start();
     const turn = value.transport.runTurn(
@@ -3228,13 +3228,67 @@ describe("ClaudeSdkTransport steer", () => {
       "00000000-0000-4000-8000-000000000034",
       () => undefined,
     );
-    const steered = value.transport.steer("PIN", "00000000-0000-4000-8000-000000000035");
+    const steerId = "00000000-0000-4000-8000-000000000035";
+    let rejected = false;
+    const steered = value.transport.steer("PIN", steerId).catch((error: unknown) => {
+      rejected = true;
+      throw error;
+    });
     completeTurn(value.fakeQuery);
-    await expect(steered).rejects.toBeInstanceOf(ClaudeSteerMissedTurnError);
     await turn;
+    expect(rejected).toBe(false);
+    value.fakeQuery.push({
+      type: "command_lifecycle",
+      state: "queued",
+      command_uuid: steerId,
+      uuid: "00000000-0000-4000-8000-000000000037",
+      session_id: "00000000-0000-4000-8000-000000000001",
+    } as unknown as SDKMessage);
+    await expect(steered).resolves.toBeUndefined();
     await expect(
       value.transport.steer("later", "00000000-0000-4000-8000-000000000036"),
     ).rejects.toBeInstanceOf(ClaudeSteerMissedTurnError);
     await value.transport.close();
+  });
+
+  it("accepts a written steer after a bounded wait when Claude sends no queued receipt", async () => {
+    const value = fixture();
+    const transport = new ClaudeSdkTransport({
+      command: process.execPath,
+      cwd: process.cwd(),
+      sessionId: "00000000-0000-4000-8000-000000000001",
+      openMode: "create",
+      permissionMode: "default",
+      thinkingOptionId: harnessThinkingOptionIdSchema.parse("auto"),
+      closeTimeoutMs: 100,
+      steerQueuedTimeoutMs: 20,
+      onPermissionModeChanged: value.onPermissionModeChanged,
+      onFault: value.onFault,
+      onPlanLimit: value.onPlanLimit,
+      queryFactory: value.queryFactory,
+    });
+    await transport.start();
+    const turn = transport.runTurn(
+      "hello",
+      "00000000-0000-4000-8000-000000000038",
+      () => undefined,
+    );
+    await expect(
+      transport.steer("PIN", "00000000-0000-4000-8000-000000000039"),
+    ).resolves.toBeUndefined();
+    completeTurn(value.fakeQuery);
+    await turn;
+    await transport.close();
+  });
+
+  it("rejects a pending steer when the transport closes before Claude accepts it", async () => {
+    const value = fixture();
+    await value.transport.start();
+    void value.transport
+      .runTurn("hello", "00000000-0000-4000-8000-000000000040", () => undefined)
+      .catch(() => undefined);
+    const steered = value.transport.steer("PIN", "00000000-0000-4000-8000-000000000041");
+    await value.transport.close();
+    await expect(steered).rejects.toBeInstanceOf(ClaudeSteerMissedTurnError);
   });
 });

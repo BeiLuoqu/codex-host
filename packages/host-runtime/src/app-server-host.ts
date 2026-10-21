@@ -4742,12 +4742,13 @@ export class AppServerHost {
     thread: ExternalThread,
     input: { turnId: HostTurnId; text: string; clientUserMessageId?: string },
   ): Promise<{ turnId: HostTurnId; gate: TurnProjectionGate }> {
+    const restored = restoreHarnessCommandMentions(input.text);
+    // The Harness receives rewritten Delegation mentions; Desktop shows what the user typed,
+    // matching the `turn/start` path.
     const steered: HostTextInput[] = [
-      {
-        type: "text",
-        text: rewriteDelegationMentionText(restoreHarnessCommandMentions(input.text)),
-      },
+      { type: "text", text: rewriteDelegationMentionText(restored) },
     ];
+    const displayed: HostTextInput[] = [{ type: "text", text: restored }];
     const projectionDone = Promise.withResolvers<undefined>();
     thread.pendingSteerProjections.add(projectionDone.promise);
     try {
@@ -4761,7 +4762,7 @@ export class AppServerHost {
       const item = {
         type: "userMessage" as const,
         itemId: hostItemIdSchema.parse(randomUUID()),
-        input: steered,
+        input: displayed,
       };
       try {
         const projection = this.#projectedTurn(thread, input.turnId);
