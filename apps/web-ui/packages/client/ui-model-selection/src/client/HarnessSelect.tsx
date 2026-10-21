@@ -14,15 +14,15 @@ import type { ModelSelectInjected } from "./slots.ts";
 import css from "./HarnessSelect.module.css";
 
 /** Show the plugin's own brand asset, with a generic glyph when it has no icon. */
-function HarnessIcon({ id }: { id: string }) {
+function HarnessIcon({ id, size = 20 }: { id: string; size?: number }) {
   return (
     <RemotePluginIcon
       id={id}
       src={`/harness-icons/${encodeURIComponent(id)}`}
       presentationUrl="/harness-icons/presentation.json"
-      size={20}
+      size={size}
       className={css.icon}
-      fallback={<IconDataOutlineRegular size={20} />}
+      fallback={<IconDataOutlineRegular size={size} />}
     />
   );
 }
@@ -161,9 +161,9 @@ export function HarnessSelect({
             {busy ? (
               <StateDot state="ongoing" />
             ) : currentId === undefined ? (
-              <IconDataOutlineRegular size={20} />
+              <IconDataOutlineRegular size={16} />
             ) : (
-              <HarnessIcon key={currentId} id={currentId} />
+              <HarnessIcon key={currentId} id={currentId} size={16} />
             )}
           </button>
         }

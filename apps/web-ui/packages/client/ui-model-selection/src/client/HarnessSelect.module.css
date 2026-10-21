@@ -15,7 +15,7 @@
   padding: 0;
   border: none;
   border-radius: 6px;
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: transparent;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   touch-action: manipulation;
@@ -23,7 +23,7 @@
 
 .trigger:hover:not(:disabled),
 .trigger[aria-expanded="true"] {
-  background: var(--dsw-alias-interactive-bg-active);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .trigger:focus-visible {
@@ -38,8 +38,6 @@
 
 .icon {
   display: block;
-  width: 20px;
-  height: 20px;
   flex-shrink: 0;
   object-fit: contain;
   border-radius: 3px;
