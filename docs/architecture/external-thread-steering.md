@@ -5,7 +5,7 @@ codexhost 对外部 Harness Thread 保留一个「调整方向」操作，按当
 - **原生同轮插入**：Session 声明 `capabilities.steer` 时，Host 发送公共命令 `turn.steer`，由 Adapter 调用 Harness 自己的插入原语，在原生安全边界把输入送入**当前 Turn**，不取消、不另起 Turn。
 - **停止后重发（退路）**：Session 未声明能力时，Host **取消当前 Turn，等待它终结，再自动执行本次新输入**。
 
-用户继续使用 Codex Desktop 原有按钮、跟进处理方式设置和单条消息反向操作，不需要手动停止后重发。官方 Codex Thread 仍透传原生 `turn/steer`，不改变同轮追加输入的语义。当前只有 Claude Code 声明 `capabilities.steer`，其原生依据见 [`../harnesses/claude-code/claude-code-steer.md`](../harnesses/claude-code/claude-code-steer.md)；其他 Adapter 对 `turn.steer` 返回 `unsupported`，保持停止后重发。
+用户继续使用 Codex Desktop 原有按钮、跟进处理方式设置和单条消息反向操作，不需要手动停止后重发。官方 Codex Thread 仍透传原生 `turn/steer`，不改变同轮追加输入的语义。当前只有 Claude Code 会声明 `capabilities.steer`，并且只在 CLI 运行时报告 `msg_lifecycle_v1` 后才声明；其原生依据见 [`../harnesses/claude-code/claude-code-steer.md`](../harnesses/claude-code/claude-code-steer.md)；其他 Adapter 对 `turn.steer` 返回 `unsupported`，保持停止后重发。
 
 ## 原生同轮插入
 

@@ -482,6 +482,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
   #thinkingOptionId: HarnessThinkingOptionId;
   #active: ActiveTurn | null = null;
   readonly #steerQueuedTimeoutMs: number;
+  #nativeSteer = false;
   readonly #pendingSteers = new Map<
     string,
     {
@@ -615,6 +616,16 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
   slashCommands(): ClaudeSlashCommandSnapshot | null {
     if (!this.#started || this.#slashCommands === null) return null;
     return { commands: this.#slashCommands, skillNames: this.#skillNames };
+  }
+
+  supportsNativeSteer(): boolean {
+    return this.#nativeSteer;
+  }
+
+  #observeNativeCapabilities(message: unknown): void {
+    if (!isRecord(message) || message.type !== "system" || message.subtype !== "init") return;
+    this.#nativeSteer =
+      Array.isArray(message.capabilities) && message.capabilities.includes("msg_lifecycle_v1");
   }
 
   #observeSlashCommands(message: unknown): void {
@@ -1280,6 +1291,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
         this.#observeBackgroundTasks(message);
         this.#observeWorkflowAgents(message);
         this.#observeSlashCommands(message);
+        this.#observeNativeCapabilities(message);
         const permissionMode = permissionModeFromMessage(message);
         if (permissionMode && permissionMode !== this.#permissionMode) {
           this.#permissionMode = permissionMode;

@@ -3170,6 +3170,25 @@ describe("ClaudeSdkTransport Workflow agent Interactions", () => {
 });
 
 describe("ClaudeSdkTransport steer", () => {
+  it("supports native steering only after init reports msg_lifecycle_v1", async () => {
+    const value = fixture();
+    await value.transport.start();
+    expect(value.transport.supportsNativeSteer()).toBe(false);
+    value.fakeQuery.push({
+      type: "system",
+      subtype: "init",
+      capabilities: ["interrupt_receipt_v1"],
+    } as unknown as SDKMessage);
+    await vi.waitFor(() => expect(value.transport.supportsNativeSteer()).toBe(false));
+    value.fakeQuery.push({
+      type: "system",
+      subtype: "init",
+      capabilities: ["interrupt_receipt_v1", "msg_lifecycle_v1"],
+    } as unknown as SDKMessage);
+    await vi.waitFor(() => expect(value.transport.supportsNativeSteer()).toBe(true));
+    await value.transport.close();
+  });
+
   it("pushes priority next and accepts when Claude starts that command", async () => {
     const value = fixture();
     await value.transport.start();

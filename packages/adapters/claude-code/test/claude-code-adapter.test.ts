@@ -114,6 +114,8 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
   readonly recapCalls: string[] = [];
   readonly turns: Array<{ text: string; userMessageId: string }> = [];
   readonly steers: Array<{ text: string; messageId: string; priority: "next" }> = [];
+  /** Whether the fake CLI reported `msg_lifecycle_v1` in its init capabilities. */
+  nativeSteer = true;
   readonly #pendingSteers = new Map<
     string,
     { resolve(): void; reject(error: ClaudeSteerMissedTurnError): void }
@@ -192,6 +194,10 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
     return new Promise((resolve, reject) => {
       this.#active = { onEvent, resolve, reject };
     });
+  }
+
+  supportsNativeSteer(): boolean {
+    return this.nativeSteer;
   }
 
   steer(text: string, messageId: string): Promise<void> {
@@ -920,7 +926,8 @@ describe("Claude Code HarnessAdapter", () => {
       },
       history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
       subagents: { observe: true, readTranscript: true },
-      steer: true,
+      // No CLI has reported its init capabilities yet.
+      steer: false,
     });
     const iterator = session.outputs[Symbol.asyncIterator]();
     await expect(
@@ -955,6 +962,34 @@ describe("Claude Code HarnessAdapter", () => {
     if (configured.ok) await configured.value.close();
     expect(dependencies.createTransport).not.toHaveBeenCalled();
     await session.close();
+  });
+
+  it("declares and accepts native steering only when the CLI confirms steers", async () => {
+    const { adapter, transports } = fixture();
+    const session = await openSession(adapter);
+    const outputs: HarnessOutput[] = [];
+    const consuming = (async () => {
+      for await (const output of session.outputs) outputs.push(output);
+    })();
+    await session.execute(textTurn("turn-1"));
+    await vi.waitFor(() => expect(transports[0]?.turns).toHaveLength(1));
+    expect(session.capabilities.steer).toBe(true);
+    const transport = transports[0];
+    if (!transport) throw new Error("Fake transport was not created");
+    transport.nativeSteer = false;
+    expect(session.capabilities.steer).toBe(false);
+    await expect(
+      session.execute({
+        type: "turn.steer",
+        turnId: hostTurnIdSchema.parse("turn-1"),
+        input: [{ type: "text", text: "not confirmed" }],
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "unsupported" } });
+    expect(transport.steers).toHaveLength(0);
+    transport.finish({ status: "succeeded" });
+    await session.close();
+    await consuming;
+    await adapter.close();
   });
 
   it("inserts a steer into the active Turn and does not emit a userMessage item", async () => {

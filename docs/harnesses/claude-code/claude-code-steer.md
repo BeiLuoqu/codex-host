@@ -10,7 +10,9 @@ CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；
 
 ## 版本
 
-2026-09-24 在 Claude Code 2.1.280 上实机确认；2026-10-21 在 Claude Code 2.1.305（Agent SDK 0.3.273 与 0.3.305）上复核了相同的 `queued` → `started` → `completed` 顺序和单个 `result`。更早版本是否支持 `priority: "next"` 尚未确定。Adapter 目前对所有 Claude Code Session 无条件声明 `capabilities.steer`，并不代表未验证的版本都已支持原生同轮插入；如果 CLI 不发 `queued` 回执，`steer()` 会在有限等待后按接受处理。
+`capabilities.steer` 是运行时判断的：只有当前 CLI 在 `system/init` 的 `capabilities` 中报告 `msg_lifecycle_v1`（也就是会发出确认插入所需的 `command_lifecycle` 回执）时才为 `true`。CLI 发出 init 之前，或者旧版 CLI 不报告这项能力时，为 `false`，Adapter 对 `turn.steer` 返回 `unsupported`，Host 继续使用停止后重发。Harness Broker 在打开 Session 时会做一次能力快照，那时 CLI 尚未发出 init，因此经 Broker 的 Session 保持停止后重发。
+
+2026-09-24 在 Claude Code 2.1.280 上实机确认；2026-10-21 在 Claude Code 2.1.305（Agent SDK 0.3.273 与 0.3.305）上复核了相同的 `queued` → `started` → `completed` 顺序和单个 `result`，这两个版本都会报告 `msg_lifecycle_v1`。其他版本只依据这项运行时能力判断，没有逐个实机验证。
 
 ## 历史
 

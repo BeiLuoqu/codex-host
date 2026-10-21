@@ -566,18 +566,21 @@ export function projectClaudePlanLimitToCredits(
 
 class ClaudeHarnessSession implements HarnessSession {
   readonly harnessId: HarnessId = claudeCodeHarnessId;
-  readonly capabilities: HarnessSessionCapabilities = {
+  readonly capabilities: HarnessSessionCapabilities = ((session) => ({
     configuration: {
       selectModel: true,
       selectThinkingOption: true,
       selectPermissionMode: true,
-      permissionModeScope: "live",
+      permissionModeScope: "live" as const,
     },
     history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
     subagents: { observe: true, readTranscript: true },
-    // Claude Code 2.1.280 folds `priority: "next"` into the running Turn. No earlier cutoff is known.
-    steer: true,
-  };
+    // Read live: only a CLI that reports `msg_lifecycle_v1` confirms steers with `queued`. Until
+    // then (and on older CLIs) the Host keeps its stop-then-start fallback.
+    get steer(): boolean {
+      return session.#transport?.supportsNativeSteer?.() === true;
+    },
+  }))(this);
   readonly commands: HarnessCommandCapability;
   readonly initialState: HarnessSessionState;
   readonly initialUsage = null;
@@ -1008,6 +1011,16 @@ class ClaudeHarnessSession implements HarnessSession {
     const transport = this.#transport;
     if (!transport) {
       return { ok: false, error: invalidState("Claude Code steer missed the active Turn") };
+    }
+    if (transport.supportsNativeSteer?.() !== true) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "This Claude Code version does not confirm native steering",
+          retryable: false,
+        },
+      };
     }
     try {
       await transport.steer(text, this.#randomUUID());
@@ -3153,7 +3166,6 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
           },
           history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
           subagents: { observe: true, readTranscript: true },
-          steer: true,
         },
       };
     } catch (error) {

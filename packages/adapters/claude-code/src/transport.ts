@@ -276,6 +276,11 @@ export interface ClaudeTurnTransport {
   getContextUsage(): Promise<ClaudeTransportContextUsage | null>;
   /** Live slash commands of the started native Session, when known. */
   slashCommands?(): ClaudeSlashCommandSnapshot | null;
+  /**
+   * True once the running CLI reports `msg_lifecycle_v1` in `system/init`: it then emits the
+   * `command_lifecycle` receipts that confirm a steer. False before init and on CLIs without it.
+   */
+  supportsNativeSteer?(): boolean;
   getPermissionMode(): ClaudePermissionMode;
   setModel(model?: string): Promise<void>;
   setThinkingOption(thinkingOptionId: HarnessThinkingOptionId): Promise<void>;
