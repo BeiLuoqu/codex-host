@@ -102,6 +102,7 @@ import {
   routeRendererHarnessCommandSelection,
 } from "./renderer-harness-command-claim.js";
 import { installRendererSettingsLifecycle } from "./renderer-settings-lifecycle.js";
+import { installRendererSidebarThreadState } from "./renderer-sidebar-thread-state.js";
 import {
   installRendererDelegationMention,
   type RendererDelegationMentionControl,
@@ -794,6 +795,7 @@ export function installRendererBindingProbe(
     }
     return null;
   };
+  const sidebarThreadState = installRendererSidebarThreadState();
   const sidebarAgentIcons = installRendererSidebarAgentIcons({
     getClient: (hostId) => modelClientForHost(hostId),
     getPlugins: (hostId) => {
@@ -3372,6 +3374,7 @@ export function installRendererBindingProbe(
       disposeReasoningSoftWrap();
       delegationMention?.dispose();
       sidebarAgentIcons.dispose();
+      sidebarThreadState.dispose();
       settingsLifecycle.dispose();
       document.removeEventListener("beforeinput", onBeforeInput, true);
       document.removeEventListener("submit", onSubmit, true);
