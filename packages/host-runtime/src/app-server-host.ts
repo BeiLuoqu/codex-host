@@ -3223,6 +3223,7 @@ export class AppServerHost {
       inspection = await adapter.inspect({
         ...(params.data.cwd ? { cwd: params.data.cwd } : {}),
         ...(params.data.refresh !== undefined ? { refresh: params.data.refresh } : {}),
+        ...(params.data.purpose ? { purpose: params.data.purpose } : {}),
       });
     } catch (error) {
       await this.#writer.json(
