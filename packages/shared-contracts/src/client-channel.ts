@@ -44,7 +44,7 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/harness/session-import/sources",
   "codexhost/harness/session-import/list",
   "codexhost/harness/session-import/import",
-  // Settings pages shared with the console (connections, accounts, usage, updates).
+  // Settings pages shared with the console and GUI (connections, accounts, usage, updates, idle release).
   "codexhost/harness/installation",
   "codexhost/harness/launch-settings/get",
   "codexhost/harness/launch-settings/set",
@@ -63,6 +63,7 @@ export const CLIENT_CHANNEL_METHODS = [
   "codexhost/update/check",
   "codexhost/update/start",
   "codexhost/update/status",
+  "codexhost/sessions/loaded/list",
 ] as const;
 /** Explicit no-project creation; naming input is not a cwd or a project ID. */
 export const clientProjectlessWorkspaceSchema = z

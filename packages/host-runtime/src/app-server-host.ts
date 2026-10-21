@@ -1756,7 +1756,11 @@ export class AppServerHost {
         request.method.startsWith("codexhost/harness/") ||
         request.method === LOADED_SESSIONS_METHOD ||
         request.method === IDLE_RELEASE_SETTINGS_METHOD ||
-        request.method === USAGE_STATISTICS_METHOD
+        request.method === USAGE_STATISTICS_METHOD ||
+        // Settings requests from Web clients; the shared service owns these handlers too.
+        request.method.startsWith("codexhost/account/") ||
+        request.method.startsWith("codexhost/update/") ||
+        isModelPriceOverridesMethod(request.method)
       )
     ) {
       await this.#writer.json(

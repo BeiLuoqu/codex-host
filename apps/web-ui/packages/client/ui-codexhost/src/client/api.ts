@@ -57,13 +57,3 @@ export const importApi = {
       request: { harnessId, nativeSessionId },
     }),
 };
-export const preferencesApi = {
-  get: () =>
-    call<{
-      idleRelease: { enabled: boolean; timeoutMinutes: number };
-      revision: number;
-      idleReleaseAvailable: boolean;
-    }>("codexhost/preferences/get", {}),
-  setIdleRelease: (value: { enabled: boolean; timeoutMinutes: number }) =>
-    call("codexhost/preferences/patch", { operation: { kind: "idleRelease", value } }),
-};

@@ -46,7 +46,7 @@ Web 网关自有数据默认位于 `~/.codexhost/web/`，源码入口与打包�
 
 收藏、新会话配置与共享空闲释放设置由 Host 提供，空闲释放设置适用于 CH 管理的全部外部会话，包括 Codex CLI。旧 Host 不支持新接口时，普通会话仍可使用，收藏保存和共享设置不可用。
 
-Web 设置在“通用”之后提供连接、账号、用量统计、更新和关于，直接复用控制台的设置页代码（`renderer-extension` 的 `web-settings.js`，构建时复制为 Web 的 `codexhost-settings.js`，打开对应分区时按需加载并渲染在 Shadow DOM 中）。设置弹窗宽 1040px（不超过视口宽度减 48px）；页面声明 `codexhost-settings-page` 容器，宽度不足 720px 时沿用控制台的窄屏布局。请求经 Web 认证的 `/api/ch/v1/rpc` 发到 Host 客户端通道，所需设置方法已加入 `CLIENT_CHANNEL_METHODS`；Harness 安装更新沿用安装请求的长超时。会话导入继续使用 Web 侧栏的导入页；远程连接（SSH）依赖 Desktop，不在 Web 提供。Harness 排序在设置打开期间每 3 秒与 Host 核对。手机等非本机访问暂不限制安装与更新操作。
+Web 设置在“通用”之后提供连接、资源管理、账号、用量统计、更新和关于，直接复用控制台的设置页代码（`renderer-extension` 的 `web-settings.js`，构建时复制为 Web 的 `codexhost-settings.js`，打开对应分区时按需加载并渲染在 Shadow DOM 中）。设置弹窗宽 1040px（不超过视口宽度减 48px）；页面声明 `codexhost-settings-page` 容器，宽度不足 720px 时沿用控制台的窄屏布局。请求经 Web 认证的 `/api/ch/v1/rpc` 发到 Host 客户端通道，所需设置方法已加入 `CLIENT_CHANNEL_METHODS`，共享后台（`externalOnly`）也接受 Codex 账号、模型价格和更新请求（共享后台未接入更新协调器时，检查更新返回空结果、开始更新报不可用）；Harness 安装更新沿用安装请求的长超时。“资源管理”与 GUI 通用设置中的同名分组相同：自动释放空闲会话开关、空闲超时（5～1440 分钟）及已加载会话列表，读写同一份 Host Harness 偏好，Web 不再单独提供简化的空闲释放行。会话导入继续使用 Web 侧栏的导入页；远程连接（SSH）依赖 Desktop，不在 Web 提供。Harness 排序在设置打开期间每 3 秒与 Host 核对。手机等非本机访问暂不限制安装与更新操作。
 
 输入框下方只显示 CodexHost 用量按钮（见[会话用量计量](usage-metering.md)）；DSH 原有的会话统计标签、每轮用量面板和“性能与用量”设置已移除。
 

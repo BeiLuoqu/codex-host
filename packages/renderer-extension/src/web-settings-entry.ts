@@ -8,13 +8,17 @@ import consoleComponentsCss from "./console/components.css";
 import usageCss from "./console/usage/usage.css";
 import { startAgentGroupSync } from "./agent-group-sync.js";
 import { getSharedAgentGroupPreferenceStore } from "./agent-group-preference.js";
-import { createRendererModelClient } from "./renderer-model-client.js";
+import { installRendererHarnessPreferenceSync } from "./renderer-harness-preferences.js";
+import { installIdleReleasePreferenceSync } from "./renderer-idle-release-preference.js";
+import { createRendererModelClient, type RendererModelClient } from "./renderer-model-client.js";
 import coloredBrandCss from "./renderer-brand-mark.css";
 import accountsCss from "./settings/accounts.css";
-import { RendererSettingsPageScope } from "./settings/core.js";
+import { RendererSettingsPageScope, type RendererSettingsPageDefinition } from "./settings/core.js";
+import { mountIdleReleaseControls } from "./settings/idle-release-controls.js";
 import {
   resolveRendererSettingsLocale,
   rendererSettingsMessages,
+  type RendererSettingsMessages,
 } from "./settings/localization.js";
 import { createDefaultRendererSettingsPages } from "./settings/pages.js";
 import settingsCss from "./settings/shell.css";
@@ -56,6 +60,30 @@ function webRequestManager(): {
   };
 }
 
+/** The GUI's idle release group (switch, timeout, loaded sessions) as its own Web section. */
+function resourcesPage(
+  messages: RendererSettingsMessages,
+  client: RendererModelClient,
+): RendererSettingsPageDefinition {
+  return {
+    id: "resources",
+    label: messages.idleReleaseSection,
+    icon: "settings",
+    mount(context) {
+      const idleRelease = installIdleReleasePreferenceSync(window);
+      const disposeControls = mountIdleReleaseControls(context, messages, () => client);
+      const preferences = installRendererHarnessPreferenceSync(window);
+      preferences.connect("local", client);
+      idleRelease.connect(client);
+      return () => {
+        disposeControls();
+        preferences.dispose();
+        idleRelease.dispose();
+      };
+    },
+  };
+}
+
 function mount(pageId: string, host: HTMLElement, options: WebSettingsMountOptions): () => void {
   const messages = rendererSettingsMessages(resolveRendererSettingsLocale([options.locale]));
   const manager = webRequestManager();
@@ -72,17 +100,20 @@ function mount(pageId: string, host: HTMLElement, options: WebSettingsMountOptio
     startUpdate: () => modelClient.startUpdate(),
     readUpdateStatus: () => modelClient.readUpdateStatus(),
   };
-  const page = createDefaultRendererSettingsPages(
-    messages,
-    () => updateClient,
-    () => diagnostics,
-    () => modelClient,
-    () => null,
-    null,
-    () => null,
-    () => null,
-    (method, params) => manager.sendRequest(method, params),
-  ).find((candidate) => candidate.id === pageId);
+  const page = [
+    ...createDefaultRendererSettingsPages(
+      messages,
+      () => updateClient,
+      () => diagnostics,
+      () => modelClient,
+      () => null,
+      null,
+      () => null,
+      () => null,
+      (method, params) => manager.sendRequest(method, params),
+    ),
+    resourcesPage(messages, modelClient),
+  ].find((candidate) => candidate.id === pageId);
   if (!page) throw new Error(`Settings page ${pageId} is unavailable`);
 
   host.style.colorScheme = options.colorScheme;

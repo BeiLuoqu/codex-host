@@ -27,7 +27,6 @@ import type {} from "@deepseek-ai/dsh-client-ui-chat/client";
 import type {} from "@deepseek-ai/dsh-api-remotes/client";
 import { ensureServiceWorker } from "./notifications.ts";
 import { NotificationsRow } from "./NotificationsRow.tsx";
-import { IdleReleaseRow } from "./IdleReleaseRow.tsx";
 import { ImportPage, type ImportPageFace } from "./ImportPage.tsx";
 import { HostSettingsSection, type HostSettingsSectionFace } from "./HostSettingsSection.tsx";
 import type {} from "@deepseek-ai/dsh-client-ui-theme/client";
@@ -61,6 +60,7 @@ export const inject = [
 /** Console settings pages shown in Web settings, after General. */
 const HOST_SETTINGS_PAGES = [
   ["connections", "settings.connections"],
+  ["resources", "settings.resources"],
   ["accounts", "settings.accounts"],
   ["usage-statistics", "settings.usage"],
   ["updates", "settings.updates"],
@@ -148,26 +148,6 @@ export function apply(ctx: ClientContext): void {
         locale: NS,
       },
       NotificationsRow,
-    ),
-  );
-  const subscribePreferences = (listener: () => void) => {
-    const remove = ctx.remote.$on("codexhost/preferences-changed", listener);
-    const reconnect = ctx.on("connection/reset", listener);
-    return () => {
-      remove();
-      reconnect();
-    };
-  };
-  ctx.slots.inject("settings.general.item", () =>
-    ctx.slots.register(
-      {
-        name: "settings.general.item",
-        id: "codexhost.idle-release",
-        order: 6,
-        locale: NS,
-        inject: () => ({ subscribe: subscribePreferences }),
-      },
-      IdleReleaseRow,
     ),
   );
 
