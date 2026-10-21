@@ -10,7 +10,7 @@ CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；
 
 ## 版本
 
-2026-09-24 在 Claude Code 2.1.280 上实机确认；2026-10-21 在 Claude Code 2.1.305（Agent SDK 0.3.273 与 0.3.305）上复核了相同的 `queued` → `started` → `completed` 顺序和单个 `result`。没有查到 `priority: "next"` 的更早引入版本，因此不设版本门槛，已安装的 Claude Code 都声明 `capabilities.steer`。
+2026-09-24 在 Claude Code 2.1.280 上实机确认；2026-10-21 在 Claude Code 2.1.305（Agent SDK 0.3.273 与 0.3.305）上复核了相同的 `queued` → `started` → `completed` 顺序和单个 `result`。更早版本是否支持 `priority: "next"` 尚未确定。Adapter 目前对所有 Claude Code Session 无条件声明 `capabilities.steer`，并不代表未验证的版本都已支持原生同轮插入；如果 CLI 不发 `queued` 回执，`steer()` 会在有限等待后按接受处理。
 
 ## 历史
 
