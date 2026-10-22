@@ -3,6 +3,8 @@ import { harnessLocalizedTextSchema } from "./harness-presentation.js";
 import { harnessIdSchema } from "./ids.js";
 
 export const HARNESS_INSTALLATION_METHOD = "codexhost/harness/installation";
+export const HARNESS_INSTALLATION_START_METHOD = "codexhost/harness/installation/start";
+export const HARNESS_INSTALLATION_STATUS_METHOD = "codexhost/harness/installation/status";
 export const harnessInstallationParamsSchema = z
   .object({
     harnessId: harnessIdSchema,
@@ -25,3 +27,23 @@ export const harnessInstallationStateSchema = z
   .strict();
 export type HarnessInstallationParams = z.infer<typeof harnessInstallationParamsSchema>;
 export type HarnessInstallationState = z.infer<typeof harnessInstallationStateSchema>;
+
+export const harnessInstallationTaskParamsSchema = z.object({ taskId: z.string().uuid() }).strict();
+export const harnessInstallationTaskSchema = z.discriminatedUnion("status", [
+  z.object({ taskId: z.string().uuid(), status: z.literal("running") }).strict(),
+  z
+    .object({
+      taskId: z.string().uuid(),
+      status: z.literal("succeeded"),
+      result: harnessInstallationStateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      taskId: z.string().uuid(),
+      status: z.literal("failed"),
+      error: z.object({ code: z.number().int(), message: z.string().min(1).max(2048) }).strict(),
+    })
+    .strict(),
+]);
+export type HarnessInstallationTask = z.infer<typeof harnessInstallationTaskSchema>;
