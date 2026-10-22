@@ -5460,31 +5460,45 @@ describe("Claude Code HarnessAdapter", () => {
     await session.close();
   });
 
-  it("drops a malformed plan-limit observation without touching the latest still-applicable Usage", async () => {
-    const { adapter, transports } = fixture();
-    const session = await openSession(adapter);
-    const iterator = session.outputs[Symbol.asyncIterator]();
+  it.each([
+    { fiveHour: { utilizationPercent: Number.NaN } },
+    { fiveHour: { utilizationPercent: 40, resetsAtUnix: Number.MAX_SAFE_INTEGER } },
+    { sevenDay: { utilizationPercent: 12, resetsAtUnix: Number.MAX_SAFE_INTEGER } },
+  ])(
+    "drops a malformed plan-limit observation without touching the latest still-applicable Usage: %j",
+    async (planLimit) => {
+      const { adapter, transports } = fixture();
+      const session = await openSession(adapter);
+      const iterator = session.outputs[Symbol.asyncIterator]();
 
-    await session.execute(textTurn("plan-malformed"));
-    await nextEvent(iterator);
-    await nextEvent(iterator);
-    await nextEvent(iterator);
-    const transport = transports[0];
-    if (!transport) throw new Error("Fake Claude transport was not created");
+      await session.execute(textTurn("plan-malformed"));
+      await nextEvent(iterator);
+      await nextEvent(iterator);
+      await nextEvent(iterator);
+      const transport = transports[0];
+      if (!transport) throw new Error("Fake Claude transport was not created");
 
-    transport.planLimit({ fiveHour: { utilizationPercent: 30 } });
-    expect(await nextEvent(iterator)).toEqual({
-      type: "session.usage.changed",
-      observedForTurnId: "plan-malformed",
-      usage: { planFiveHourUsedPercent: 30 },
-    });
+      transport.planLimit({ fiveHour: { utilizationPercent: 30 } });
+      expect(await nextEvent(iterator)).toEqual({
+        type: "session.usage.changed",
+        observedForTurnId: "plan-malformed",
+        usage: { planFiveHourUsedPercent: 30 },
+      });
 
-    transport.planLimit({ fiveHour: { utilizationPercent: Number.NaN } });
-    transport.finish({ status: "succeeded" });
-    expect((await nextEvent(iterator)).type).toBe("item.completed");
-    expect((await nextEvent(iterator)).type).toBe("turn.completed");
-    await session.close();
-  });
+      expect(() => transport.planLimit(planLimit)).not.toThrow();
+      expect(adapter.credits()).toEqual({ usedPercent: 30, periodType: "five_hour" });
+      transport.planLimit({ sevenDay: { utilizationPercent: 12 } });
+      expect(await nextEvent(iterator)).toEqual({
+        type: "session.usage.changed",
+        observedForTurnId: "plan-malformed",
+        usage: { planFiveHourUsedPercent: 30, planSevenDayUsedPercent: 12 },
+      });
+      transport.finish({ status: "succeeded" });
+      expect((await nextEvent(iterator)).type).toBe("item.completed");
+      expect((await nextEvent(iterator)).type).toBe("turn.completed");
+      await session.close();
+    },
+  );
 
   it("has no plan usage on the Adapter before any rate-limit event is observed", () => {
     const { adapter } = fixture();

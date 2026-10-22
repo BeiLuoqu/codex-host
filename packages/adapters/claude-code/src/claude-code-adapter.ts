@@ -3455,8 +3455,13 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     const next: ClaudePlanLimitEvent = { ...(this.#latestPlanLimit ?? {}) };
     if (planLimit.fiveHour) next.fiveHour = planLimit.fiveHour;
     if (planLimit.sevenDay) next.sevenDay = planLimit.sevenDay;
-    if (!accountCreditsSnapshotSchema.safeParse(projectClaudePlanLimitToCredits(next)).success)
+    try {
+      if (!accountCreditsSnapshotSchema.safeParse(projectClaudePlanLimitToCredits(next)).success)
+        return null;
+    } catch {
+      // Optional quota observations must not fault the Session when native timestamps are invalid.
       return null;
+    }
     this.#latestPlanLimit = next.fiveHour || next.sevenDay ? next : null;
     if (this.#latestPlanLimit) {
       this.#accountCreditsSupported = true;
