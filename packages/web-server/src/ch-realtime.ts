@@ -17,7 +17,8 @@ export class ChRealtime {
       thread: (id: string) => Promise<unknown>;
       catalog: () => Promise<void>;
       connection: (online: boolean) => void;
-      reset: (epoch: string) => void;
+      /** `full` is the hello's `reset`: the cursor could not be replayed. */
+      reset: (epoch: string, full: boolean) => void;
       error: (id: string, error: unknown) => void;
     },
   ) {
@@ -46,7 +47,7 @@ export class ChRealtime {
       return;
     }
     if (event.type === "hello") {
-      this.callbacks.reset(event.cursor.epoch);
+      this.callbacks.reset(event.cursor.epoch, event.reset);
       for (const id of this.watched.keys()) this.schedule(id);
       this.schedule("");
     } else if (event.type === "changed") {

@@ -74,6 +74,25 @@ it(
     assert.equal(snapshot.status, 200);
     assert.match(text, /existing CH answer/u);
     assert.doesNotMatch(text, /"token"|"port"|"pid"/u);
+    // Snapshot options are opt-in and pass through to the Host unchanged.
+    assert.deepEqual(host.snapshotOptions.at(-1), {});
+    const compact = await fetch(`${origin}/api/ch/v1/snapshot`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ threadId: "shared", knownTurns: [], truncateToolOutput: true }),
+    });
+    assert.equal(compact.status, 200);
+    const compacted = (await compact.json()) as {
+      result: { turnsPage: { data: Array<{ fingerprint?: string }> } };
+    };
+    assert.equal(typeof compacted.result.turnsPage.data[0]?.fingerprint, "string");
+    assert.deepEqual(host.snapshotOptions.at(-1), { knownTurns: [], truncateToolOutput: true });
+    const malformed = await fetch(`${origin}/api/ch/v1/snapshot`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ threadId: "shared", knownTurns: "all" }),
+    });
+    assert.equal(malformed.status, 400);
     const controller = new AbortController();
     t.after(() => controller.abort());
     const events = await fetch(`${origin}/api/ch/v1/events`, {

@@ -7,6 +7,8 @@ import type { AddressInfo } from "node:net";
 import {
   clientChannelCursorSchema,
   clientChannelResponseSchema,
+  clientSnapshotRequestSchema,
+  type ClientSnapshotOptions,
   type ClientThreadSnapshot,
   type ClientChannelResponse,
 } from "@codexhost/shared-contracts";
@@ -18,7 +20,7 @@ import type { RemoteAppServerSessionStreams, RemoteAppServerSession } from "./re
 export interface ClientChannelTarget {
   readonly clientEvents: ClientChannelEvents;
   handleClientRequest(method: string, params: unknown): Promise<unknown>;
-  clientSnapshot(threadId: string): Promise<ClientThreadSnapshot>;
+  clientSnapshot(threadId: string, options?: ClientSnapshotOptions): Promise<ClientThreadSnapshot>;
   respondClient(input: ClientChannelResponse): Promise<{ resolved: boolean }>;
 }
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -108,9 +110,10 @@ export async function startClientChannelServer(options: {
       }
       if (url.pathname === "/v1/rpc" && typeof input.method === "string")
         reply(200, await options.target.handleClientRequest(input.method, input.params));
-      else if (url.pathname === "/v1/snapshot" && typeof input.threadId === "string")
-        reply(200, { result: await options.target.clientSnapshot(input.threadId) });
-      else if (url.pathname === "/v1/respond")
+      else if (url.pathname === "/v1/snapshot" && typeof input.threadId === "string") {
+        const { threadId, ...snapshotOptions } = clientSnapshotRequestSchema.parse(input);
+        reply(200, { result: await options.target.clientSnapshot(threadId, snapshotOptions) });
+      } else if (url.pathname === "/v1/respond")
         reply(200, {
           result: await options.target.respondClient(clientChannelResponseSchema.parse(input)),
         });

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   clientChannelCursorSchema,
   clientChannelResponseSchema,
+  clientSnapshotRequestSchema,
 } from "@codexhost/shared-contracts";
 import type { ChHostClient } from "./ch-host-client.ts";
 
@@ -83,9 +84,10 @@ export async function serveChClientGateway(
     if (!value || typeof value !== "object" || Array.isArray(value))
       throw new Error("Expected a request object");
     const input = value as Record<string, unknown>;
-    if (route === "/v1/snapshot" && typeof input.threadId === "string")
-      reply(200, { result: await channel.snapshot(input.threadId) });
-    else if (route === "/v1/respond")
+    if (route === "/v1/snapshot" && typeof input.threadId === "string") {
+      const { threadId, ...options } = clientSnapshotRequestSchema.parse(input);
+      reply(200, { result: await channel.snapshot(threadId, options) });
+    } else if (route === "/v1/respond")
       reply(200, { result: await channel.respond(clientChannelResponseSchema.parse(input)) });
     else if (
       route === "/v1/rpc" &&

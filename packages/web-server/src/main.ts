@@ -13,7 +13,7 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import qrcode from "qrcode-terminal";
-import { WebSocketServer } from "ws";
+import { createBrowserWebSocketServer } from "./browser-websocket.ts";
 
 import { AccessAuth } from "./auth.ts";
 import { registerMisc } from "./misc.ts";
@@ -399,7 +399,7 @@ const server = createServer((request, response) => {
   });
 });
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
+const wss = createBrowserWebSocketServer();
 server.on("upgrade", (request, socket, head) => {
   if (
     (request.url ?? "").split("?")[0] !== "/api/remote.mux" ||

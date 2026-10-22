@@ -20,6 +20,7 @@ import type {
   ClientWorkspaceSnapshot,
   ClientChannelResponse,
   ClientChannelCursor,
+  ClientSnapshotOptions,
 } from "@codexhost/shared-contracts";
 import { RpcError } from "./transport.ts";
 
@@ -32,7 +33,7 @@ export interface ChHostClient {
   readonly realtime?: {
     subscribe(listener: (event: HostClientUpdate) => void, after?: ClientChannelCursor): () => void;
     request<T = unknown>(method: string, params: Record<string, unknown>): Promise<T>;
-    snapshot(threadId: string): Promise<ClientThreadSnapshot>;
+    snapshot(threadId: string, options?: ClientSnapshotOptions): Promise<ClientThreadSnapshot>;
     respond(input: ClientChannelResponse): Promise<{ resolved: boolean }>;
   };
 }

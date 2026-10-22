@@ -191,7 +191,7 @@ export async function runSharedHostService(
             target: {
               clientEvents: host.clientEvents,
               handleClientRequest: (method, params) => host.handleClientRequest(method, params),
-              clientSnapshot: (id) => host.clientSnapshot(id),
+              clientSnapshot: (id, snapshotOptions) => host.clientSnapshot(id, snapshotOptions),
               respondClient: (input) => host.respondClient(input),
             },
           });

@@ -10,6 +10,7 @@ import {
   type ClientChannelCursor,
   type ClientChannelEvent,
   type ClientChannelResponse,
+  type ClientSnapshotOptions,
   type ClientThreadSnapshot,
 } from "@codexhost/shared-contracts";
 
@@ -237,10 +238,14 @@ export class HostClientChannel {
   get epoch(): string {
     return this.descriptor.epoch;
   }
-  async snapshot(threadId: string): Promise<ClientThreadSnapshot> {
+  /** Options are opt-in; an older Host ignores them and returns full Turns. */
+  async snapshot(
+    threadId: string,
+    options: ClientSnapshotOptions = {},
+  ): Promise<ClientThreadSnapshot> {
     const generation = this.generation;
     const snapshot = clientThreadSnapshotSchema.parse(
-      await this.post("/v1/snapshot", { threadId }),
+      await this.post("/v1/snapshot", { ...options, threadId }),
     );
     if (
       snapshot.thread.id !== threadId ||

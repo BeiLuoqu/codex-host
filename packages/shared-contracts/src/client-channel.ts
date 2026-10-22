@@ -156,14 +156,48 @@ const clientQueuedSubmissionSchema = z
     presentationInput: z.array(record).nullable().optional(),
   })
   .passthrough();
+/** Path of a shortened string inside an Item, e.g. `["aggregatedOutput"]` or `["changes", 0, "diff"]`. */
+const clientItemPathSchema = z.array(z.union([z.string(), z.number().int().nonnegative()]));
+/** An Item's `codexhostTruncated` field, present only when the snapshot request
+ * opted into `truncateToolOutput`. Shortened fields keep their first
+ * characters; `thread/items/list` returns the full Item. Items stay passthrough,
+ * so readers validate this field themselves. */
+export const clientItemTruncationSchema = z.object({
+  fields: z.array(
+    z.object({ path: clientItemPathSchema, originalLength: z.number().int().nonnegative() }),
+  ),
+});
+export type ClientItemTruncation = z.infer<typeof clientItemTruncationSchema>;
 const clientTurnSchema = z
   .object({
     id: z.string().min(1),
     status: z.string().min(1),
     items: z.array(z.object({ id: z.string().min(1), type: z.string().min(1) }).passthrough()),
     error: z.object({ message: z.string().optional() }).passthrough().nullable().optional(),
+    /** Completed Turns only, when the request carried `knownTurns`. Opaque; valid
+     * only within the Host epoch that issued it. */
+    fingerprint: z.string().min(1).optional(),
+    /** Placeholder for a requested known Turn whose served form is identical:
+     * `items` is empty and the client keeps the copy it holds. */
+    unchanged: z.literal(true).optional(),
   })
   .passthrough();
+const clientKnownTurnSchema = z.object({
+  id: z.string().min(1).max(512),
+  fingerprint: z.string().min(1).max(128),
+});
+/** `POST /v1/snapshot` body. Both options are optional; without them the reply
+ * is the unchanged v1 snapshot. */
+export const clientSnapshotRequestSchema = z.object({
+  threadId: z.string().min(1),
+  /** Completed Turns held from earlier snapshots. Presence (even empty) also asks
+   * the Host to fingerprint completed Turns in this reply. */
+  knownTurns: z.array(clientKnownTurnSchema).max(64).optional(),
+  /** Shorten long tool output in settled Items of completed Turns. */
+  truncateToolOutput: z.boolean().optional(),
+});
+export type ClientSnapshotRequest = z.infer<typeof clientSnapshotRequestSchema>;
+export type ClientSnapshotOptions = Omit<ClientSnapshotRequest, "threadId">;
 export const clientThreadSnapshotSchema = z.object({
   cursor: clientChannelCursorSchema,
   /** Current interruptible Host Turn, including command Turns omitted from client history. */

@@ -1,5 +1,5 @@
 /** Protocol fixture only. Real owner arbitration is tested in host-runtime. */
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -8,9 +8,11 @@ import {
   clientThreadSnapshotSchema,
   type ClientInteraction,
   type ClientChannelResponse,
+  type ClientSnapshotOptions,
   type ClientThreadSnapshot,
 } from "@codexhost/shared-contracts";
 import type { HostClientUpdate } from "@codexhost/desktop-control";
+import type { ChTurn } from "../../src/ch-thread-view.ts";
 import { FakeChHost } from "./ch-host.ts";
 
 export class FakeChChannel extends FakeChHost {
@@ -22,6 +24,14 @@ export class FakeChChannel extends FakeChHost {
   pending: ClientInteraction[] = [];
   answers: ClientChannelResponse[] = [];
   delaySnapshot: (() => Promise<void>) | undefined;
+  /** Options of every snapshot request, in order. */
+  snapshotOptions: ClientSnapshotOptions[] = [];
+  /** False models an older Host that ignores `knownTurns` and sends full Turns. */
+  supportsKnownTurns = true;
+  /** Placeholders sent in each snapshot reply, in order. */
+  snapshotPlaceholders: number[] = [];
+  /** Models a Host bug: answers any non-empty `knownTurns` with mismatching placeholders. */
+  forgeUnchanged = false;
   readonly realtime = {
     request: <T>(method: string, params: Record<string, unknown>) =>
       this.request<T>(method, params),
@@ -39,7 +49,7 @@ export class FakeChChannel extends FakeChHost {
         this.listeners.delete(listener);
       };
     },
-    snapshot: (id: string) => this.snapshot(id),
+    snapshot: (id: string, options?: ClientSnapshotOptions) => this.snapshot(id, options),
     respond: (response: ClientChannelResponse) => this.respond(response),
   };
   changed(id: string, method = "item/agentMessage/delta"): void {
@@ -63,8 +73,28 @@ export class FakeChChannel extends FakeChHost {
           reset: true,
         });
   }
-  async snapshot(id: string): Promise<ClientThreadSnapshot> {
+  /** Same contract as the Host: settled Turns carry an epoch-bound fingerprint and
+   * become placeholders when the client already holds identical content. */
+  private compact(turn: ChTurn, known: NonNullable<ClientSnapshotOptions["knownTurns"]>) {
+    if (turn.status === "inProgress") return turn;
+    const fingerprint = createHash("sha256")
+      .update(this.epoch + JSON.stringify(turn))
+      .digest("base64url");
+    if (this.forgeUnchanged && known.length)
+      return {
+        id: turn.id,
+        status: turn.status,
+        items: [],
+        fingerprint: "forged",
+        unchanged: true,
+      };
+    return known.some((entry) => entry.id === turn.id && entry.fingerprint === fingerprint)
+      ? { id: turn.id, status: turn.status, items: [], fingerprint, unchanged: true }
+      : { ...turn, fingerprint };
+  }
+  async snapshot(id: string, options: ClientSnapshotOptions = {}): Promise<ClientThreadSnapshot> {
     this.snapshots++;
+    this.snapshotOptions.push(structuredClone(options));
     if (!this.online) throw new Error("Host offline");
     const row = this.threads.get(id);
     if (!row) throw new Error("Unknown Thread");
@@ -72,7 +102,11 @@ export class FakeChChannel extends FakeChHost {
       cursor: { epoch: this.epoch, sequence: this.sequence },
       thread: { ...structuredClone(row), turns: [] },
       turnsPage: {
-        data: structuredClone(row.turns.slice(-5).reverse()),
+        data: structuredClone(row.turns.slice(-5).reverse()).map((turn) =>
+          this.supportsKnownTurns && options.knownTurns
+            ? this.compact(turn, options.knownTurns)
+            : turn,
+        ),
         nextCursor: row.turns.length > 5 ? row.turns.at(-5)?.id : null,
       },
       configuration: {
@@ -81,6 +115,7 @@ export class FakeChChannel extends FakeChHost {
       },
       interactions: this.pending.filter((value) => value.threadId === id),
     });
+    this.snapshotPlaceholders.push(value.turnsPage.data.filter((turn) => turn.unchanged).length);
     await this.delaySnapshot?.();
     return value;
   }
@@ -127,7 +162,10 @@ export async function startFakeChChannel(host: FakeChChannel, directory: string)
       const input = JSON.parse(text) as Record<string, unknown>;
       const result =
         request.url === "/v1/snapshot"
-          ? await host.snapshot(String(input.threadId))
+          ? await host.snapshot(String(input.threadId), {
+              ...(input.knownTurns ? { knownTurns: input.knownTurns } : {}),
+              ...(input.truncateToolOutput ? { truncateToolOutput: true } : {}),
+            } as ClientSnapshotOptions)
           : request.url === "/v1/respond"
             ? await host.respond(input as unknown as ClientChannelResponse)
             : await host.request(String(input.method), input.params as Record<string, unknown>);

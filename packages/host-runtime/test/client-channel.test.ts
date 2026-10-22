@@ -240,6 +240,57 @@ describe("public authenticated owner channel", () => {
     );
     current(fixture).succeedTurn();
   });
+  it("serves unchanged completed Turns as placeholders and full tool output on demand over HTTP", async () => {
+    const { fixture, a } = await setup();
+    const id = await startPiThread(fixture);
+    const turnId = await startPiTurn(fixture, id);
+    const command = current(fixture).startCommandExecution("cat big");
+    const output = "line of output\n".repeat(8_000);
+    current(fixture).appendCommandOutput(command, output);
+    current(fixture).completeItem(command, { status: "succeeded" });
+    current(fixture).succeedTurn();
+    await fixture.collector.waitFor((value) => value.method === "turn/completed");
+
+    const plain = await a.snapshot(id);
+    expect(plain.turnsPage.data[0]?.fingerprint).toBeUndefined();
+    expect(
+      plain.turnsPage.data
+        .find((turn) => turn.id === turnId)
+        ?.items.find((item) => item.type === "commandExecution")?.aggregatedOutput,
+    ).toBe(output);
+
+    const first = await a.snapshot(id, { knownTurns: [], truncateToolOutput: true });
+    const served = first.turnsPage.data.find((turn) => turn.id === turnId);
+    expect(served?.fingerprint).toEqual(expect.any(String));
+    const shortened = served?.items.find((item) => item.type === "commandExecution");
+    expect((shortened?.aggregatedOutput as string).length).toBeLessThan(output.length);
+    expect(shortened?.codexhostTruncated).toEqual({
+      fields: [{ path: ["aggregatedOutput"], originalLength: output.length }],
+    });
+
+    const second = await a.snapshot(id, {
+      knownTurns: [{ id: turnId, fingerprint: served?.fingerprint ?? "" }],
+      truncateToolOutput: true,
+    });
+    expect(second.turnsPage.data.find((turn) => turn.id === turnId)).toMatchObject({
+      unchanged: true,
+      items: [],
+    });
+    // Without truncation the served form differs, so the same fingerprint cannot match.
+    const untruncated = await a.snapshot(id, {
+      knownTurns: [{ id: turnId, fingerprint: served?.fingerprint ?? "" }],
+    });
+    expect(
+      untruncated.turnsPage.data.find((turn) => turn.id === turnId)?.unchanged,
+    ).toBeUndefined();
+
+    const full = await a.request<{
+      data: Array<{ item: { id: string; aggregatedOutput?: string } }>;
+    }>("thread/items/list", { threadId: id, turnId });
+    expect(full.data.find((entry) => entry.item.id === shortened?.id)?.item.aggregatedOutput).toBe(
+      output,
+    );
+  });
   it("publishes GUI model changes and native cancellation to every client", async () => {
     const { fixture, a, b, events } = await setup();
     const id = await startPiThread(fixture);

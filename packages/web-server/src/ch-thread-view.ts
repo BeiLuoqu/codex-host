@@ -24,6 +24,8 @@ export interface ChTurn {
   startedAt?: number | null;
   completedAt?: number | null;
   error?: { message?: string | undefined } | null | undefined;
+  /** Host snapshot fingerprint of a completed Turn; absent from paginated reads. */
+  fingerprint?: string | undefined;
 }
 export interface ChThread {
   id: string;

@@ -12,6 +12,8 @@ const PAGE_TURNS = 5;
 // can prepend without renumbering visible messages, tool references or anchors.
 // These are NOT native Turn numbers/cursors and are never persisted or sent to CH.
 const RENDER_ORIGIN = 2 ** 40;
+// Completed Turns offered to the Host as already held; its page holds five.
+const KNOWN_TURNS = 16;
 interface TurnsPage {
   data: ChTurn[];
   nextCursor: string | null;
@@ -66,12 +68,51 @@ export class ChThreadHistory extends ChThreadView {
     return result;
   }
 
+  /** After a Host `reset`, the next read uses full snapshot semantics. */
+  forgetKnownTurns(): void {
+    for (const turn of this.thread.turns) delete turn.fingerprint;
+  }
+
+  /** Ask the Host to replace completed Turns this window already holds with
+   * placeholders, then resolve each placeholder to the held copy. A placeholder
+   * this window cannot satisfy falls back to one full read; an older Host that
+   * ignores the option simply returns full Turns.
+   */
+  private async snapshot(
+    realtime: NonNullable<ChHostClient["realtime"]>,
+  ): Promise<ClientThreadSnapshot> {
+    const held = new Map(this.thread.turns.map((turn) => [turn.id, turn]));
+    const knownTurns = this.thread.turns
+      .slice(-KNOWN_TURNS)
+      .flatMap((turn) =>
+        turn.fingerprint ? [{ id: turn.id, fingerprint: turn.fingerprint }] : [],
+      );
+    let snapshot = await realtime.snapshot(this.thread.id, { knownTurns });
+    const unresolved = (value: ClientThreadSnapshot) =>
+      value.turnsPage.data.some(
+        (turn) => turn.unchanged && held.get(turn.id)?.fingerprint !== turn.fingerprint,
+      );
+    if (unresolved(snapshot)) {
+      // `knownTurns: []` still requests fingerprints but can never match a placeholder.
+      snapshot = await realtime.snapshot(this.thread.id, { knownTurns: [] });
+      if (snapshot.turnsPage.data.some((turn) => turn.unchanged))
+        throw new RpcError("host/history-invalid", "CH replaced a Turn it was not asked to.");
+    }
+    return {
+      ...snapshot,
+      turnsPage: {
+        ...snapshot.turnsPage,
+        data: snapshot.turnsPage.data.map((turn) => (turn.unchanged ? held.get(turn.id) : turn)),
+      },
+    } as ClientThreadSnapshot;
+  }
+
   /** First open reads only the newest five Turns. Later opens reuse this window;
    * a metadata probe avoids rereading unchanged idle history, even after cache TTL.
    */
   refresh(force = false): Promise<void> {
     this.refreshing ??= (async () => {
-      const snapshot = await this.host.realtime?.snapshot(this.thread.id);
+      const snapshot = this.host.realtime ? await this.snapshot(this.host.realtime) : undefined;
       const { thread } = snapshot
         ? { thread: snapshot.thread }
         : await this.host.request<{ thread: ChThread }>("thread/read", {

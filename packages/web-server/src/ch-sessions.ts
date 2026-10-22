@@ -23,6 +23,7 @@ import { nativePermissionView } from "./session-presentation.ts";
 import { projectGroupRoot } from "./ch-project-groups.ts";
 import { threadListTitle } from "./ch-thread-title.ts";
 import { ChThreadHistory } from "./ch-thread-history.ts";
+import { WebThreadStates, type UsageLoad } from "./web-thread-state.ts";
 import { forkChThread, forkUnavailable } from "./ch-thread-fork.ts";
 import { ChPinnedThreads } from "./ch-pinned-threads.ts";
 import { type WebImages, WEB_IMAGE_INPUT, WEB_IMAGE_LIMITS } from "./web-images.ts";
@@ -61,16 +62,9 @@ export class ChSessions {
   private readonly fileInputs: ChFileInputs | undefined;
   private rows = new Map<string, ChThread>();
   private publishedCatalog: Map<string, string> | undefined;
-  private views = new Map<string, ChThreadHistory>();
-  private readingViews = new Map<string, Promise<ChThreadHistory>>();
-  private loadingControls = new Map<string, Promise<void>>();
-  private loadingUsage = new Map<
-    string,
-    { view: ChThreadHistory; dirty: boolean; operation: Promise<void> }
-  >();
-  private usageReadAt = new Map<string, number>();
-  private historyReadAt = new Map<string, number>();
-  private ownership = new Map<string, string>();
+  /** Everything derived per Thread. Rows (replaced as a whole by each catalog read)
+   * and drafts (not yet Host Threads) keep their own lifecycles. */
+  private readonly threads = new WebThreadStates();
   private drafts = new Map<string, Draft>();
   private controls = new Set<StreamSink>();
   private refreshing: Promise<void> | undefined;
@@ -82,7 +76,6 @@ export class ChSessions {
   private readonly interactions: ChInteractions | undefined;
   private hostOnline = true;
   private hostEpoch: string | undefined;
-  private readonly viewOrigins = new Map<string, number>();
   notifier: ((notification: SessionNotification) => void) | undefined;
   constructor(
     private readonly host: ChHostClient,
@@ -104,7 +97,7 @@ export class ChSessions {
             if (this.drafts.has(id)) return id;
             await this.owner(id);
             if (!this.rows.has(id)) await this.refresh();
-            if (!this.ownership.has(id))
+            if (!this.threads.hasHarness(id))
               throw new RpcError("session/not-found", "CH Thread not found.");
             if (this.rows.get(id)?.parentThreadId)
               throw new RpcError(
@@ -114,11 +107,11 @@ export class ChSessions {
             return id;
           })
         : undefined;
-    this.pins = new ChPinnedThreads(host, workspaces, (id) => this.ownership.has(id));
+    this.pins = new ChPinnedThreads(host, workspaces, (id) => this.threads.hasHarness(id));
     workspaces.setReferenceArchives([]);
     this.interactions = host.realtime
       ? new ChInteractions(host.realtime, events, (id, message) => {
-          this.views.get(id)?.log.setProjection("nativeInteractionError", message);
+          this.threads.view(id)?.log.setProjection("nativeInteractionError", message);
         })
       : undefined;
     this.realtime = host.realtime
@@ -128,32 +121,22 @@ export class ChSessions {
           connection: (online) => {
             this.hostOnline = online;
             if (!online) this.interactions?.clear();
-            for (const view of this.views.values())
+            for (const [, view] of this.threads.views())
               view.log.setProjection("nativeConnection", {
                 state: online ? "connected" : "reconnecting",
               });
           },
-          reset: (epoch) => {
+          reset: (epoch, full) => {
+            if (full && this.hostEpoch === epoch) this.threads.forgetKnownTurns();
             if (this.hostEpoch && this.hostEpoch !== epoch) {
-              const old = [...this.views.values()];
-              this.views.clear();
-              this.readingViews.clear();
-              this.loadingControls.clear();
-              this.loadingUsage.clear();
-              this.usageReadAt.clear();
-              this.historyReadAt.clear();
               this.interactions?.clear();
-              for (const view of old) {
-                view.retire();
-                this.viewOrigins.set(view.thread.id, view.log.lastSeq + 2);
-                view.log.reconnectFollowers();
-              }
+              for (const view of this.threads.newHostGeneration()) view.log.reconnectFollowers();
             }
             this.hostEpoch = epoch;
           },
           error: (id, error) => {
             if (error instanceof RpcError && error.code === "host/resync") return;
-            this.views.get(id)?.log.setProjection("nativeConnection", {
+            this.threads.view(id)?.log.setProjection("nativeConnection", {
               state: "reconnecting",
               message: error instanceof Error ? error.message : "CH state is unavailable",
             });
@@ -217,12 +200,12 @@ export class ChSessions {
     }
     const rows = new Map([...found].filter(([id]) => ownership.has(id)));
     for (const [id, row] of this.rows) {
-      const harnessId = this.ownership.get(id);
+      const harnessId = this.threads.harnessId(id);
       if (known.has(id) || found.has(id) || !harnessId) continue;
       rows.set(id, row);
       ownership.set(id, harnessId);
     }
-    this.ownership = ownership;
+    this.threads.replaceHarnesses(ownership);
     this.rows = rows;
     await this.syncWorkspace();
     if (this.closed) return;
@@ -270,7 +253,7 @@ export class ChSessions {
       row.updatedAt,
       row.status.type,
       row.parentThreadId ?? null,
-      this.ownership.get(row.id),
+      this.threads.harnessId(row.id),
     ]);
   }
   private async publishCatalogChanges(): Promise<void> {
@@ -291,7 +274,7 @@ export class ChSessions {
     // unfollow. Cached catalog hints cannot replace them. Push the authoritative
     // title through the existing control stream without rereading any history.
     for (const [id, row] of this.rows)
-      this.views.get(id)?.log.setProjection("title", threadListTitle(row));
+      this.threads.view(id)?.log.setProjection("title", threadListTitle(row));
     for (const row of changed) this.events.emit("api-session/added", row);
     if (before)
       for (const id of before.keys())
@@ -310,9 +293,10 @@ export class ChSessions {
   }
   private view(id: string, reuseIdle = false): Promise<ChThreadHistory> {
     id = this.id(id);
-    const existing = this.readingViews.get(id);
+    const state = this.threads.get(id);
+    const existing = state?.reading;
     if (existing) return reuseIdle ? existing : existing.then(() => this.view(id));
-    const cached = this.views.get(id);
+    const cached = state?.view;
     const row = this.rows.get(id);
     if (
       reuseIdle &&
@@ -322,7 +306,7 @@ export class ChSessions {
       row.status.type !== "active" &&
       cached.thread.status.type !== "active" &&
       row.updatedAt === cached.thread.updatedAt &&
-      Date.now() - (this.historyReadAt.get(id) ?? 0) < 30_000
+      Date.now() - (state?.historyReadAt ?? 0) < 30_000
     )
       return Promise.resolve(cached);
     const reading = this.readView(id, !reuseIdle)
@@ -333,25 +317,29 @@ export class ChSessions {
           "code" in error &&
           (error.code === "host/resync" || error.code === -32094)
         ) {
-          if (this.readingViews.get(id) === reading) this.readingViews.delete(id);
+          this.finishReading(id, reading);
           return this.view(id, reuseIdle);
         }
         throw error;
       })
-      .finally(() => {
-        if (this.readingViews.get(id) === reading) this.readingViews.delete(id);
-      });
-    this.readingViews.set(id, reading);
+      .finally(() => this.finishReading(id, reading));
+    this.threads.ensure(id).reading = reading;
     return reading;
+  }
+  private finishReading(id: string, reading: Promise<ChThreadHistory>): void {
+    const state = this.threads.get(id);
+    if (state?.reading !== reading) return;
+    delete state.reading;
+    this.threads.prune(id);
   }
   private async readView(id: string, force: boolean): Promise<ChThreadHistory> {
     if (!this.rows.has(id)) await this.refresh();
     const row = this.rows.get(id);
     if (!row) throw new RpcError("session/not-found", "CH Thread not found.", { sessionId: id });
-    const harnessId = this.ownership.get(id);
+    const harnessId = this.threads.harnessId(id);
     if (!harnessId)
       throw new RpcError("session/not-external", "CH did not confirm external Thread ownership.");
-    let view = this.views.get(id);
+    let view = this.threads.view(id);
     if (!view) {
       view = new ChThreadHistory(
         this.host,
@@ -361,7 +349,7 @@ export class ChSessions {
           for (const sink of this.controls)
             sink.push({ type: "projection", sessionId, key, value, seq });
         },
-        this.viewOrigins.get(id),
+        this.threads.get(id)?.viewOrigin,
         this.attachments
           ? (content) => this.attachments?.project(id, content) ?? content
           : undefined,
@@ -371,7 +359,7 @@ export class ChSessions {
         view.log.setProjection("attachmentInput", this.files ? WEB_FILE_INPUT : WEB_IMAGE_INPUT);
         view.log.setProjection("imageLimits", WEB_IMAGE_LIMITS);
       }
-      this.views.set(id, view);
+      this.threads.ensure(id).view = view;
     }
     try {
       await view.refresh(force);
@@ -380,15 +368,9 @@ export class ChSessions {
         error instanceof RpcError &&
         (error.code === "host/history-changed" || error.code === "host/items-replaced")
       ) {
-        view.retire();
         // Browsers retain per-key projection watermarks across Thread reopening.
         // Rebuilt history must not make fresh queue/control values look stale.
-        this.viewOrigins.set(id, view.log.lastSeq + 2);
-        this.views.delete(id);
-        this.historyReadAt.delete(id);
-        this.loadingControls.delete(id);
-        this.loadingUsage.delete(id);
-        this.usageReadAt.delete(id);
+        this.threads.discardView(id, view);
         if (error.code === "host/items-replaced") {
           view.log.reconnectFollowers();
           return this.readView(id, true);
@@ -397,7 +379,7 @@ export class ChSessions {
       }
       throw error;
     }
-    if (this.views.get(id) !== view)
+    if (this.threads.view(id) !== view)
       throw new RpcError("host/resync", "Host snapshot was superseded by a new generation");
     if (view.ownerSnapshot && this.hostOnline && !this.closed)
       this.interactions?.update(view.ownerSnapshot);
@@ -405,9 +387,9 @@ export class ChSessions {
       view.log.setProjection("nativeConnection", {
         state: this.hostOnline ? "connected" : "reconnecting",
       });
-    this.historyReadAt.set(id, Date.now());
+    this.threads.ensure(id).historyReadAt = Date.now();
     const name = await this.catalog.name(harnessId);
-    if (this.views.get(id) !== view)
+    if (this.threads.view(id) !== view)
       throw new RpcError("host/resync", "Host snapshot was superseded by a new generation");
     view.log.setProjection("harnessIdentity", { id: harnessId, name });
     this.loadControls(view, harnessId, force);
@@ -420,13 +402,13 @@ export class ChSessions {
   }
   private loadUsage(view: ChThreadHistory, force: boolean): void {
     const id = view.thread.id;
-    const active = this.loadingUsage.get(id);
+    const active = this.threads.get(id)?.usage;
     if (active?.view === view) {
       if (force) active.dirty = true;
       return;
     }
-    if (!force && Date.now() - (this.usageReadAt.get(id) ?? 0) < 30_000) return;
-    const state = {
+    if (!force && Date.now() - (this.threads.get(id)?.usageReadAt ?? 0) < 30_000) return;
+    const state: UsageLoad = {
       view,
       dirty: false,
       operation: Promise.resolve(),
@@ -437,10 +419,10 @@ export class ChSessions {
         const result = threadUsageInspectionSchema.parse(
           await this.host.request("codexhost/thread/usage/inspect", { threadId: id }),
         );
-        if (this.closed || this.views.get(id) !== view || this.loadingUsage.get(id) !== state)
+        if (this.closed || this.threads.view(id) !== view || this.threads.get(id)?.usage !== state)
           return;
         applyUsageProjections(view.log, result);
-        this.usageReadAt.set(id, Date.now());
+        this.threads.ensure(id).usageReadAt = Date.now();
       } while (state.dirty);
     })()
       .catch(() => {
@@ -448,20 +430,25 @@ export class ChSessions {
         // history and input remain usable, and the next invalidation retries.
       })
       .finally(() => {
-        if (this.loadingUsage.get(id) === state) this.loadingUsage.delete(id);
+        const current = this.threads.get(id);
+        if (current?.usage === state) delete current.usage;
       });
-    this.loadingUsage.set(id, state);
+    this.threads.ensure(id).usage = state;
   }
   private loadControls(view: ChThreadHistory, harnessId: string, force: boolean): void {
     const id = view.thread.id;
-    if (!force && this.loadingControls.has(id)) return;
+    if (!force && this.threads.get(id)?.controls) return;
     // Runtime inspection/config discovery must not gate the history snapshot.
     const loading = Promise.all([
       view.ownerSnapshot ? Promise.resolve(view.ownerSnapshot.configuration) : this.owner(id),
       this.catalog.inspect(harnessId, view.thread.cwd),
     ])
       .then(([owner, inspection]) => {
-        if (this.closed || this.views.get(id) !== view || this.loadingControls.get(id) !== loading)
+        if (
+          this.closed ||
+          this.threads.view(id) !== view ||
+          this.threads.get(id)?.controls !== loading
+        )
           return;
         view.log.setProjection(
           "nativePermissions",
@@ -482,17 +469,18 @@ export class ChSessions {
         // Controls remain absent on failure; history stays usable and later reads retry.
       })
       .finally(() => {
-        if (this.loadingControls.get(id) === loading) this.loadingControls.delete(id);
+        const current = this.threads.get(id);
+        if (current?.controls === loading) delete current.controls;
       });
-    this.loadingControls.set(id, loading);
+    this.threads.ensure(id).controls = loading;
   }
   private async summary(row: ChThread) {
-    const harnessId = this.ownership.get(row.id);
+    const harnessId = this.threads.harnessId(row.id);
     if (!harnessId)
       throw new RpcError("session/not-external", "CH did not confirm external Thread ownership.");
     const values = {
       ...defaultProjections(),
-      ...this.views.get(row.id)?.log.projections,
+      ...this.threads.view(row.id)?.log.projections,
       ...(this.images
         ? {
             attachmentInput: this.files ? WEB_FILE_INPUT : WEB_IMAGE_INPUT,
@@ -648,7 +636,7 @@ export class ChSessions {
       draft.canonicalId = result.thread.id;
       this.files?.bind(draft.id, result.thread.id);
       this.rows.set(result.thread.id, result.thread);
-      this.ownership.set(result.thread.id, owner.harnessId);
+      this.threads.setHarness(result.thread.id, owner.harnessId);
       this.workspaces.detachSession(draft.id);
       if (draft.cwd) {
         this.workspaces.selectReferenceWorkspace(draft.cwd);
@@ -712,8 +700,8 @@ export class ChSessions {
         "session/not-started",
         "Send the first message before archiving this Thread.",
       );
-    if (!this.ownership.has(id)) await this.refresh();
-    if (!this.ownership.has(id))
+    if (!this.threads.hasHarness(id)) await this.refresh();
+    if (!this.threads.hasHarness(id))
       throw new RpcError("session/not-found", "This Thread is not in the shared catalog.");
     await this.owner(id);
     await this.host.request(archived ? "thread/archive" : "thread/unarchive", { threadId: id });
@@ -746,9 +734,9 @@ export class ChSessions {
             "host/pin-draft",
             "Send the first message before pinning this Thread.",
           );
-        if (!this.ownership.has(id)) await this.refresh();
+        if (!this.threads.hasHarness(id)) await this.refresh();
         await this.owner(id);
-        if (!this.ownership.has(id))
+        if (!this.threads.hasHarness(id))
           throw new RpcError("session/not-found", "This Thread is not in the shared catalog.");
         return { pinnedSessionIds: await this.pins.sync({ threadId: id, pinned }) };
       });
@@ -778,7 +766,7 @@ export class ChSessions {
       const id = this.id(request.sessionId);
       if (this.drafts.has(id))
         return forkUnavailable(id, "Send a message before forking this session.");
-      const displayed = this.views.get(id);
+      const displayed = this.threads.view(id);
       if (request.atSeq !== undefined && !displayed)
         return forkUnavailable(id, "Fork history expired. Reopen the conversation.");
       const view = await this.view(id);
@@ -925,7 +913,7 @@ export class ChSessions {
       } catch {
         // A failed read cannot turn an acknowledged write into a rejected send.
         if (this.realtime) {
-          this.views.get(threadId)?.log.setProjection("nativeConnection", {
+          this.threads.view(threadId)?.log.setProjection("nativeConnection", {
             state: "reconnecting",
             message: "CH accepted your message; waiting to synchronize its state.",
           });
@@ -1044,7 +1032,7 @@ export class ChSessions {
         maxMessages?: number;
       }>(args);
       const view =
-        this.views.get(this.id(req.address.sessionId)) ??
+        this.threads.view(this.id(req.address.sessionId)) ??
         (await this.view(req.address.sessionId, true));
       return view.olderPage(req.throughSeq, req.beforeSeq, req.maxMessages);
     });
@@ -1075,7 +1063,8 @@ export class ChSessions {
       // Draft metadata can yield. Capture live state and subscribe only after
       // it settles, in one synchronous step: the client requires the baseline
       // before any delta, and changes during preparation belong in that baseline.
-      for (const [id, view] of this.views) projections[id] = view.log.projectionBaseline();
+      for (const [id, view] of this.threads.views())
+        projections[id] = view.log.projectionBaseline();
       this.controls.add(sink);
       sink.onClose(() => this.controls.delete(sink));
       sink.push({ type: "baseline", value: { projections } });
@@ -1112,8 +1101,8 @@ export class ChSessions {
       const view = await this.view(request.address.sessionId, !this.realtime);
       // Reopening a Thread must not retain a snapshot that went stale while it
       // had no realtime follower. The initial open already has a read in flight.
-      if (this.usageReadAt.has(view.thread.id) && !this.loadingUsage.has(view.thread.id))
-        this.loadUsage(view, true);
+      const tracked = this.threads.get(view.thread.id);
+      if (tracked?.usageReadAt !== undefined && !tracked.usage) this.loadUsage(view, true);
       view.log.follow(sink, request);
       // Publish first; prefetch just one older page, never drain all history.
       const prefetch = setImmediate(() => {
