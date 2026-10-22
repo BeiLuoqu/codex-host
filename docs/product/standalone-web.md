@@ -72,7 +72,7 @@ GUI 原生路由仍不使用 Codex CLI 插件。共享 home 会共享原生配�
 
 默认发现本地 CH 的认证客户端通道 v1；没有健康服务时，调用同仓库/发行包原生 Launcher 按需启动后台，不启动/重启 Desktop、不重新注入 Renderer。通道描述文件默认位于 `~/.codexhost/client-hosts`。`--ch-data <dir>` 指定后台数据目录，和 Web 的认证/设置 `--data` 分开；还可显式指定 `--ch-launcher`、`--ch-host-runtime`、`--ch-plugins`、`--ch-codex-home`。自定义发现路径为 `--ch-control-directory <ch-data>/client-hosts`，不能用另一个目录暗中创建不同所有者。Desktop 必须使用同一 Host 数据目录和 Codex home，才能共享原会话。
 
-两端通过发现已运行的后台复用执行与存储；无可用后台时才启动。后台使用动态端口，检查不是原子互斥，不保证并发启动严格单实例；Mapping Store 保留自身的存储锁。关闭前台不停止任务。后台重启仅恢复原生历史与当前可读取事实，不重发写入，不保证崩溃时进行中的任务继续执行。显式维护可运行 `codexhost host stop`，该操作会停止任务并等待正常子进程清理；应先关闭会自动重连的界面。生命周期边界见[客户端通道](../architecture/host-client-channel.md)。
+两端通过动态端口与认证描述文件发现已运行的后台，复用其执行与存储；无可用后台时调用 `host ensure`。同一 Host 数据目录的 `ensure`、`stop`、`restart` 由 `shared-host-lifecycle.lock` 串行执行，`ensure` 持锁后重新检查并复用已就绪的后台，`restart` 持锁完成停止、清理、启动和就绪确认。该锁仅协调支持它的生命周期操作，不是运行期所有权锁，也不锁原生 Harness home；Mapping Store 保留自身的存储锁。关闭前台不停止任务。后台重启仅恢复原生历史与当前可读取事实，不重发写入，不保证崩溃时进行中的任务继续执行。显式维护可运行 `codexhost host stop`，该操作会停止任务并等待正常子进程清理；应先关闭会自动重连的界面。生命周期边界见[客户端通道](../architecture/host-client-channel.md)。
 
 已运行的旧 Desktop-owned 通道仍可连接，但不会被接管或停止；迁移须用户另行更新并重启 Desktop。单独指定 `--ch-cdp http://127.0.0.1:<port>` 明确选择旧 CDP 入口；与 control directory 同用时，Thread 请求使用事件通道，CDP 仅为依赖 GUI 的原生置顶服务及旧 Host 项目读取提供入口。独立后台从原生保存文件只读读取项目，Windows 的共享聊天/项目读取不再要求 CDP。已选中的服务通道只重连或启动同一后台，不在 Web 网关创建执行 owner。仅重建 Web 不会升级正在运行的后台或 Desktop。
 
