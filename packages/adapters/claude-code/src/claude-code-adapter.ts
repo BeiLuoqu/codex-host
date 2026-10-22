@@ -615,6 +615,7 @@ class ClaudeHarnessSession implements HarnessSession {
   #usageGeneration = 0;
   #latestUsage: HostUsage | null = null;
   #minimumContextUsedTokens: number | null = null;
+  #latestRequestModel: string | null = null;
   #calibratedInputTokens = 0;
   #calibratedOutputTokens = 0;
   #calibratedCostUsd = 0;
@@ -2544,6 +2545,7 @@ class ClaudeHarnessSession implements HarnessSession {
     const promptTokens =
       usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens;
     if (promptTokens > 0) this.#minimumContextUsedTokens = promptTokens;
+    if (usage.model) this.#latestRequestModel = usage.model;
     const cacheHitRatePercent = claudeCacheHitRatePercent(usage);
     const contextWindowTokens = this.#latestUsage?.contextWindowTokens;
     this.#mergeAndPublishUsage(
@@ -2595,7 +2597,37 @@ class ClaudeHarnessSession implements HarnessSession {
       const cacheHitRatePercent = claudeCacheHitRatePercent(event.lastRequestUsage);
       if (cacheHitRatePercent !== undefined) delta.cacheHitRatePercent = cacheHitRatePercent;
     }
+    // The Result names each Model's context window for free. Without it the
+    // passive per-request projection cannot show Context until an explicit
+    // (count_tokens-backed) Usage detail refresh, i.e. until the popover opens.
+    if (
+      this.#latestUsage?.contextWindowTokens === undefined &&
+      this.#minimumContextUsedTokens !== null
+    ) {
+      const contextWindowTokens = this.#resultContextWindow(event.modelUsage);
+      if (contextWindowTokens !== undefined) {
+        delta.contextUsedTokens = this.#minimumContextUsedTokens;
+        delta.contextWindowTokens = contextWindowTokens;
+      }
+    }
     this.#mergeAndPublishUsage(delta, active.command.turnId);
+  }
+
+  /** The latest request's Model, else the Model that carried the most prompt tokens. */
+  #resultContextWindow(
+    modelUsage: Extract<ClaudeTurnEvent, { type: "usage.result" }>["modelUsage"],
+  ): number | undefined {
+    if (!modelUsage?.length) return undefined;
+    const latest = this.#latestRequestModel;
+    const matched = latest ? modelUsage.find(({ model }) => model === latest) : undefined;
+    const main =
+      matched ??
+      modelUsage.reduce((best, entry) =>
+        (entry.promptTokens ?? entry.inputTokens) > (best.promptTokens ?? best.inputTokens)
+          ? entry
+          : best,
+      );
+    return main.contextWindowTokens;
   }
 
   /**

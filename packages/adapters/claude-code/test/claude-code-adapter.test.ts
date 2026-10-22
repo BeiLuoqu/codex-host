@@ -4922,8 +4922,8 @@ describe("Claude Code HarnessAdapter", () => {
       type: "usage.result",
       totalCostUsd: 1.373,
       modelUsage: [
-        { inputTokens: 100, outputTokens: 40 },
-        { inputTokens: 20, outputTokens: 5 },
+        { model: "claude-sonnet-4-6", inputTokens: 100, outputTokens: 40 },
+        { model: "claude-haiku-4-5", inputTokens: 20, outputTokens: 5 },
       ],
       lastRequestUsage: {
         inputTokens: 10,
@@ -4941,6 +4941,65 @@ describe("Claude Code HarnessAdapter", () => {
         outputTokens: 45,
         cacheHitRatePercent: 99,
       },
+    });
+    transport.finish({ status: "succeeded" });
+    for (;;) {
+      if ((await nextEvent(iterator)).type === "turn.completed") break;
+    }
+    expect(transport.getContextUsage).not.toHaveBeenCalled();
+    await session.close();
+  });
+
+  it("projects Context from the Result's context window without an exact refresh", async () => {
+    const { adapter, transports } = fixture();
+    const session = await openSession(adapter);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+
+    await session.execute(textTurn("result-context"));
+    await nextEvent(iterator);
+    await nextEvent(iterator);
+    await nextEvent(iterator);
+    const transport = transports[0];
+    if (!transport) throw new Error("Fake Claude transport was not created");
+
+    transport.event({
+      type: "message.completed",
+      messageId: "assistant-1",
+      lastRequestUsage: {
+        requestId: "request-1",
+        model: "claude-sonnet-4-6",
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheCreationInputTokens: 20,
+        cacheReadInputTokens: 70_000,
+      },
+    });
+    const estimate = await nextEvent(iterator);
+    expect(estimate).toMatchObject({ type: "session.usage.changed" });
+    expect(estimate).not.toHaveProperty("usage.contextWindowTokens");
+
+    transport.event({
+      type: "usage.result",
+      modelUsage: [
+        {
+          model: "claude-haiku-4-5",
+          inputTokens: 900_000,
+          outputTokens: 1,
+          promptTokens: 900_000,
+          contextWindowTokens: 200_000,
+        },
+        {
+          model: "claude-sonnet-4-6",
+          inputTokens: 10,
+          outputTokens: 5,
+          promptTokens: 70_030,
+          contextWindowTokens: 1_000_000,
+        },
+      ],
+    });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: "session.usage.changed",
+      usage: { contextUsedTokens: 70_030, contextWindowTokens: 1_000_000 },
     });
     transport.finish({ status: "succeeded" });
     for (;;) {
@@ -5199,7 +5258,7 @@ describe("Claude Code HarnessAdapter", () => {
     transport.event({
       type: "usage.result",
       totalCostUsd: 0.5,
-      modelUsage: [{ inputTokens: 10, outputTokens: 2 }],
+      modelUsage: [{ model: "claude-sonnet-4-6", inputTokens: 10, outputTokens: 2 }],
     });
     expect(await nextEvent(iterator)).toEqual({
       type: "session.usage.changed",

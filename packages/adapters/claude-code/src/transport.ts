@@ -203,7 +203,13 @@ export type ClaudeTurnEvent =
   | {
       type: "usage.result";
       totalCostUsd?: number;
-      modelUsage?: Array<{ inputTokens: number; outputTokens: number }>;
+      modelUsage?: Array<{
+        model: string;
+        inputTokens: number;
+        outputTokens: number;
+        promptTokens?: number;
+        contextWindowTokens?: number;
+      }>;
       lastRequestUsage?: ClaudeLastRequestUsage;
     };
 
