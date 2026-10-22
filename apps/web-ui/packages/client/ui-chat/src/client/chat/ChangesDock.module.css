@@ -6,21 +6,31 @@
 
 .anchor {
   position: relative;
-  outline: none;
+  border-radius: 16px;
+  corner-shape: round;
+}
+
+.anchor:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-tertiary);
+  outline-offset: 2px;
 }
 
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 3px 10px;
-  border-radius: 999px;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: inherit;
   corner-shape: round;
-  background: var(--dsw-alias-fill-secondary, rgb(128 128 128 / 14%));
-  color: var(--dsw-alias-label-secondary);
-  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) + 2px);
   line-height: 20px;
   white-space: nowrap;
+  --dsh-change-stat-font-size: calc(var(--dsh-content-font-size-secondary, 13px) + 1px);
+  --dsw-alias-state-success-primary: var(--dsw-alias-file-diff-added-marker);
+  --dsw-alias-state-error-primary: var(--dsw-alias-file-diff-deleted-marker);
 }
 
 .list {
