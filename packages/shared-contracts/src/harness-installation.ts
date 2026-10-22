@@ -17,6 +17,17 @@ export const harnessInstallationStateSchema = z
     latestVersion: z.string().min(1).max(128),
     updateAvailable: z.boolean(),
     canUpdate: z.boolean(),
+    /** Defaults to CLI; some Harnesses ship only inside a desktop application. */
+    versionKind: z.enum(["cli", "application"]).optional(),
+    /** Official download opened by the user; does not imply an automatic installation. */
+    manualUpdateUrl: z
+      .url()
+      .max(2048)
+      .refine(
+        (value) => /^https:\/\/[^/?#@]+(?:[/?#]|$)/iu.test(value),
+        "Manual updates require a credential-free HTTPS URL",
+      )
+      .optional(),
     // Adapter-owned diagnostic text; UI uses messageCode rather than displaying it verbatim.
     message: z.string().max(2048).optional(),
     messageCode: z.string().min(1).max(128).optional(),

@@ -136,6 +136,14 @@ WorkBuddy 2.137.1 对标准 ACP `session/fork` 返回 `Method not found`，所�
 
 WorkBuddy 原生 Agent 工具创建的是同一 Native Session 体系内的子 Agent，Adapter 只读投影它们的状态和 Transcript。它们不是 CodexHost 跨 Harness Thread，也不会自动获得其他 Harness 的身份或能力。
 
+## 应用版本与手动更新
+
+WorkBuddy 插件通过公共 `installation("check")` 能力查询所选安装的版本，不依赖 ACP 连接成功或登录状态。应用内置 CLI 的 `product.json` 中 `genieVersion` 为桌面应用版本；更新查询复用启动时的安装选择规则，保存的安装路径优先于环境变量与自动发现，不检查另一份默认安装。
+
+标准 WorkBuddy AI 与 WorkBuddy 中国版分别使用其产品元数据声明的官方公共站点 `/v2/update?platform=workbuddy-<target>` 查询发布版本。支持 macOS arm64/x64 和 Windows x64 用户安装包；不发送账号、租户或凭据。公开 Feed 版本末尾的第四段数字是构建标识，显示与比较使用桌面应用的三段版本；同一应用版本的构建差异不提示升级。私有/企业更新渠道、其他平台与无法查询的 Feed 保留当前版本、将最新版本标为未知，并提示使用应用内更新器。自定义独立 CLI 仅查询其 `--version`，不把桌面发布版本视为该 CLI 的最新版本。
+
+有新版本时，详情卡片提供「下载更新」，使用 Feed 指向的同产品、同平台、同发行区域的官方安装包。macOS 按官网下载逻辑将 ZIP 地址切换为 DMG；Windows 使用 EXE。该入口只打开官方安装包下载，不执行安装器、不替换文件、不关闭 WorkBuddy，也不报告更新成功。用户完成安装后重新打开连接页回读版本；已有会话保持原进程，新会话使用更新后的内置 CLI。插件保持 `canUpdate: false`，不参与「全部更新」，显式调用 `installation("update")` 会返回手动安装提示。Broker 路径不提供本机版本管理能力。
+
 ## 插件、路由与发行
 
 插件源码位于 `packages/adapters/workbuddy`，Manifest、Adapter、Session 和 Native Ref 都使用 `workbuddy` 身份。新 Thread 使用共享 `encodeHarnessPluginRoute` 路由，不新增 WorkBuddy 专用 Host codec 或回退分支。

@@ -49,16 +49,36 @@ export function createHarnessVersionPanel(
   let unsupported = false;
   let updatePromise: Promise<boolean> | null = null;
   const render = (): void => {
+    heading.textContent =
+      state?.versionKind === "application"
+        ? messages.harnessVersionApplicationTitle
+        : messages.harnessVersionTitle;
     current.textContent = `${messages.harnessVersionCurrent}: ${state?.currentVersion ?? "—"}`;
     latest.textContent = `${messages.harnessVersionLatest}: ${harnessVersionLabel(state, messages.harnessVersion)}`;
     update.disabled = busy || signal.aborted || !state?.canUpdate || !state.updateAvailable;
+    const manualUrl =
+      !state?.canUpdate && state?.updateAvailable ? state.manualUpdateUrl : undefined;
+    actions.replaceChildren(update);
+    update.hidden = !busy && !signal.aborted && Boolean(manualUrl);
+    if (update.hidden && manualUrl) {
+      const download = document.createElement("a");
+      download.className = "settings-command-button settings-command-button--secondary";
+      download.dataset.harnessVersionAction = "download-update";
+      download.textContent = messages.harnessVersionDownloadUpdate;
+      download.href = manualUrl;
+      download.target = "_blank";
+      download.rel = "noopener noreferrer";
+      actions.append(download);
+    }
     update.textContent =
       state?.canUpdate && state.latestVersion !== "Unknown" && !state.updateAvailable
         ? messages.harnessVersionUpToDate
         : messages.harnessVersionUpdate;
     const detail = harnessVersionNote(state, messages.harnessVersion);
     note.textContent = detail
-      ? `${detail} ${messages.harnessVersionNote}`
+      ? !state?.canUpdate
+        ? detail
+        : `${detail} ${messages.harnessVersionNote}`
       : messages.harnessVersionNote;
   };
   const run = async (action: "check" | "update"): Promise<boolean> => {

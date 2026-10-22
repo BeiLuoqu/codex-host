@@ -16,7 +16,7 @@ const { outputFiles } = await build({
       import { rendererSettingsMessages } from "./packages/renderer-extension/src/settings/localization.ts";
       import { mountRendererSettingsShell } from "./packages/renderer-extension/src/settings/shell.ts";
       const plugins = ${JSON.stringify(testPluginIds.map(pluginDescriptor))};
-      globalThis.setupFeedback = (bulk = false) => {
+      globalThis.setupFeedback = (bulk = false, manual = false) => {
         let checking = false;
         const listeners = new Set();
         const agents = plugins.map(plugin => plugin.id);
@@ -41,7 +41,7 @@ const { outputFiles } = await build({
           snapshot: () => ({
             adapter: {state:"ready",reason:"ready",modelUpdates:1,hook:"request-bridge"},
             hosts: (bulk ? ["local", ...Array.from({length:8}, (_,i)=>"remote-long-host-"+i)] : ["local"]).map(hostId=>({hostId,active:hostId === "local",agents:agents.map(agent=>({
-              agent, plugin:plugins.find(plugin => plugin.id === agent), availability:checking ? "checking" : "ready", error:null,
+              agent, plugin:plugins.find(plugin => plugin.id === agent), availability:checking ? "checking" : manual && agent === "workbuddy" ? "unavailable" : "ready", error:manual && agent === "workbuddy" ? {code:"nativeFailure",message:"WorkBuddy: ACP connection closed",retryable:false} : null,
             }))})),
           }),
           subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
@@ -65,6 +65,11 @@ const { outputFiles } = await build({
               while (performance.now() < until) {}
             }
             await new Promise(resolve => pendingChecks.push(resolve));
+            if (manual && agent === "workbuddy") return {
+              currentVersion:"5.5.2",latestVersion:"5.8.4",updateAvailable:true,canUpdate:false,versionKind:"application",
+              manualUpdateUrl:"https://download.codebuddy.ai/workbuddy/test/WorkBuddy.dmg",
+              notice:{en:"Download the official installer, complete installation, then reopen Connections to verify the version.","zh-CN":"此处显示 WorkBuddy 桌面应用版本，内置 CLI 随应用更新。请下载官方安装包并完成安装，再重新打开连接页确认版本。"},
+            };
             const updateAvailable = agent === "pi" || (bulk && ["claude-code", "opencode"].includes(agent));
             return {currentVersion:"1.2.16",latestVersion:updateAvailable ? "1.3.0" : "1.2.16",updateAvailable,canUpdate:!(bulk && agent === "opencode")};
           },
@@ -90,7 +95,7 @@ const { outputFiles } = await build({
 const bundle = outputFiles[0]?.text ?? "";
 if (!bundle) throw new Error("Connection feedback fixture missing");
 
-async function setup(page: Page, bulk = false) {
+async function setup(page: Page, bulk = false, manual = false) {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.route("http://localhost/connections-feedback", (route) =>
     route.fulfill({
@@ -100,7 +105,10 @@ async function setup(page: Page, bulk = false) {
   );
   await page.goto("http://localhost/connections-feedback");
   await page.addScriptTag({ content: bundle });
-  await page.evaluate((bulk) => Reflect.get(globalThis, "setupFeedback")(bulk), bulk);
+  await page.evaluate(
+    ({ bulk, manual }) => Reflect.get(globalThis, "setupFeedback")(bulk, manual),
+    { bulk, manual },
+  );
   await expect(page.locator('[data-connection-item="antigravity"] button')).toBeEnabled();
   await expect
     .poll(() =>
@@ -259,4 +267,41 @@ test("updates all eligible Harnesses from the Host header and keeps the button b
     { hostId: "local", agent: "pi" },
   ]);
   await page.screenshot({ path: testInfo.outputPath("update-all-completed.png") });
+});
+
+test("offers the WorkBuddy installer without submitting an automatic update", async ({
+  page,
+}, testInfo) => {
+  await setup(page, false, true);
+  await page.evaluate(() => Reflect.get(globalThis, "finishVersionChecks")());
+  const row = page.locator('[data-connection-item="workbuddy"]');
+  await row.click();
+  const panel = page.locator('[data-harness-version="workbuddy"]');
+  await expect(page.locator(".settings-connection-inspector")).toContainText(
+    "ACP connection closed",
+  );
+  await expect(panel).toContainText("应用版本");
+  await expect(panel).toContainText("当前版本: 5.5.2");
+  await expect(panel).toContainText("最新版本: 5.8.4");
+  await expect(row).toContainText("有更新");
+  await expect(row.locator('[data-connection-action="update"]')).toHaveCount(0);
+  const download = panel.getByRole("link", { name: "下载更新", exact: true });
+  await expect(download).toBeVisible();
+  await expect(download).toHaveAttribute(
+    "href",
+    "https://download.codebuddy.ai/workbuddy/test/WorkBuddy.dmg",
+  );
+  await expect(panel.locator('[data-harness-version-action="update"]')).toBeHidden();
+  await expect(page.locator('[data-connection-action="update-all"]')).toHaveText("全部更新 (1)");
+  await page.route("https://download.codebuddy.ai/**", (route) =>
+    route.fulfill({ contentType: "text/html", body: "Official installer test" }),
+  );
+  const popupPromise = page.waitForEvent("popup");
+  await download.click();
+  const popup = await popupPromise;
+  await popup.close();
+  expect(await page.evaluate(() => Reflect.get(globalThis, "feedbackMetrics").updates)).toEqual([]);
+  await expect(panel).toContainText("当前版本: 5.5.2");
+  await expect(panel).not.toContainText("已确认更新成功");
+  await page.screenshot({ path: testInfo.outputPath("workbuddy-manual-update.png") });
 });

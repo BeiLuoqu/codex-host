@@ -843,6 +843,44 @@ describe("Harness CLI version panel", () => {
     expect(button("update").disabled).toBe(true);
     abort.abort();
   });
+  it("offers a manual installer without submitting an update or claiming installation succeeded", async () => {
+    const run = vi.fn(async () => ({
+      ...state,
+      canUpdate: false,
+      manualUpdateUrl: "https://download.codebuddy.ai/WorkBuddy.dmg",
+      notice: { en: "Complete installation, then reopen Connections to verify the version." },
+    }));
+    const { panel, button, abort } = mount(run);
+    await vi.waitFor(() => expect(visibleText(panel)).toContain("Download update"));
+    const download = button("download-update");
+    expect(download.tagName).toBe("a");
+    expect(download.href).toBe("https://download.codebuddy.ai/WorkBuddy.dmg");
+    expect(download.target).toBe("_blank");
+    expect(download.rel).toBe("noopener noreferrer");
+    expect(button("update").hidden).toBe(true);
+    download.dispatch("click");
+    button("update").dispatch("click");
+    expect(run.mock.calls).toEqual([["check"]]);
+    expect(visibleText(panel)).toContain("Current version: 1.0.0");
+    expect(visibleText(panel)).not.toContain("Update verified");
+    expect(visibleText(panel)).not.toContain("an update already started continues");
+    abort.abort();
+    expect(descendants(panel).some(({ tagName }) => tagName === "a")).toBe(false);
+  });
+  it("does not offer a manual download when the checked application is current", async () => {
+    const { panel, button, abort } = mount(async () => ({
+      ...state,
+      latestVersion: "1.0.0",
+      updateAvailable: false,
+      canUpdate: false,
+      manualUpdateUrl: "https://download.codebuddy.ai/WorkBuddy.dmg",
+    }));
+    await vi.waitFor(() => expect(visibleText(panel)).toContain("original installer"));
+    expect(descendants(panel).some(({ tagName }) => tagName === "a")).toBe(false);
+    expect(button("update").textContent).toBe("Update");
+    expect(button("update").disabled).toBe(true);
+    abort.abort();
+  });
   it("does not label an unknown latest version current even when updates are supported", async () => {
     const { panel, button, abort } = mount(async () => ({
       ...state,
