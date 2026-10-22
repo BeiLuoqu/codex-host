@@ -75,6 +75,28 @@ describe("Codex session usage capability", () => {
     }
   });
 
+  it("restores turn timing when the completion marker is beyond the row head", async () => {
+    await appendFile(
+      file,
+      line("event_msg", {
+        padding: "x".repeat(4096),
+        type: "task_complete",
+        turn_id: "r1",
+        time_to_first_token_ms: 1234,
+      }),
+    );
+    const plugin = adapter();
+    try {
+      expect((await plugin.sessionUsage.read(thread, signal()))?.lastTurnTiming).toEqual({
+        turnId: "r1",
+        timeToFirstOutputMs: 1234,
+        at: Date.parse("2026-01-01T00:00:00Z"),
+      });
+    } finally {
+      await plugin.close();
+    }
+  });
+
   it("does not claim complete cost before native usage has reached disk", async () => {
     const plugin = adapter();
     try {

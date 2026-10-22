@@ -67,7 +67,10 @@ export class ExternalThreadQueue {
     state.items.push(item);
     if (clientUserMessageId) {
       this.#receipts.set(this.#receiptKey(threadId, clientUserMessageId), item);
-      while (this.#receipts.size > 256) this.#receipts.delete(this.#receipts.keys().next().value!);
+      if (this.#receipts.size > 256) {
+        const oldest = this.#receipts.keys().next();
+        if (!oldest.done) this.#receipts.delete(oldest.value);
+      }
     }
     return structuredClone(item);
   }
@@ -106,9 +109,14 @@ export class ExternalThreadQueue {
     if (!state) return itemIds.length === 0;
     if (itemIds.length !== state.items.length) return false;
     const byId = new Map(state.items.map((item) => [item.id, item]));
-    if (new Set(itemIds).size !== itemIds.length || itemIds.some((id) => !byId.has(id)))
-      return false;
-    state.items = itemIds.map((id) => byId.get(id)!);
+    if (new Set(itemIds).size !== itemIds.length) return false;
+    const reordered: ExternalQueuedSubmission[] = [];
+    for (const id of itemIds) {
+      const item = byId.get(id);
+      if (!item) return false;
+      reordered.push(item);
+    }
+    state.items = reordered;
     return true;
   }
 

@@ -17,6 +17,7 @@ export default [
     ignores: [
       ".codexhost/**",
       ".pi/**",
+      ".work/**",
       "build/**",
       "coverage/**",
       "node_modules/**",

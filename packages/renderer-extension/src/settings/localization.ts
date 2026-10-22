@@ -200,6 +200,7 @@ export interface RendererSettingsMessages {
   readonly harnessVersionCurrent: string;
   readonly harnessVersionLatest: string;
   readonly harnessVersionChecking: string;
+  readonly harnessVersionAvailable: string;
   readonly harnessVersionUpdate: string;
   readonly harnessVersionUpdating: string;
   readonly harnessVersionUpToDate: string;
@@ -471,7 +472,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   connectionOfficialWebsite: "Visit official website",
   connectionOpenHarnessWeb: "Open DeepSeek Harness Web",
   connectionDeepSeekTestedVersions:
-    "Supported DSH versions: 0.1.7-rc.1, 0.1.7-rc.2, 0.2.0-rc.1 and 0.2.0-rc.2. Versions newer than 0.2.0-rc.2 can be tried, but compatibility may be limited; versions older than 0.1.7-rc.1 must be upgraded first.",
+    "Supported DSH versions: 0.1.7-rc.1, 0.1.7-rc.2, 0.2.0-rc.1, 0.2.0-rc.2, 0.2.1-rc.1 and 0.2.1-rc.2. Versions newer than 0.2.1-rc.2 can be tried, but compatibility may be limited; versions older than 0.1.7-rc.1 must be upgraded first.",
   connectionInstall: "Install",
   connectionInstallDescription: "This Harness was not detected.",
   connectionInstallRunning:
@@ -481,6 +482,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   harnessVersionCurrent: "Current version",
   harnessVersionLatest: "Latest version",
   harnessVersionChecking: "Checking versions…",
+  harnessVersionAvailable: "Update available",
   harnessVersionUpdate: "Update",
   harnessVersionUpdating: "Updating…",
   harnessVersionUpToDate: "Up to date",
@@ -768,7 +770,7 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   connectionOfficialWebsite: "访问官网",
   connectionOpenHarnessWeb: "打开 DeepSeek Harness Web",
   connectionDeepSeekTestedVersions:
-    "支持 DSH 版本：0.1.7-rc.1、0.1.7-rc.2、0.2.0-rc.1 和 0.2.0-rc.2。高于 0.2.0-rc.2 的版本可以尝试连接，但适配度可能有限；低于 0.1.7-rc.1 的版本需要先升级。",
+    "支持 DSH 版本：0.1.7-rc.1、0.1.7-rc.2、0.2.0-rc.1、0.2.0-rc.2、0.2.1-rc.1 和 0.2.1-rc.2。高于 0.2.1-rc.2 的版本可以尝试连接，但适配度可能有限；低于 0.1.7-rc.1 的版本需要先升级。",
   connectionInstall: "安装",
   connectionInstallDescription: "尚未检测到该 Harness。",
   connectionInstallRunning: "正在所选 Host 上安装，离开页面不会中断。安装后可能仍需登录或配置。",
@@ -777,6 +779,7 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   harnessVersionCurrent: "当前版本",
   harnessVersionLatest: "最新版本",
   harnessVersionChecking: "正在检查版本…",
+  harnessVersionAvailable: "有新版本",
   harnessVersionUpdate: "更新",
   harnessVersionUpdating: "正在更新…",
   harnessVersionUpToDate: "已是最新",

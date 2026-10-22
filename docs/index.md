@@ -24,6 +24,7 @@
 | [`architecture/host-client-channel.md`](architecture/host-client-channel.md) | GUI、Web 与 App 按需连接独立后台的生命周期、认证通道、事件驱动快照、交互仲裁及恢复边界。 |
 | [OpenSpec：状态刷新与轮询优化](../openspec/changes/reduce-redundant-state-polling/proposal.md) | Web 目录与组织状态分别校验，远程设置页和 Console 按可见性降频；查看方案、实现进度与验收边界时阅读。 |
 | [`architecture/gui-web-shared-state-design.md`](architecture/gui-web-shared-state-design.md) | 当前所有权概览：共享 Host 的外部 Thread、Codex CLI 的 Web-only 界面声明、存储分区、启动发现及简化后的生命周期边界；不提供旧 standalone 迁移。 |
+| [`architecture/delegation-titles.md`](architecture/delegation-titles.md) | 委派子会话标题、子任务显示名、创建快照与重试边界。 |
 | [`architecture/thread-watch.md`](architecture/thread-watch.md) | 一次性 Thread 停下通知（`thread watch`）的模型、结果、送达与边界；修改委派跟进或通知时阅读。 |
 | [`architecture/official-traffic-ownership.md`](architecture/official-traffic-ownership.md) | Host 只截获自身流量、其余原样转发官方的归属判别与例外；修改请求路由或参数校验时阅读。 |
 | [`architecture/app-server-transport.md`](architecture/app-server-transport.md) | 原生大历史响应的 WebSocket 与 JSONL 传输边界；排查任务加载、消息大小和转发性能时阅读。 |
@@ -63,7 +64,7 @@
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`harnesses/deepseek/dsh-edit-recovery.md`](harnesses/deepseek/dsh-edit-recovery.md) | DSH 原生停止确认、消息修订、V4 Fork、版本化 checkpoint 和补写工具结果的显示；修改恢复流程时阅读。 |
-| [`harnesses/deepseek/dsh-version-validation.md`](harnesses/deepseek/dsh-version-validation.md) | DSH 支持范围与最低版本、0.2.0 源码审计、真实 CLI Gate 与探测证据、限时提问的迟到回答边界；变更版本范围或 Gate 时阅读。 |
+| [`harnesses/deepseek/dsh-version-validation.md`](harnesses/deepseek/dsh-version-validation.md) | DSH 支持范围与最低版本、0.2.0 与 0.2.1-rc.1、rc.2 源码审计、真实 CLI Gate 与探测证据、限时提问的迟到回答边界；变更版本范围或 Gate 时阅读。 |
 
 ### Hermes
 
@@ -77,6 +78,7 @@
 | --- | --- |
 | [`harnesses/opencode/opencode-harness-integration-analysis.md`](harnesses/opencode/opencode-harness-integration-analysis.md) | OpenCode v1/v2 兼容范围、版本选择、原生接口与验证边界；维护 OpenCode Adapter 时阅读。 |
 | [`harnesses/opencode/opencode-edit-recovery.md`](harnesses/opencode/opencode-edit-recovery.md) | OpenCode 原生 Fork 编辑恢复和取消终态语义；修改编辑或取消时阅读。 |
+| [`opencode-streaming.md`](opencode-streaming.md) | OpenCode 空 Part 身份与文本、推理增量投影；维护流式输出时阅读。 |
 | [`harnesses/pi/pi-edit-recovery.md`](harnesses/pi/pi-edit-recovery.md) | Pi 空历史编辑、原生文件发布和生命周期 Gate；修改 Pi 恢复时阅读。 |
 | [`harnesses/pi/pi-subagents.md`](harnesses/pi/pi-subagents.md) | Pi 的 pi-subagents 异步状态、同步 workflow 子任务、记录读取与适配边界。 |
 | [`harnesses/pi/pi-fast.md`](harnesses/pi/pi-fast.md) | Pi Codex Fast 闪电开关、别名 Provider 能力判定、自动加载和 priority 请求边界。 |

@@ -26,17 +26,17 @@ for (const leaveWhileSending of [false, true])
         ...(await snapshot(id)),
         ...(id === row.id ? { queue: structuredClone(queue) } : {}),
       });
-      const requested = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      const accepted = Promise.withResolvers<void>();
-      t.after(() => release.resolve());
+      const requested = Promise.withResolvers<undefined>();
+      const release = Promise.withResolvers<undefined>();
+      const accepted = Promise.withResolvers<undefined>();
+      t.after(() => release.resolve(undefined));
       let submissions = 0;
       const request = host.request.bind(host);
       host.request = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
         if (method !== "turn/start") return request<T>(method, params);
         submissions++;
         assert.equal(params.delivery, "queue");
-        requested.resolve();
+        requested.resolve(undefined);
         if (leaveWhileSending) await release.promise;
         queue = {
           pausedReason: null,
@@ -50,7 +50,7 @@ for (const leaveWhileSending of [false, true])
           ],
         };
         host.changed(row.id, "codexhost/thread/queue/updated");
-        accepted.resolve();
+        accepted.resolve(undefined);
         return { queued: true, queuedSubmission: queue.items[0] } as T;
       };
       const debuggerServer = await startFakeChDebugger(host);
@@ -96,7 +96,7 @@ for (const leaveWhileSending of [false, true])
       await pending.waitFor();
       if (!leaveWhileSending) await admitted.waitFor();
       await open("Other conversation");
-      release.resolve();
+      release.resolve(undefined);
       await accepted.promise;
       await open("Queue navigation");
       await pending.waitFor();

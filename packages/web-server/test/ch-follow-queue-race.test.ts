@@ -58,11 +58,11 @@ for (const removal of [false, true])
       rpc.dispatch("session/projections", { args: { request: { sessionId: row.id } } });
     assert.ok((await read()).ok);
 
-    const requested = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    t.after(() => release.resolve());
+    const requested = Promise.withResolvers<undefined>();
+    const release = Promise.withResolvers<undefined>();
+    t.after(() => release.resolve(undefined));
     host.delaySnapshot = async () => {
-      requested.resolve();
+      requested.resolve(undefined);
       await release.promise;
     };
     // A projection lookup is already reading while this Thread has no follower.
@@ -97,7 +97,7 @@ for (const removal of [false, true])
     assert.ok(follow);
     const opening = follow({ request: { address: { sessionId: row.id } } }, sink);
     host.delaySnapshot = undefined;
-    release.resolve();
+    release.resolve(undefined);
     assert.ok((await reading).ok);
     await opening;
     assert.deepEqual(

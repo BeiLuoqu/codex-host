@@ -20,7 +20,9 @@ for (const mobile of [false, true]) {
       writeFileSync(path, Buffer.from(PNG, "base64"));
       const host = new FakeChHost();
       const row = host.add("images", root, "Output images");
-      row.turns[0]!.items.at(-1)!.text = [
+      const answer = row.turns[0]?.items.at(-1);
+      assert.ok(answer);
+      answer.text = [
         "Output image answer",
         `![Absolute image](${encodeURI(path)})`,
         `![Relative image](${encodeURI("图片 with spaces.png")})`,

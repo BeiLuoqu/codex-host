@@ -289,6 +289,7 @@ import {
 } from "./thread-list-aggregator.js";
 import { listSectionThreads, moveThreadSection } from "./external-thread-sections.js";
 import { externalThreadListEntries } from "./external-thread-list.js";
+import { externalThreadEmptyOfficialResult } from "./external-thread-official-defaults.js";
 import { ModelPriceCatalog } from "./model-prices.js";
 import { UsageMeasurementsStore } from "./usage-measurements-store.js";
 import { ObservedSessionUsage } from "./observed-session-usage.js";
@@ -921,7 +922,7 @@ export class AppServerHost {
       cancelOfficial: (input) => this.#cancelOfficialDelegationThread(input),
       startOfficial: (input) => this.#startOfficialDelegation(input),
       listOfficial: (input) => this.#listDelegationThreads(input),
-      officialThreadCwd: (threadId) => this.#readOfficialThreadCwd(threadId),
+      officialThreadMetadata: (threadId) => this.#readOfficialThreadMetadata(threadId),
       activeOfficialParents: () => [...this.#activeOfficialTurns.keys()],
       externalThreadBusy: (thread) => this.#externalThreadBusy(thread),
       harnessSurfaces: (harnessId) => this.#pluginSurfaces.get(harnessId as HarnessId),
@@ -2584,8 +2585,11 @@ export class AppServerHost {
       const location = await this.#locateExternalThread(request.params.threadId);
       if (await this.#writeResolutionError(request, location)) return;
       if (location.kind === "external") {
+        const emptyResult = externalThreadEmptyOfficialResult(request.method);
         await this.#writer.json(
-          rpcError(request, -32076, `External Thread does not support ${request.method}`),
+          emptyResult
+            ? rpcEnvelope(request, { result: emptyResult })
+            : rpcError(request, -32076, `External Thread does not support ${request.method}`),
         );
         return;
       }
@@ -2866,12 +2870,18 @@ export class AppServerHost {
     return thread !== null || childDelegation !== null || delegation !== null;
   }
 
-  async #readOfficialThreadCwd(threadId: string): Promise<string | undefined> {
-    const response = await this.#requestOfficial("thread/read", { threadId });
-    if (isRecord(response.error)) return undefined;
+  async #readOfficialThreadMetadata(threadId: string): Promise<{ cwd?: string; title?: string }> {
+    const response = await this.#requestOfficial("thread/read", { threadId, includeTurns: false });
+    if (isRecord(response.error)) return {};
     const result = isRecord(response.result) ? response.result : null;
     const thread = result && isRecord(result.thread) ? result.thread : null;
-    return thread && typeof thread.cwd === "string" && thread.cwd.trim() ? thread.cwd : undefined;
+    if (!thread) return {};
+    const title =
+      typeof thread.name === "string" && thread.name.trim() ? thread.name : thread.preview;
+    return {
+      ...(typeof thread.cwd === "string" && thread.cwd.trim() ? { cwd: thread.cwd } : {}),
+      ...(typeof title === "string" && title.trim() ? { title } : {}),
+    };
   }
 
   async #inspectOfficialDelegationTarget(
@@ -2954,7 +2964,7 @@ export class AppServerHost {
   }
 
   async #startOfficialDelegation(
-    input: DelegationStartInput & { parentThreadId: string; cwd: string },
+    input: DelegationStartInput & { parentThreadId: string; cwd: string; title: string },
   ): Promise<DelegationStartResult> {
     let requestedModel: HarnessModelRef | undefined;
     try {
@@ -3059,6 +3069,10 @@ export class AppServerHost {
     this.#pendingOfficialDelegationThreads.add(threadId);
     let turnId: string;
     try {
+      // The title is presentation only: a failure keeps the default title and still delivers the task.
+      await this.#requestOfficial("thread/name/set", { threadId, name: input.title }).catch(
+        () => undefined,
+      );
       const turn = await this.#requestOfficial("turn/start", {
         threadId,
         input: [{ type: "text", text: input.task }],
@@ -3711,6 +3725,7 @@ export class AppServerHost {
       inspection = await adapter.inspect({
         ...(params.data.cwd ? { cwd: params.data.cwd } : {}),
         ...(params.data.refresh !== undefined ? { refresh: params.data.refresh } : {}),
+        ...(params.data.purpose ? { purpose: params.data.purpose } : {}),
       });
     } catch (error) {
       await this.#writer.json(
@@ -4226,6 +4241,27 @@ export class AppServerHost {
       if (!projected.effectiveModel) {
         throw new Error("Harness Session did not report an effective Model");
       }
+      // Resume and Fork read the saved selection, so keep it on the confirmed Model.
+      const transportModelId = encodeExternalTransportSelection(thread.harnessId, {
+        ...(decodeExternalTransportSelection(thread.harnessId, thread.transportModelId) ?? {}),
+        model: projected.effectiveModel,
+      });
+      thread.transportModelId = transportModelId;
+      thread.requestedModel = projected.effectiveModel;
+      try {
+        thread.record = await this.#repository.setTransportModelId(
+          thread.record.hostThreadId,
+          transportModelId,
+        );
+      } catch (error) {
+        this.#diagnose(error);
+      }
+      thread.thread = externalThreadValue({
+        record: { ...thread.record, transportModelId },
+        turns: thread.turns,
+        sessionId: thread.sessionId,
+        running: thread.running,
+      });
       await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(projected) }));
     } catch (error) {
       await this.#writer.json(
