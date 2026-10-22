@@ -202,6 +202,10 @@ export interface RendererSettingsMessages {
   readonly harnessVersionChecking: string;
   readonly harnessVersionAvailable: string;
   readonly harnessVersionUpdate: string;
+  readonly harnessUpdateAll: string;
+  readonly harnessUpdateAllProgress: string;
+  readonly harnessUpdateAllDescription: string;
+  readonly harnessUpdateAllResult: string;
   readonly harnessVersionUpdating: string;
   readonly harnessVersionUpToDate: string;
   readonly harnessVersionUpdated: string;
@@ -484,6 +488,10 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   harnessVersionChecking: "Checking versions…",
   harnessVersionAvailable: "Update available",
   harnessVersionUpdate: "Update",
+  harnessUpdateAll: "Update all",
+  harnessUpdateAllProgress: "Updating",
+  harnessUpdateAllDescription: "Update all eligible Harnesses on the selected Host.",
+  harnessUpdateAllResult: "Updated {succeeded}; failed {failed}.",
   harnessVersionUpdating: "Updating…",
   harnessVersionUpToDate: "Up to date",
   harnessVersionUpdated: "Update verified. New sessions will use the new version.",
@@ -779,8 +787,12 @@ const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   harnessVersionCurrent: "当前版本",
   harnessVersionLatest: "最新版本",
   harnessVersionChecking: "正在检查版本…",
-  harnessVersionAvailable: "有新版本",
+  harnessVersionAvailable: "有更新",
   harnessVersionUpdate: "更新",
+  harnessUpdateAll: "全部更新",
+  harnessUpdateAllProgress: "更新中",
+  harnessUpdateAllDescription: "更新当前 Host 上支持自动更新且有新版本的 Harness。",
+  harnessUpdateAllResult: "已更新 {succeeded} 项，{failed} 项失败。",
   harnessVersionUpdating: "正在更新…",
   harnessVersionUpToDate: "已是最新",
   harnessVersionUpdated: "已确认更新成功，新会话将使用新版本。",
