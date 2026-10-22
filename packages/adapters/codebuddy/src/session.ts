@@ -27,6 +27,7 @@ import type {
   TurnSteerAccepted,
   TurnSteerCommand,
 } from "@codexhost/harness-adapter";
+import { unsupportedSteer } from "@codexhost/harness-adapter";
 import { HarnessOutputChannel } from "@codexhost/harness-adapter";
 import {
   nativeSessionRefSchema,
@@ -481,9 +482,7 @@ export class CodeBuddySession implements HarnessSession {
   > {
     if (this.#closed || this.#fault)
       return failure("invalidState", "Session is closed or faulted", this.profile);
-    if (command.type === "turn.steer") {
-      return failure("unsupported", "Native steering is not enabled", this.profile);
-    }
+    if (command.type === "turn.steer") return unsupportedSteer(this.profile.displayName);
     if (command.type === "interaction.respond") return this.#interactions.respond(command);
     if (command.type === "turn.cancel") {
       const active = this.#active;

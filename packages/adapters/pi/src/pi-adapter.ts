@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   validateHostQuestionResponse,
   type HarnessAdapter,
@@ -600,16 +601,7 @@ class PiHarnessSession implements HarnessSession {
     if (this.#phase !== "open") {
       return { ok: false, error: invalidState("Pi Session is not open") };
     }
-    if (command.type === "turn.steer") {
-      return {
-        ok: false,
-        error: {
-          code: "unsupported",
-          message: "Pi native steering is not enabled",
-          retryable: false,
-        },
-      };
-    }
+    if (command.type === "turn.steer") return unsupportedSteer("Pi");
     if (command.type === "turn.cancel") return this.#cancel(command);
     if (command.type === "interaction.respond") return this.#respond(command);
     if (command.type === "model.select") return this.#selectModel(command);

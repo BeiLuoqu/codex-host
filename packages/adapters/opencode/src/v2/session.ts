@@ -5,6 +5,7 @@ import type {
   SessionMessageInfo,
 } from "@opencode/client";
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   type HarnessSession,
   type HarnessOutput,
@@ -201,8 +202,7 @@ export class V2Session implements HarnessSession {
     if (this.#closed)
       return { ok: false, error: failure("OpenCode Session is closed", "invalidState") };
     // Same as v1: this Session does not declare native steer.
-    if (command.type === "turn.steer")
-      return { ok: false, error: failure("OpenCode cannot steer an active Turn", "unsupported") };
+    if (command.type === "turn.steer") return unsupportedSteer("OpenCode");
     if (command.type === "turn.start") return this.#start(command, false);
     if (command.type === "turn.cancel") {
       const active = this.#active;

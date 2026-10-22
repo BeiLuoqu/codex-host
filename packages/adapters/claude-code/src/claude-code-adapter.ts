@@ -575,10 +575,10 @@ class ClaudeHarnessSession implements HarnessSession {
     },
     history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
     subagents: { observe: true, readTranscript: true },
-    // Read live: only a CLI that reports `msg_lifecycle_v1` confirms steers with `queued`. Until
-    // then (and on older CLIs) the Host keeps its stop-then-start fallback.
+    // Read live: native delivery joins this Turn only while a requested Turn runs a root tool call
+    // on a CLI that confirms steers (`msg_lifecycle_v1`). Otherwise the Host stops and restarts.
     get steer(): boolean {
-      return session.#transport?.supportsNativeSteer?.() === true;
+      return session.#transport?.canSteerActiveTurn?.() === true;
     },
   }))(this);
   readonly commands: HarnessCommandCapability;

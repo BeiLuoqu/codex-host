@@ -3,6 +3,7 @@ import { randomUUID as nodeRandomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   validateHostInteractionResponse,
   type HarnessCommandAccepted,
@@ -589,7 +590,7 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
       case "turn.start":
         return this.#start(command);
       case "turn.steer":
-        return Promise.resolve({ ok: false, error: unsupportedError(command.type) });
+        return Promise.resolve(unsupportedSteer("DeepSeek Harness"));
       case "turn.cancel":
         return this.#cancel(command);
       case "interaction.respond":

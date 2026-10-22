@@ -432,8 +432,18 @@ export type ThreadOwnershipListResult = z.infer<typeof threadOwnershipListResult
 export const threadSteeringInspectParamsSchema = z
   .object({
     threadId: hostThreadIdSchema,
+    /** The text about to be steered; a Harness command always stops and restarts. */
+    text: z.string().optional(),
   })
   .strict();
+
+/**
+ * `turn/steer` parameter naming the delivery the Renderer already presented, so the Host follows
+ * it instead of deciding again: `activeTurn` inserts natively, `newTurn` stops and restarts.
+ */
+export const THREAD_STEER_DELIVERY_PARAM = "codexhostSteerDelivery";
+export const threadSteerDeliverySchema = z.enum(["activeTurn", "newTurn"]);
+export type ThreadSteerDelivery = z.infer<typeof threadSteerDeliverySchema>;
 
 /**
  * How a steer submitted now reaches the Thread: `official` keeps Codex's own steer,

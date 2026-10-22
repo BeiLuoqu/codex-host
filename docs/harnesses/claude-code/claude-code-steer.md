@@ -4,13 +4,25 @@ Claude Code 的运行中插入走 Agent SDK 流式输入：向当前 Query 的�
 
 Host 在原生接受后自己发当前 Turn 的 `userMessage` Item。Adapter 不发这条 Item，也不改历史解析。
 
+## 何时同轮插入
+
+`priority: "next"` 在**当前工具调用结束后**、下一次模型请求之前并入；工具结果之后一定还有一次模型请求，所以插入写入时只要有根级工具调用正在执行，它就一定并入当前 Turn。反过来，如果 Claude 正在输出最终文本、没有工具在执行，它可能直接结束本轮，把插入留到下一轮执行：2026-10-22 在 Claude Code 2.1.305 上实测，Host 把插入显示在原来那一轮，而 Claude 在随后的另一轮里回复。
+
+因此 `capabilities.steer` 实时取以下三项的交集，任何一项不满足都为 `false`，Host 改用停止后重发：
+
+- CLI 在 `system/init` 的 `capabilities` 中报告 `msg_lifecycle_v1`，会发出确认插入所需的 `command_lifecycle` 回执；
+- 当前是用户发起的 Turn，不是后台通知等触发的自主 Turn（transport 没有对应的活跃 Turn）；
+- 有根级工具调用已经开始、还没返回结果（子 Agent 内部的工具调用不计入）。
+
+`turn.steer` 本身只要求前两项，因为 Renderer 按预先查询的结果展示后，会要求 Host 照原样执行；如果此时工具恰好刚结束，插入仍然写入，可能落到下一轮执行。Adapter 拒绝时都不写入输入流，返回失败即表示没有收下。Harness Broker 在打开 Session 时做一次能力快照，那时 CLI 尚未发出 init，因此经 Broker 的 Session 保持停止后重发。
+
 ## 接受
 
-CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；工具调用结束后发 `started`，这时插入进入正在运行的 Turn。Adapter 在 `queued` 时返回 `{ accepted: true }`：此后由 Claude 负责送达，不等 `started`，否则调用方要被整段工具调用挂住（Desktop 提交约 30 秒超时）。若本轮在插入前结束，Claude 会把已排队的输入作为下一次运行执行，由现有自主 Turn 路径呈现。输入一旦写入就无法撤回，所以本轮的 `result` 先于 `queued` 到达时不拒绝，仍按接受处理；`queued` 回执迟迟不到时，等待 5 秒后同样按接受处理，避免串行处理请求的调用方（如 Harness Broker）被无限期占住。只有目标不是当前 Turn、输入写入失败，或会话在接受前关闭或出错时，才返回 `invalidState`。空文本返回 `invalidRequest`。忙时 `turn.start` 仍是 `sessionBusy`。
+CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；工具调用结束后发 `started`，这时插入进入正在运行的 Turn。Adapter 在 `queued` 时返回 `{ accepted: true }`：此后由 Claude 负责送达，不等 `started`，否则调用方要被整段工具调用挂住（Desktop 提交约 30 秒超时）。输入一旦写入就无法撤回，所以本轮的 `result` 先于 `queued` 到达时不拒绝，仍按接受处理；`queued` 回执迟迟不到时，等待 5 秒后同样按接受处理，避免串行处理请求的调用方（如 Harness Broker）被无限期占住。只有目标不是当前 Turn、CLI 不支持、当前是自主 Turn、输入写入失败，或会话在接受前关闭或出错时，才返回失败。空文本返回 `invalidRequest`。忙时 `turn.start` 仍是 `sessionBusy`。
+
+插入被接受后、还没并入之前，如果用户停止了这一轮，按 SDK 的中断语义，仍在排队的插入会在下一轮执行。公开的 SDK 接口目前没有撤回单条排队消息的方法，Adapter 不处理这种情况；由于只在工具执行期间插入，这个窗口只剩当前那次工具调用的剩余时间。
 
 ## 版本
-
-`capabilities.steer` 是运行时判断的：只有当前 CLI 在 `system/init` 的 `capabilities` 中报告 `msg_lifecycle_v1`（也就是会发出确认插入所需的 `command_lifecycle` 回执）时才为 `true`。CLI 发出 init 之前，或者旧版 CLI 不报告这项能力时，为 `false`，Adapter 对 `turn.steer` 返回 `unsupported`，Host 继续使用停止后重发。Harness Broker 在打开 Session 时会做一次能力快照，那时 CLI 尚未发出 init，因此经 Broker 的 Session 保持停止后重发。
 
 2026-09-24 在 Claude Code 2.1.280 上实机确认；2026-10-21 在 Claude Code 2.1.305（Agent SDK 0.3.273 与 0.3.305）上复核了相同的 `queued` → `started` → `completed` 顺序和单个 `result`，这两个版本都会报告 `msg_lifecycle_v1`。其他版本只依据这项运行时能力判断，没有逐个实机验证。
 

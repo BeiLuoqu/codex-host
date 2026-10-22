@@ -1,12 +1,29 @@
-import type { HarnessSessionCapabilities, HostTurnId } from "@codexhost/shared-contracts";
+import { randomUUID } from "node:crypto";
+
+import {
+  hostItemIdSchema,
+  restoreHarnessCommandMentions,
+  THREAD_STEER_DELIVERY_PARAM,
+  threadSteerDeliverySchema,
+  type HarnessSessionCapabilities,
+  type HostTurnId,
+  type ThreadSteerDelivery,
+} from "@codexhost/shared-contracts";
 import type { JsonObject } from "@codexhost/protocol-core";
 import type {
   HarnessResult,
+  HarnessSession,
+  HostTextInput,
+  HostUserMessageItem,
   TurnCancelAccepted,
   TurnCancelCommand,
   TurnOutcome,
+  TurnSteerAccepted,
+  TurnSteerCommand,
 } from "@codexhost/harness-adapter";
 
+import { rewriteDelegationMentionText } from "./delegation-mention-rewrite.js";
+import { isExternalCommandCandidate } from "./external-command-routing.js";
 import type { TurnProjectionGate } from "./external-thread-runtime.js";
 
 interface SteeringThread {
@@ -16,8 +33,38 @@ interface SteeringThread {
   persistenceError: Error | null;
   session: {
     readonly capabilities: Pick<HarnessSessionCapabilities, "steer">;
+    readonly commands?: HarnessSession["commands"];
     execute(command: TurnCancelCommand): Promise<HarnessResult<TurnCancelAccepted>>;
   };
+}
+
+/** A Thread whose Session can take native same-Turn input. */
+export interface NativeSteeringThread {
+  pendingSteerProjections: Set<Promise<void>>;
+  steeredTurnIds: Set<HostTurnId>;
+  session: {
+    execute(command: TurnSteerCommand): Promise<HarnessResult<TurnSteerAccepted>>;
+  };
+}
+
+/** A Harness command keeps the stop-then-start path, which resolves and runs commands. */
+function isHarnessCommand(thread: SteeringThread, text: string): boolean {
+  return (
+    thread.session.commands !== undefined &&
+    isExternalCommandCandidate(restoreHarnessCommandMentions(text))
+  );
+}
+
+/**
+ * The delivery a steer submitted now would use. Native delivery needs the Session to report it
+ * can take input into the running Turn now; commands and every other case stop and restart.
+ */
+export function externalSteeringDelivery(
+  thread: SteeringThread,
+  text?: string,
+): ThreadSteerDelivery {
+  if (text !== undefined && isHarnessCommand(thread, text)) return "newTurn";
+  return thread.session.capabilities.steer === true ? "activeTurn" : "newTurn";
 }
 
 export class ExternalSteerError extends Error {
@@ -29,10 +76,19 @@ export class ExternalSteerError extends Error {
   }
 }
 
+/** The Harness did not take native same-Turn input, so stopping and restarting is still safe. */
+export class ExternalSteerNotTakenError extends ExternalSteerError {
+  constructor(message: string) {
+    super(-32074, message);
+  }
+}
+
 interface SteeringInput {
   expectedTurnId: string;
   clientUserMessageId?: string;
   text: string;
+  /** The delivery a Renderer already presented; absent for clients without one. */
+  delivery?: ThreadSteerDelivery;
 }
 
 function parseInput(params: JsonObject): SteeringInput {
@@ -63,11 +119,66 @@ function parseInput(params: JsonObject): SteeringInput {
   ) {
     throw new ExternalSteerError(-32602, "External steering message identity is invalid");
   }
+  const delivery = params[THREAD_STEER_DELIVERY_PARAM];
+  const parsedDelivery =
+    delivery == null ? undefined : threadSteerDeliverySchema.safeParse(delivery);
+  if (parsedDelivery && !parsedDelivery.success) {
+    throw new ExternalSteerError(-32602, "External steering delivery is invalid");
+  }
   return {
     expectedTurnId: params.expectedTurnId,
     text,
     ...(typeof clientUserMessageId === "string" ? { clientUserMessageId } : {}),
+    ...(parsedDelivery ? { delivery: parsedDelivery.data } : {}),
   };
+}
+
+/**
+ * Hands steered input to the Harness's native insertion primitive. Once the Harness takes it,
+ * the Host shows it in that Turn: the Harness receives rewritten Delegation mentions, Desktop
+ * shows what the user typed, as on the `turn/start` path. A Harness refusal means the input was
+ * not taken and is reported as {@link ExternalSteerNotTakenError}.
+ */
+export async function insertNativeSteer(
+  thread: NativeSteeringThread,
+  input: { turnId: HostTurnId; text: string; clientUserMessageId?: string },
+  host: {
+    project(
+      turnId: HostTurnId,
+      item: HostUserMessageItem,
+      clientUserMessageId?: string,
+    ): Promise<void>;
+    diagnose(error: unknown): void;
+  },
+): Promise<void> {
+  const restored = restoreHarnessCommandMentions(input.text);
+  const steered: HostTextInput[] = [{ type: "text", text: rewriteDelegationMentionText(restored) }];
+  const displayed: HostTextInput[] = [{ type: "text", text: restored }];
+  const projectionDone = Promise.withResolvers<undefined>();
+  thread.pendingSteerProjections.add(projectionDone.promise);
+  try {
+    const result = await thread.session.execute({
+      type: "turn.steer",
+      turnId: input.turnId,
+      input: steered,
+    });
+    if (!result.ok) throw new ExternalSteerNotTakenError(result.error.message);
+    thread.steeredTurnIds.add(input.turnId);
+    const item: HostUserMessageItem = {
+      type: "userMessage",
+      itemId: hostItemIdSchema.parse(randomUUID()),
+      input: displayed,
+    };
+    try {
+      await host.project(input.turnId, item, input.clientUserMessageId);
+    } catch (error) {
+      // Native delivery already succeeded. Reporting failure here would invite a duplicate retry.
+      host.diagnose(error);
+    }
+  } finally {
+    projectionDone.resolve(undefined);
+    thread.pendingSteerProjections.delete(projectionDone.promise);
+  }
 }
 
 export interface ExternalTurnAdmission {
@@ -141,15 +252,7 @@ export class ExternalTurnSteering {
         // Do not use Codex's mismatch wording: Desktop automatically retries it against another Turn.
         throw new ExternalSteerError(-32074, "External steering must reference the active Turn");
       }
-      const result = thread.session.capabilities.steer
-        ? insert({
-            turnId: thread.activeTurnId,
-            text: input.text,
-            ...(input.clientUserMessageId
-              ? { clientUserMessageId: input.clientUserMessageId }
-              : {}),
-          }).then((admitted) => ({ ...admitted, delivery: "activeTurn" as const }))
-        : this.#replace(thread, input, start);
+      const result = this.#deliver(thread, input, start, insert);
       if (key) {
         const receipt = { fingerprint, result, settled: false };
         this.#receipts.set(key, receipt);
@@ -172,6 +275,40 @@ export class ExternalTurnSteering {
     } catch (error) {
       return Promise.reject(error);
     }
+  }
+
+  /**
+   * A Renderer that already presented a delivery gets exactly that one. Otherwise native delivery
+   * is tried only when the Session can take the input now, and input the Harness did not take
+   * falls back to stopping and restarting, so no case is worse than the stop-then-start path.
+   */
+  #deliver(
+    thread: SteeringThread,
+    input: SteeringInput,
+    start: StartSteeredTurn,
+    insert: InsertSteeredInput,
+  ): Promise<ExternalSteerStarted> {
+    const delivery =
+      input.delivery === "newTurn" || isHarnessCommand(thread, input.text)
+        ? "newTurn"
+        : (input.delivery ?? externalSteeringDelivery(thread));
+    if (delivery === "newTurn" || !thread.activeTurnId) return this.#replace(thread, input, start);
+    const native = insert({
+      turnId: thread.activeTurnId,
+      text: input.text,
+      ...(input.clientUserMessageId ? { clientUserMessageId: input.clientUserMessageId } : {}),
+    }).then((admitted) => ({ ...admitted, delivery: "activeTurn" as const }));
+    if (input.delivery === "activeTurn") return native;
+    return native.catch(async (error: unknown) => {
+      if (!(error instanceof ExternalSteerNotTakenError)) throw error;
+      if (thread.running || thread.activeTurnId) return this.#replace(thread, input, start);
+      // The Turn ended meanwhile; nothing is left to stop, so start the input as the next Turn.
+      const assertActive = (): void => {
+        if (this.#closed)
+          throw new ExternalSteerError(-32074, "External steering connection is closed");
+      };
+      return { ...(await start(input.text, assertActive)), delivery: "newTurn" as const };
+    });
   }
 
   terminal(threadId: string, turnId: string, outcome: TurnOutcome): void {
@@ -238,7 +375,11 @@ export class ExternalTurnSteering {
         thread.session.execute({ type: "turn.cancel", turnId }),
         failure.promise,
       ]);
-      if (!cancelled.ok) throw new ExternalSteerError(-32074, cancelled.error.message);
+      // A Turn that is already ending (for example after its native steer was not taken) refuses
+      // the cancel as inactive; its terminal still follows, so keep waiting for it.
+      if (!cancelled.ok && cancelled.error.code !== "invalidState") {
+        throw new ExternalSteerError(-32074, cancelled.error.message);
+      }
       const outcome = await Promise.race([terminal.promise, failure.promise]);
       clearTimeout(timeout);
       // A terminal and a stop/fault may both settle before the await continuation.

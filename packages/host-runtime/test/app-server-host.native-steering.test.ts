@@ -424,3 +424,181 @@ describe("Native steering", () => {
     }
   });
 });
+
+describe("Native steering fallbacks", () => {
+  it("guards undoing only the Turns that took steered input", async () => {
+    const fixture = createFixture();
+    fixture.adapter.supportsSteer = true;
+    try {
+      const threadId = await startPiThread(fixture);
+      const turnId = await startPiTurn(fixture, threadId);
+      const session = fixture.adapter.sessions[0];
+      if (!session) throw new Error("Fake Session was not opened");
+      writeRequest(fixture.desktopInput, {
+        id: 60,
+        method: "turn/steer",
+        params: {
+          threadId,
+          expectedTurnId: turnId,
+          input: [{ type: "text", text: "also check the tests" }],
+        },
+      });
+      await fixture.collector.waitFor((message) => requestId(message, 60));
+      session.succeedTurn();
+      await fixture.collector.waitFor((message) => turnEvent(message, "turn/completed", turnId));
+      await completePiTurn(fixture, threadId, 61);
+
+      writeRequest(fixture.desktopInput, {
+        id: 62,
+        method: "thread/rollback",
+        params: { threadId, numTurns: 2 },
+      });
+      await expect(
+        fixture.collector.waitFor((message) => requestId(message, 62)),
+      ).resolves.toMatchObject({ error: { code: -32080 } });
+      writeRequest(fixture.desktopInput, {
+        id: 63,
+        method: "thread/rollback",
+        params: { threadId, numTurns: 1 },
+      });
+      const undoLast = await fixture.collector.waitFor((message) => requestId(message, 63));
+      expect((undoLast.error as JsonObject | undefined)?.code).not.toBe(-32080);
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+
+  function steer(
+    fixture: ReturnType<typeof createFixture>,
+    id: number,
+    threadId: string,
+    turnId: string,
+    text: string,
+    extra: JsonObject = {},
+  ): Promise<JsonObject> {
+    writeRequest(fixture.desktopInput, {
+      id,
+      method: "turn/steer",
+      params: {
+        threadId,
+        expectedTurnId: turnId,
+        clientUserMessageId: `message-${id}`,
+        input: [{ type: "text", text }],
+        ...extra,
+      },
+    });
+    return fixture.collector.waitFor((message) => requestId(message, id));
+  }
+
+  it("stops and restarts when the Harness does not take native input", async () => {
+    const fixture = createFixture();
+    fixture.adapter.supportsSteer = true;
+    try {
+      const threadId = await startPiThread(fixture);
+      const turnId = await startPiTurn(fixture, threadId);
+      const session = fixture.adapter.sessions[0];
+      if (!session) throw new Error("Fake Session was not opened");
+      session.refuseNextSteer();
+      session.completeCancellationOnRequest();
+      const response = await steer(fixture, 40, threadId, turnId, "take this instead");
+      expect(response).toMatchObject({ result: { delivery: "newTurn" } });
+      expect((response.result as JsonObject).turnId).not.toBe(turnId);
+      expect(session.steers).toHaveLength(0);
+      expect(
+        fixture.collector.messages.some((message) => steeredUserMessage(message, turnId) !== null),
+      ).toBe(false);
+      session.succeedTurn();
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+
+  it("keeps a Renderer-presented activeTurn delivery instead of restarting", async () => {
+    const fixture = createFixture();
+    fixture.adapter.supportsSteer = true;
+    try {
+      const threadId = await startPiThread(fixture);
+      const turnId = await startPiTurn(fixture, threadId);
+      const session = fixture.adapter.sessions[0];
+      if (!session) throw new Error("Fake Session was not opened");
+      session.refuseNextSteer();
+      await expect(
+        steer(fixture, 41, threadId, turnId, "presented in this Turn", {
+          codexhostSteerDelivery: "activeTurn",
+        }),
+      ).resolves.toMatchObject({ error: { code: -32074 } });
+      await expect(
+        steer(fixture, 42, threadId, turnId, "now it joins", {
+          codexhostSteerDelivery: "activeTurn",
+        }),
+      ).resolves.toMatchObject({ result: { turnId, delivery: "activeTurn" } });
+      session.succeedTurn();
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+
+  it("follows a Renderer-presented newTurn delivery even when native steering is available", async () => {
+    const fixture = createFixture();
+    fixture.adapter.supportsSteer = true;
+    try {
+      const threadId = await startPiThread(fixture);
+      const turnId = await startPiTurn(fixture, threadId);
+      const session = fixture.adapter.sessions[0];
+      if (!session) throw new Error("Fake Session was not opened");
+      session.completeCancellationOnRequest();
+      const response = await steer(fixture, 43, threadId, turnId, "restart with this", {
+        codexhostSteerDelivery: "newTurn",
+      });
+      expect(response).toMatchObject({ result: { delivery: "newTurn" } });
+      expect(session.steers).toHaveLength(0);
+      session.succeedTurn();
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+
+  it("stops and restarts for a Harness command, and inspection says so", async () => {
+    const fixture = createFixture();
+    fixture.adapter.supportsSteer = true;
+    try {
+      const threadId = await startPiThread(fixture);
+      const turnId = await startPiTurn(fixture, threadId);
+      const session = fixture.adapter.sessions[0];
+      if (!session) throw new Error("Fake Session was not opened");
+      session.commands = {
+        list: async () => ({ ok: true, value: { commands: [] } }),
+        execute: async ({ turnId: commandTurnId }) => ({
+          ok: true,
+          value: { turnId: commandTurnId },
+        }),
+      };
+      writeRequest(fixture.desktopInput, {
+        id: 44,
+        method: "codexhost/thread/steering/inspect",
+        params: { threadId, text: "/compact" },
+      });
+      await expect(
+        fixture.collector.waitFor((message) => requestId(message, 44)),
+      ).resolves.toMatchObject({ result: { delivery: "newTurn" } });
+      writeRequest(fixture.desktopInput, {
+        id: 45,
+        method: "codexhost/thread/steering/inspect",
+        params: { threadId, text: "plain direction" },
+      });
+      await expect(
+        fixture.collector.waitFor((message) => requestId(message, 45)),
+      ).resolves.toMatchObject({ result: { delivery: "activeTurn" } });
+      session.completeCancellationOnRequest();
+      await steer(fixture, 46, threadId, turnId, "/compact");
+      expect(session.steers).toHaveLength(0);
+      await vi.waitFor(() =>
+        expect(fixture.collector.messages.some((message) => method(message, "turn/started"))).toBe(
+          true,
+        ),
+      );
+    } finally {
+      await stopFixture(fixture);
+    }
+  });
+});

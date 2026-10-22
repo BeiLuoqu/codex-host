@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   HarnessResult,
+  HarnessSession,
   TurnCancelAccepted,
   TurnCancelCommand,
 } from "@codexhost/harness-adapter";
 
 import { hostTurnIdSchema } from "@codexhost/shared-contracts";
 
-import { ExternalTurnSteering } from "../src/external-turn-steering.js";
+import {
+  ExternalSteerNotTakenError,
+  ExternalTurnSteering,
+  externalSteeringDelivery,
+} from "../src/external-turn-steering.js";
 
 type Cancel = (command: TurnCancelCommand) => Promise<HarnessResult<TurnCancelAccepted>>;
 
@@ -276,5 +281,52 @@ describe("Host native steering", () => {
       delivery: "activeTurn",
     });
     expect(f.insert).toHaveBeenCalledTimes(2);
+  });
+  it("starts the next Turn when untaken input arrives after the active Turn ended", async () => {
+    const f = fixture();
+    f.thread.session.capabilities.steer = true;
+    f.insert.mockImplementationOnce(async () => {
+      f.thread.running = false;
+      f.thread.activeTurnId = null;
+      throw new ExternalSteerNotTakenError("Turn ended first");
+    });
+    await expect(f.coordinator.run(f.thread, f.params, f.start, f.insert)).resolves.toEqual(
+      f.replaced,
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.start).toHaveBeenCalledOnce();
+  });
+
+  it("waits for an ending Turn whose cancel is refused as inactive", async () => {
+    const f = fixture();
+    f.thread.session.capabilities.steer = true;
+    f.insert.mockRejectedValueOnce(new ExternalSteerNotTakenError("no tool running"));
+    f.execute.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "invalidState", message: "Turn is not active", retryable: false },
+    });
+    const result = f.coordinator.run(f.thread, f.params, f.start, f.insert);
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    f.complete();
+    await expect(result).resolves.toEqual(f.replaced);
+  });
+
+  it("decides delivery from the live capability, and always restarts for commands", () => {
+    const f = fixture();
+    expect(externalSteeringDelivery(f.thread, "go")).toBe("newTurn");
+    f.thread.session.capabilities.steer = true;
+    expect(externalSteeringDelivery(f.thread, "go")).toBe("activeTurn");
+    const withCommands = {
+      ...f.thread,
+      session: {
+        ...f.thread.session,
+        commands: {
+          list: async () => ({ ok: true, value: { commands: [] } }),
+          execute: async () => ({ ok: true, value: { turnId: hostTurnIdSchema.parse("x") } }),
+        } satisfies NonNullable<HarnessSession["commands"]>,
+      },
+    };
+    expect(externalSteeringDelivery(withCommands, "/compact now")).toBe("newTurn");
+    expect(externalSteeringDelivery(withCommands, "compact now")).toBe("activeTurn");
   });
 });

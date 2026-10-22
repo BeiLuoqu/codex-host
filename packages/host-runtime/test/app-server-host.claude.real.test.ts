@@ -443,6 +443,17 @@ describe.skipIf(!RUN_REAL)("AppServerHost real Claude projection", () => {
         await expect(collector.waitFor((message) => requestId(message, 3))).resolves.toMatchObject({
           result: { delivery: "activeTurn" },
         });
+        // A Harness command keeps the stop-then-start path even while native steering is available.
+        writeRequest(desktopInput, {
+          id: 30,
+          method: "codexhost/thread/steering/inspect",
+          params: { threadId, text: "/compact" },
+        });
+        await expect(collector.waitFor((message) => requestId(message, 30))).resolves.toMatchObject(
+          {
+            result: { delivery: "newTurn" },
+          },
+        );
 
         writeRequest(desktopInput, {
           id: 4,
@@ -507,6 +518,133 @@ describe.skipIf(!RUN_REAL)("AppServerHost real Claude projection", () => {
         await expect(collector.waitFor((message) => requestId(message, 5))).resolves.toMatchObject({
           error: { code: -32080 },
         });
+      } finally {
+        desktopInput.end();
+        await running;
+        await claudeAdapter.close();
+        await fs.rm(mappingStoreDirectory, { recursive: true, force: true });
+      }
+    },
+    REAL_TIMEOUT_MS,
+  );
+  it(
+    "stops and restarts a real Claude Turn steered while it streams text without tools",
+    async () => {
+      const workspace = path.resolve(".codexhost", "claude-host-real", "steer-text-workspace");
+      await fs.mkdir(workspace, { recursive: true });
+      const mappingStoreDirectory = await fs.mkdtemp(path.join(tmpdir(), "codexhost-steer-real-"));
+      const desktopInput = new PassThrough();
+      const desktopOutput = new PassThrough();
+      // Claude Code runs the scripted `sleep` without an Approval in the default permission mode;
+      // decline any native action that does ask, so the test never grants extra permissions.
+      const collector = new JsonCollector(desktopOutput, (request) => {
+        if (request.method !== "mcpServer/elicitation/request") return;
+        writeRequest(desktopInput, { id: request.id ?? null, result: { action: "decline" } });
+      });
+      const official = new OfficialProcess();
+      const claudeAdapter = new ClaudeCodeAdapter({ closeTimeoutMs: 10_000 });
+      const host = new AppServerHost({
+        stockCodexPath: "/synthetic/codex",
+        arguments: [],
+        desktopInput,
+        desktopOutput,
+        diagnosticOutput: new PassThrough(),
+        externalAdapters: new Map<ExternalHarnessId, ClaudeCodeAdapter>([
+          ["claude-code", claudeAdapter],
+        ]),
+        mappingStore: new MappingStore({ directory: mappingStoreDirectory }),
+        spawnOfficial: (() =>
+          official as unknown as ChildProcessWithoutNullStreams) as unknown as typeof spawn,
+      });
+      const running = host.run();
+
+      try {
+        writeRequest(desktopInput, {
+          id: 1,
+          method: "thread/start",
+          params: {
+            model: encodeExternalTransportSelection("claude-code", {
+              permissionModeId: harnessPermissionModeIdSchema.parse("default"),
+            }),
+            cwd: workspace,
+          },
+        });
+        const started = await collector.waitFor((message) => requestId(message, 1));
+        const threadId = ((started.result as JsonObject).thread as JsonObject).id;
+        if (typeof threadId !== "string") throw new Error("Host returned no Thread ID");
+
+        writeRequest(desktopInput, {
+          id: 2,
+          method: "turn/start",
+          params: {
+            threadId,
+            input: [
+              {
+                type: "text",
+                text: "Without using any tools, write a 30-line poem about the sea, one short line per sentence.",
+              },
+            ],
+          },
+        });
+        const turnResponse = await collector.waitFor((message) => requestId(message, 2));
+        const turnId = ((turnResponse.result as JsonObject).turn as JsonObject).id;
+        if (typeof turnId !== "string") throw new Error("Host returned no Turn ID");
+        await collector.waitFor((message) => method(message, "item/agentMessage/delta"));
+
+        writeRequest(desktopInput, {
+          id: 3,
+          method: "codexhost/thread/steering/inspect",
+          params: { threadId },
+        });
+        await expect(collector.waitFor((message) => requestId(message, 3))).resolves.toMatchObject({
+          result: { delivery: "newTurn" },
+        });
+
+        writeRequest(desktopInput, {
+          id: 4,
+          method: "turn/steer",
+          params: {
+            threadId,
+            expectedTurnId: turnId,
+            clientUserMessageId: "real-steer-message",
+            input: [
+              {
+                type: "text",
+                text: "Stop the poem and reply with exactly STEERED.",
+              },
+            ],
+          },
+        });
+        const response = await collector.waitFor((message) => requestId(message, 4));
+        expect(response).toMatchObject({ result: { delivery: "newTurn" } });
+        const nextTurnId = (response.result as JsonObject).turnId;
+        expect(nextTurnId).not.toBe(turnId);
+        await expect(
+          collector.waitFor(
+            (message) =>
+              method(message, "turn/completed") &&
+              ((message.params as JsonObject).turn as JsonObject).id === nextTurnId,
+          ),
+        ).resolves.toMatchObject({ params: { turn: { status: "completed" } } });
+        expect(
+          collector.messages.some(
+            (message) =>
+              method(message, "item/started") &&
+              (message.params as JsonObject).turnId === turnId &&
+              ((message.params as JsonObject).item as JsonObject).type === "userMessage" &&
+              ((message.params as JsonObject).item as JsonObject).clientId === "real-steer-message",
+          ),
+        ).toBe(false);
+        const reply = collector.messages
+          .filter(
+            (message) =>
+              method(message, "item/completed") &&
+              (message.params as JsonObject).turnId === nextTurnId &&
+              ((message.params as JsonObject).item as JsonObject).type === "agentMessage",
+          )
+          .map((message) => ((message.params as JsonObject).item as JsonObject).text)
+          .join("\n");
+        expect(reply).toContain("STEERED");
       } finally {
         desktopInput.end();
         await running;

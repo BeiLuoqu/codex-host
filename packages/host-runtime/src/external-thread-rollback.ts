@@ -232,9 +232,10 @@ export async function executeExternalThreadRollback(input: {
   if (derived.running) {
     return { ok: false, error: { code: -32072, message: "External Thread has an active Turn" } };
   }
-  // Native history may have split a steered Turn that Desktop still shows whole, so Desktop's
-  // "last Turns" and native Turn boundaries can disagree until it rereads this Thread.
-  if (derived.steeredTurnIds.size > 0) {
+  // Native history may have split a steered Turn that Desktop still shows whole. Only the undone
+  // Turns matter: Turns after a split still map one-to-one to native Turns.
+  const undone = derived.record.turnMappings.slice(-rollback.numTurns);
+  if (undone.some((mapping) => derived.steeredTurnIds.has(mapping.hostTurnId))) {
     return {
       ok: false,
       error: {

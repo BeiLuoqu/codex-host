@@ -9,6 +9,7 @@ import type {
   RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   validateHostApprovalResponse,
   validateHostQuestionResponse,
@@ -325,7 +326,7 @@ export class KimiSession implements HarnessSession {
         return this.#handleTurnStart(command);
       case "turn.steer":
         // `kimi acp` has no same-turn insert. SDK Session.steer() starts another turn when idle.
-        return err("unsupported", "Kimi ACP cannot steer an active Turn");
+        return unsupportedSteer("Kimi ACP");
       case "turn.cancel":
         return this.#handleTurnCancel(command);
       case "interaction.respond":

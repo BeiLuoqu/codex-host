@@ -11,6 +11,7 @@ export { validateHostInteractionResponse } from "./interaction.js";
 export { HarnessOutputChannel } from "./output-channel.js";
 export { sanitizeDiagnosticTail, filterAmbientNodeWarnings } from "./diagnostics.js";
 export { validateHostQuestionResponse } from "./question.js";
+export { unsupportedSteer } from "./steer.js";
 export { hostDerivedUsageFields, parseHostUsage, parseHostUsageRequest } from "./usage.js";
 export type { HostUsage, HostUsageCostSource, HostUsageRequest } from "./usage.js";
 export type {

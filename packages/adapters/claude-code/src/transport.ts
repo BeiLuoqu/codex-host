@@ -281,6 +281,11 @@ export interface ClaudeTurnTransport {
    * `command_lifecycle` receipts that confirm a steer. False before init and on CLIs without it.
    */
   supportsNativeSteer?(): boolean;
+  /**
+   * True while a requested Turn has a root tool call running on a CLI that confirms steers. A
+   * steer written now joins this Turn after that tool call; otherwise it may run as the next Turn.
+   */
+  canSteerActiveTurn?(): boolean;
   getPermissionMode(): ClaudePermissionMode;
   setModel(model?: string): Promise<void>;
   setThinkingOption(thinkingOptionId: HarnessThinkingOptionId): Promise<void>;

@@ -161,6 +161,7 @@ export class FakeHarnessSession implements HarnessSession {
   commands?: HarnessCommandCapability;
   readonly interactionResponses: InteractionRespondCommand[] = [];
   readonly steers: TurnSteerCommand[] = [];
+  #nextSteerRefusal: HarnessError | null = null;
   readonly outputs: AsyncIterable<HarnessOutput>;
   snapshotReads = 0;
   usageRefreshes = 0;
@@ -454,8 +455,18 @@ export class FakeHarnessSession implements HarnessSession {
     return { ok: true, value: { turnId: command.turnId } };
   }
 
+  /** The next native steer is refused without taking its input, as when it cannot join now. */
+  refuseNextSteer(message = "Fake Harness Session cannot take steered input now"): void {
+    this.#nextSteerRefusal = { code: "unsupported", message, retryable: false };
+  }
+
   /** Accepts steered input into the active Turn, as a native insertion primitive would. */
   #steer(command: TurnSteerCommand): HarnessResult<TurnSteerAccepted> {
+    if (this.#nextSteerRefusal) {
+      const error = this.#nextSteerRefusal;
+      this.#nextSteerRefusal = null;
+      return { ok: false, error };
+    }
     if (!this.capabilities.steer) {
       return {
         ok: false,

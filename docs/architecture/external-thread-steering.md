@@ -2,17 +2,21 @@
 
 codexhost 对外部 Harness Thread 保留一个「调整方向」操作，按当前 Session 的能力选择送达方式：
 
-- **原生同轮插入**：Session 声明 `capabilities.steer` 时，Host 发送公共命令 `turn.steer`，由 Adapter 调用 Harness 自己的插入原语，在原生安全边界把输入送入**当前 Turn**，不取消、不另起 Turn。
-- **停止后重发（退路）**：Session 未声明能力时，Host **取消当前 Turn，等待它终结，再自动执行本次新输入**。
+- **原生同轮插入**：Session 此刻声明 `capabilities.steer` 时，Host 发送公共命令 `turn.steer`，由 Adapter 调用 Harness 自己的插入原语，在原生安全边界把输入送入**当前 Turn**，不取消、不另起 Turn。
+- **停止后重发（退路）**：其余情况下，Host **取消当前 Turn，等待它终结，再自动执行本次新输入**。任何不确定能并入当前 Turn 的情况都走这条路径，保证不比没有原生插入时差。
 
-用户继续使用 Codex Desktop 原有按钮、跟进处理方式设置和单条消息反向操作，不需要手动停止后重发。官方 Codex Thread 仍透传原生 `turn/steer`，不改变同轮追加输入的语义。当前只有 Claude Code 会声明 `capabilities.steer`，并且只在 CLI 运行时报告 `msg_lifecycle_v1` 后才声明；其原生依据见 [`../harnesses/claude-code/claude-code-steer.md`](../harnesses/claude-code/claude-code-steer.md)；其他 Adapter 对 `turn.steer` 返回 `unsupported`，保持停止后重发。
+用户继续使用 Codex Desktop 原有按钮、跟进处理方式设置和单条消息反向操作，不需要手动停止后重发。官方 Codex Thread 仍透传原生 `turn/steer`，不改变同轮追加输入的语义。当前只有 Claude Code 会声明 `capabilities.steer`，并且只在确定插入会并入当前 Turn 时声明；其条件与原生依据见 [`../harnesses/claude-code/claude-code-steer.md`](../harnesses/claude-code/claude-code-steer.md)；其他 Adapter 对 `turn.steer` 返回 `unsupported`，保持停止后重发。
 
 ## 原生同轮插入
 
-- `HarnessSessionCapabilities.steer` 只有在 Session 能把输入交给原生同轮插入原语时才为 `true`；缺省表示不支持。
-- `TurnSteerCommand { turnId, input }` 定义在 `packages/harness-adapter/src/text-session.ts`。Adapter 在 Harness 确认接受或入队后返回 `{ accepted: true }`，不等待插入实际执行完毕。
-- `ExternalTurnSteering` 对两种送达方式统一校验非空文本、`expectedTurnId` 和 `threadId + clientUserMessageId` 去重。原生拒绝不会自动改走退路，也不会自动重试。
+- `HarnessSessionCapabilities.steer` 是实时值：只有 Session 此刻能把输入交给原生插入原语、并且插入会并入当前 Turn 时才为 `true`；缺省表示不支持。
+- `TurnSteerCommand { turnId, input }` 定义在 `packages/harness-adapter/src/text-session.ts`。Adapter 在 Harness 确认接受或入队后返回 `{ accepted: true }`，不等待插入实际执行完毕。返回失败即表示 Harness **没有收下**这条输入。没有原生插入的 Adapter 用 `unsupportedSteer()` 拒绝。
+- `ExternalTurnSteering`（`packages/host-runtime/src/external-turn-steering.ts`）对两种送达方式统一校验非空文本、`expectedTurnId` 和 `threadId + clientUserMessageId` 去重，并按以下顺序决定送达方式：
+  1. `turn/steer` 带有 `codexhostSteerDelivery`（Renderer 已经按该方式展示）时照它执行：`newTurn` 停止后重发；`activeTurn` 原生插入，Harness 没收下时报错、不改走退路，避免和 Desktop 已有的展示不一致。
+  2. 输入是 Harness 命令（Session 提供命令、文本以 `/命令` 开头）时停止后重发，命令照常解析和执行。
+  3. 其余情况读取实时的 `capabilities.steer`：为 `true` 时原生插入，Harness 没收下就改走停止后重发；如果当前 Turn 在此期间已经结束，直接把输入作为下一个 Turn 启动。
 - `turn/steer` 回执包含 `turnId` 和 `delivery`：`activeTurn` 表示送入当前 Turn，`newTurn` 表示停止旧 Turn 后开始了新 Turn。
+- `codexhost/thread/steering/inspect { threadId, text? }` 按同样的规则（第 2、3 步）预先给出送达方式；读取失败返回 `-32081`。
 
 原生同轮插入成功后，Host 在当前 Turn 发布 `userMessage` Item。Desktop 提交带 `clientUserMessageId` 时，投影把它写入 Item 的 `clientId`，用于结算 Desktop 的乐观 steer 消息；Adapter 不发布这条 Host Item。Host 会让并发的 Turn 终态投影等待这条已接受输入完成实时投影，避免 Harness 接受输入后立刻结束时遗漏乐观消息结算。刷新后的历史仍完全按 Adapter 的原生历史解析，不把不同的原生 Turn 强行合并。
 
@@ -21,7 +25,7 @@ codexhost 对外部 Harness Thread 保留一个「调整方向」操作，按当
 原生历史可能已经在插入点分轮，而 Desktop 在重新读取前仍把内容显示为一个 Turn。Host Runtime 按 Host Thread ID 在内存中拥有 `steeredTurnIds`，记录插过队的 Host Turn：
 
 - Fork 先解析请求的实际 Checkpoint 边界，再检查该边界的 Host Turn；省略 `lastTurnId` 或使用 `beforeTurnId` 不会绕过保护。
-- 对 steered 边界的 Fork，以及该 Thread 的撤销，返回 `-32080` 并要求重新打开 Thread。
+- 对 steered 边界的 Fork，以及撤销范围内包含 steered Turn 的撤销，返回 `-32080` 并要求重新打开 Thread。原生历史只会在 steered Turn 内多分出一轮，它之后的 Turn 仍与原生 Turn 一一对应，所以只撤销之后的 Turn 不受限制。
 - 空闲释放只卸载 Native Session，不等于 Desktop 已读取历史；Session 恢复后继续使用同一组未读标记。
 - Desktop 重新读取历史并成功收到 Turn 边界后，只清除实际返回的已结束 Turn 的标记。只读取 Items 或未包含该 Turn 的分页不会解除保护。
 - 标记不落盘；Host 进程重启后自然消失。
@@ -47,9 +51,9 @@ codexhost 对外部 Harness Thread 保留一个「调整方向」操作，按当
 
 接入流程：
 
-1. 调用 `codexhost/thread/steering/inspect` 读取本次送达方式（`official`、`activeTurn` 或 `newTurn`），Host 执行和预检读取同一个 Session capability。`official` 与 `activeTurn` 走原函数，使用 Desktop 自己的 steer 展示，乐观消息属于当前 Turn；follower 窗口继续使用 Desktop 原有 owner 转发。以下步骤只适用于 `newTurn`。
+1. 带上本次要插入的文本调用 `codexhost/thread/steering/inspect`，读取送达方式（`official`、`activeTurn` 或 `newTurn`）。Host 不支持该方法（`-32601`，较旧或远程的 Host）时，改用 `codexhost/thread/ownership/list`：外部 Thread 按 `newTurn` 处理；两个方法都不支持时视为官方 app-server，先确认是原生 Codex Thread。`official` 与 `activeTurn` 走原函数，使用 Desktop 自己的 steer 展示，乐观消息属于当前 Turn；`activeTurn` 期间发出的 `turn/steer` 带上 `codexhostSteerDelivery: "activeTurn"`，让 Host 照这个选择执行而不重新判断。follower 窗口继续使用 Desktop 原有 owner 转发。以下步骤只适用于 `newTurn`。
 2. 外部输入使用 Desktop 自己的 `startTurn` 展示流程。新输入从一开始就属于新 Turn 占位，保留 `clientUserMessageId`、输入及附件展示上下文；不创建旧轮 `steeringUserMessage`，不修改官方 transcript 内部实体。
-3. 仅将本次 `threadId + clientUserMessageId` 对应的出站 `turn/start` 转成 `turn/steer`，携带原先捕获的 `expectedTurnId`。把 Host 的 `{turnId}` 回执转换成正常 start 展示流程需要的 Turn envelope。其他 start、请求选项及官方 steer 不变。
+3. 仅将本次 `threadId + clientUserMessageId` 对应的出站 `turn/start` 转成 `turn/steer`，携带原先捕获的 `expectedTurnId` 和 `codexhostSteerDelivery: "newTurn"`。把 Host 的 `{turnId}` 回执转换成正常 start 展示流程需要的 Turn envelope。其他 start、请求选项及官方 steer 不变。
 4. 成功后解除本次旧轮 interrupted 引入的队列暂停，保留此前已暂停的消息。失败不自动重试或偷偷排队；Desktop 原有失败提交展示负责保留输入。
 5. 绑定卸载时停止新的替换，恢复包装过的方法；尚未发出的替换不能因卸载而意外成为普通 start。
 
@@ -91,10 +95,11 @@ Codex Desktop **26.924.22138 / build 11645** 的本地队列在 `turnCompleted` 
 
 针对性测试：
 
-- `packages/host-runtime/test/app-server-host.native-steering.test.ts`：原生插入的 `clientId` 投影、送达方式查询、Fork/撤销窗口和重新读取后放行。
+- `packages/host-runtime/test/app-server-host.native-steering.test.ts`：原生插入的 `clientId` 投影、送达方式查询、Fork/撤销窗口和重新读取后放行；Harness 没收下时改走停止后重发、`codexhostSteerDelivery` 两种取值都照办、Harness 命令停止后重发、撤销只限制包含 steered Turn 的范围。
+- `packages/renderer-extension/test/renderer-external-steering.test.ts`（`steer delivery handshake`）：inspect 带文本、两种展示方式分别标记 `codexhostSteerDelivery`、Host 不支持 inspect 时改用 Thread 所有权。
 - `packages/protocol-core/test/codex-ui-projector.test.ts`：插入的 `userMessage` 在实时与历史投影中留在所属 Turn。
 - `packages/adapters/claude-code/test/*.test.ts`：Claude Code 的 `priority: "next"` 推入、接受条件、错过 Turn 与历史分轮。
-- `packages/host-runtime/test/external-turn-steering.test.ts`：原生插入不取消、失败释放回执，以及延迟/同步终态、去重、冲突、过期目标、输入预检、超时迟到、fault、关闭、显式停止、自主 Turn 及启动失败。
+- `packages/host-runtime/test/external-turn-steering.test.ts`：原生插入不取消、失败释放回执、没收下时退回（当前 Turn 已结束则直接启动下一个、正在结束则等待其终态），以及延迟/同步终态、去重、冲突、过期目标、输入预检、超时迟到、fault、关闭、显式停止、自主 Turn 及启动失败。
 - `packages/host-runtime/test/app-server-host*.test.ts`：真实 Host 路由、外部不泄漏官方流、取消与启动顺序、响应 gate、同 Thread start 竞争、官方透传。
 - `packages/renderer-extension/test/renderer-external-steering.test.ts`：正常 start 占位、唯一输入、无旧轮 steer Item、去重、队列暂停恢复、owner/follower、失败和卸载。
 - `packages/renderer-extension/test/renderer-external-steering-rpc.test.ts`：类方法的 RPC 可访问性、模型／权限列表读取、官方与外部 steer、实例隔离、卸载和重复安装，以及卸载期间待定请求的清理。

@@ -35,6 +35,7 @@ import type {
   TurnSteerCommand,
 } from "@codexhost/harness-adapter";
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   validateHostApprovalResponse,
   validateHostQuestionResponse,
@@ -1221,14 +1222,7 @@ export class QoderSession implements HarnessSession {
 
     switch (command.type) {
       case "turn.steer":
-        return {
-          ok: false,
-          error: {
-            code: "unsupported",
-            message: "Qoder native steering is not enabled",
-            retryable: false,
-          },
-        };
+        return unsupportedSteer("Qoder");
       case "turn.start": {
         if (this.#activeTurn) {
           return {

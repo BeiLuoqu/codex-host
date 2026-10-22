@@ -8,6 +8,7 @@ import readline from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   sanitizeDiagnosticTail,
   type HarnessAdapter,
@@ -616,12 +617,7 @@ class AntigravitySession implements HarnessSession {
     if (this.#closed) return { ok: false, error: invalidState("Antigravity Session is closed") };
     if (command.type === "turn.cancel") return this.#cancel(command);
     // Headless stream-json runs each stdin message as its own Turn; steering exists only in the TUI.
-    if (command.type === "turn.steer") {
-      return {
-        ok: false,
-        error: { code: "unsupported", message: "Antigravity cannot steer", retryable: false },
-      };
-    }
+    if (command.type === "turn.steer") return unsupportedSteer("Antigravity");
     if (command.type === "model.select") return this.#selectModel(command);
     if (command.type === "permissionMode.select") return this.#selectPermissionMode(command);
     if (command.type === "thinking.select") return this.#selectThinking(command);

@@ -2,6 +2,7 @@ import path from "node:path";
 import { fetchCursorAccount } from "./account-usage.js";
 import { CursorSessionImport } from "./session-import.js";
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   sanitizeDiagnosticTail,
   type HarnessAdapter,
@@ -623,7 +624,7 @@ export class CursorSession implements HarnessSession {
     if (this.#closed) return rejected("invalidState", "Cursor session is closed");
     if (command.type === "interaction.respond") return this.#interactions.respond(command);
     // Cursor ACP cancels the running prompt on a second session/prompt; it has no native steer.
-    if (command.type === "turn.steer") return rejected("unsupported", "Cursor ACP cannot steer");
+    if (command.type === "turn.steer") return unsupportedSteer("Cursor ACP");
     if (command.type === "turn.cancel") {
       if (!this.#active || this.#active.command.turnId !== command.turnId)
         return rejected("invalidState", "Cursor turn is not active");

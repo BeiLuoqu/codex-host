@@ -65,6 +65,7 @@ import {
   type TurnStartCommand,
   type TurnSteerAccepted,
   type TurnSteerCommand,
+  unsupportedSteer,
 } from "@codexhost/harness-adapter";
 import {
   harnessCommandCatalogSchema,
@@ -1024,16 +1025,7 @@ class OmpHarnessSession implements HarnessSession {
       return { ok: false, error: invalidState("Omp Session is not open") };
     }
     if (command.type === "turn.cancel") return this.#cancel(command);
-    if (command.type === "turn.steer") {
-      return {
-        ok: false,
-        error: {
-          code: "unsupported",
-          message: "Omp native steering is not enabled",
-          retryable: false,
-        },
-      };
-    }
+    if (command.type === "turn.steer") return unsupportedSteer("OMP");
     if (command.type === "interaction.respond") return this.#respond(command);
     if (command.type === "model.select") return this.#selectModel(command);
     if (command.type === "thinking.select") return this.#selectThinking(command);

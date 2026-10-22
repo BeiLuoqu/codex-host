@@ -3170,6 +3170,58 @@ describe("ClaudeSdkTransport Workflow agent Interactions", () => {
 });
 
 describe("ClaudeSdkTransport steer", () => {
+  it("can steer the active Turn only while a root tool call runs", async () => {
+    const value = fixture();
+    await value.transport.start();
+    value.fakeQuery.push({
+      type: "system",
+      subtype: "init",
+      capabilities: ["msg_lifecycle_v1"],
+    } as unknown as SDKMessage);
+    await vi.waitFor(() => expect(value.transport.supportsNativeSteer()).toBe(true));
+    expect(value.transport.canSteerActiveTurn()).toBe(false);
+    const turn = value.transport.runTurn(
+      "hello",
+      "00000000-0000-4000-8000-000000000050",
+      () => undefined,
+    );
+    expect(value.transport.canSteerActiveTurn()).toBe(false);
+    value.fakeQuery.push({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        id: "msg-tool",
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "toolu_root", name: "Bash", input: { command: "sleep 6" } },
+        ],
+      },
+    } as unknown as SDKMessage);
+    await vi.waitFor(() => expect(value.transport.canSteerActiveTurn()).toBe(true));
+    value.fakeQuery.push({
+      type: "assistant",
+      parent_tool_use_id: "toolu_root",
+      message: {
+        id: "msg-subagent",
+        role: "assistant",
+        content: [{ type: "tool_use", id: "toolu_child", name: "Read", input: {} }],
+      },
+    } as unknown as SDKMessage);
+    value.fakeQuery.push({
+      type: "user",
+      parent_tool_use_id: null,
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "toolu_root", content: "" }],
+      },
+    } as unknown as SDKMessage);
+    await vi.waitFor(() => expect(value.transport.canSteerActiveTurn()).toBe(false));
+    completeTurn(value.fakeQuery);
+    await turn;
+    expect(value.transport.canSteerActiveTurn()).toBe(false);
+    await value.transport.close();
+  });
+
   it("supports native steering only after init reports msg_lifecycle_v1", async () => {
     const value = fixture();
     await value.transport.start();

@@ -13,6 +13,7 @@ import type {
 } from "@opencode-ai/sdk/v2";
 
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   validateHostApprovalResponse,
   validateHostQuestionResponse,
@@ -450,8 +451,7 @@ class OpenCodeHarnessSession implements HarnessSession, OpenCodeTransportListene
     }
     // Busy prompt_async is undocumented, and the live user-message binding drops the reply
     // that follows an inserted message. This Session does not declare native steer.
-    if (command.type === "turn.steer")
-      return { ok: false, error: unsupported("OpenCode cannot steer an active Turn") };
+    if (command.type === "turn.steer") return unsupportedSteer("OpenCode");
     if (command.type === "turn.cancel") return this.#cancel(command);
     if (command.type === "interaction.respond") return this.#respond(command);
     if (command.type === "model.select") return this.#selectModel(command);

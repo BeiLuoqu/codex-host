@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   parseHostUsage,
   type HarnessCommandInvocation,
@@ -278,9 +279,7 @@ export class ZcodeSession implements HarnessSession {
   > {
     if (this.#closed || this.#faulted) return failure("invalidState", "ZCode session is closed");
     try {
-      if (command.type === "turn.steer") {
-        return failure("unsupported", "ZCode cannot steer the active Turn");
-      }
+      if (command.type === "turn.steer") return unsupportedSteer("ZCode");
       if (command.type === "turn.start") {
         if (
           !hostTurnIdSchema.safeParse(command.turnId).success ||

@@ -4,6 +4,7 @@ import { HermesUsage } from "./hermes-usage.js";
 import { HermesCompactionActivity } from "./hermes-compaction-activity.js";
 
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   validateHostApprovalResponse,
   type HostQuestionResponse,
@@ -514,7 +515,7 @@ export class HermesSession implements HarnessSession {
       case "turn.start":
         return this.#startTurn(command);
       case "turn.steer":
-        return Promise.resolve(err("unsupported", "Hermes native steering is not enabled"));
+        return Promise.resolve(unsupportedSteer("Hermes"));
       case "turn.cancel":
         return this.#cancelTurn(command);
       case "interaction.respond":

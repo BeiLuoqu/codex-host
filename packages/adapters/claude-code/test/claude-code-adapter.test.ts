@@ -116,6 +116,8 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
   readonly steers: Array<{ text: string; messageId: string; priority: "next" }> = [];
   /** Whether the fake CLI reported `msg_lifecycle_v1` in its init capabilities. */
   nativeSteer = true;
+  /** Whether the fake requested Turn currently runs a root tool call. */
+  rootToolRunning = true;
   readonly #pendingSteers = new Map<
     string,
     { resolve(): void; reject(error: ClaudeSteerMissedTurnError): void }
@@ -198,6 +200,10 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
 
   supportsNativeSteer(): boolean {
     return this.nativeSteer;
+  }
+
+  canSteerActiveTurn(): boolean {
+    return this.nativeSteer && this.#active !== undefined && this.rootToolRunning;
   }
 
   steer(text: string, messageId: string): Promise<void> {
@@ -976,6 +982,10 @@ describe("Claude Code HarnessAdapter", () => {
     expect(session.capabilities.steer).toBe(true);
     const transport = transports[0];
     if (!transport) throw new Error("Fake transport was not created");
+    // Without a running root tool call the steer could run as the next Turn instead.
+    transport.rootToolRunning = false;
+    expect(session.capabilities.steer).toBe(false);
+    transport.rootToolRunning = true;
     transport.nativeSteer = false;
     expect(session.capabilities.steer).toBe(false);
     await expect(

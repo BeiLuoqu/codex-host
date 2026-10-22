@@ -483,6 +483,8 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
   #active: ActiveTurn | null = null;
   readonly #steerQueuedTimeoutMs: number;
   #nativeSteer = false;
+  /** Root tool calls of the requested Turn that have started and not yet returned a result. */
+  readonly #rootToolCalls = new Set<string>();
   readonly #pendingSteers = new Map<
     string,
     {
@@ -620,6 +622,38 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
 
   supportsNativeSteer(): boolean {
     return this.#nativeSteer;
+  }
+
+  /**
+   * `priority: "next"` joins after the current tool call, and a tool result is always followed by
+   * another model request. So a steer written while a root tool call runs folds into this Turn;
+   * one written while Claude streams its final text may instead run as the next Turn.
+   */
+  canSteerActiveTurn(): boolean {
+    return this.#nativeSteer && this.#active !== null && this.#rootToolCalls.size > 0;
+  }
+
+  #observeRootToolCalls(message: unknown): void {
+    if (!isRecord(message) || message.parent_tool_use_id != null) return;
+    if (message.type !== "assistant" && message.type !== "user") return;
+    const body = message.message;
+    if (!isRecord(body) || !Array.isArray(body.content)) return;
+    for (const block of body.content) {
+      if (!isRecord(block)) continue;
+      if (
+        message.type === "assistant" &&
+        block.type === "tool_use" &&
+        typeof block.id === "string"
+      ) {
+        this.#rootToolCalls.add(block.id);
+      } else if (
+        message.type === "user" &&
+        block.type === "tool_result" &&
+        typeof block.tool_use_id === "string"
+      ) {
+        this.#rootToolCalls.delete(block.tool_use_id);
+      }
+    }
   }
 
   #observeNativeCapabilities(message: unknown): void {
@@ -787,6 +821,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
     const unclaimed = this.#autonomous?.events ?? [];
     this.#autonomous = null;
     const promise = new Promise<ClaudeTransportTurnResult>((resolve, reject) => {
+      this.#rootToolCalls.clear();
       this.#active = {
         accumulator: new ClaudeNativeTurnAccumulator(
           this.#provider ? { provider: this.#provider } : {},
@@ -1155,6 +1190,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
     }
     this.#query = null;
     const active = this.#active;
+    this.#rootToolCalls.clear();
     this.#active = null;
     this.#autonomous = null;
     this.#idleAccumulator = null;
@@ -1302,10 +1338,12 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
         this.#observeSteer(message);
         const active = this.#active;
         if (active) {
+          this.#observeRootToolCalls(message);
           const interpreted = active.accumulator.consume(message);
           for (const event of interpreted.events) active.onEvent(event);
           if (interpreted.terminal) {
             this.#closeInteractions("root", "superseded");
+            this.#rootToolCalls.clear();
             this.#active = null;
             active.resolve(interpreted.terminal);
           }
@@ -1374,6 +1412,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
       const active = this.#active;
       this.#closeInteractions("all", "cancelled");
       this.#rejectPendingSteers();
+      this.#rootToolCalls.clear();
       this.#active = null;
       active?.reject(error);
       if (!this.#closePromise) this.#onFault(error);

@@ -42,6 +42,7 @@ import type {
   TurnStartCommand,
 } from "@codexhost/harness-adapter";
 import {
+  unsupportedSteer,
   HarnessOutputChannel as OutputChannel,
   liveHarnessCommandPrompt,
   mergeLiveHarnessCommands,
@@ -837,12 +838,7 @@ export class KiroSession implements HarnessSession {
       return this.#cancelTurn(command);
     }
     // Kiro's `_session/steer` is unpublished and unverified here; do not claim it.
-    if (command.type === "turn.steer") {
-      return {
-        ok: false,
-        error: { code: "unsupported", message: "Kiro steering is not enabled", retryable: false },
-      };
-    }
+    if (command.type === "turn.steer") return unsupportedSteer("Kiro");
     if (command.type === "interaction.respond") {
       return this.#respondInteraction(command);
     }

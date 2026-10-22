@@ -9,6 +9,7 @@ import type {
   RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   liveHarnessCommandPrompt,
   mergeLiveHarnessCommands,
@@ -477,16 +478,7 @@ class GrokHarnessSession implements HarnessSession {
     if (this.#phase !== "open")
       return { ok: false, error: invalidState("Grok Session is not open") };
     if ("commandId" in command) return this.#executeHarnessCommand(command);
-    if (command.type === "turn.steer") {
-      return {
-        ok: false,
-        error: {
-          code: "unsupported",
-          message: "Grok native steering is not enabled",
-          retryable: false,
-        },
-      };
-    }
+    if (command.type === "turn.steer") return unsupportedSteer("Grok");
     if (command.type === "turn.cancel") return this.#cancel(command);
     if (command.type === "interaction.respond") return this.#respond(command);
     if (command.type === "model.select") return this.#selectModel(command);
