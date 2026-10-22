@@ -559,6 +559,13 @@ describe("ClaudeSdkTransport Tool interpretation", () => {
     await value.transport.close();
   });
 
+  it("loads the same setting sources as the Claude Code CLI", async () => {
+    const value = fixture();
+    await value.transport.start();
+    expect(options(value)).not.toHaveProperty("settingSources");
+    await value.transport.close();
+  });
+
   it("publishes Agent delegation while hiding nested Subagent execution", async () => {
     const value = fixture();
     await value.transport.start();

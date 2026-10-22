@@ -561,7 +561,8 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
           : { type: "disabled" },
         ...(thinking.effort ? { effort: thinking.effort } : {}),
         pathToClaudeCodeExecutable: executable,
-        settingSources: ["user"],
+        // Omitted settingSources loads user, project and local settings like the
+        // Claude Code CLI, so project CLAUDE.md and .claude/skills apply.
         permissionMode: this.#permissionMode,
         ...(this.#allowDangerouslySkipPermissions ? { allowDangerouslySkipPermissions: true } : {}),
         canUseTool: (toolName, input, options) => this.#canUseTool(toolName, input, options),
