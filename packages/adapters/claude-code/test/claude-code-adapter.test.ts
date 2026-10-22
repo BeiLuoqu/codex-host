@@ -491,6 +491,57 @@ describe("Claude Code Composer cache countdown", () => {
     }
   });
 
+  it.each([true, false])(
+    "uses the latest quota evidence when account inspection completes (native push during inspection: %s)",
+    async (pushDuringInspection) => {
+      const { adapter, dependencies, transports } = fixture();
+      const accountResult = deferred<null>();
+      const createInspector = dependencies.createInspector;
+      dependencies.createInspector = (input) => ({
+        ...createInspector(input),
+        inspectAccount: () => accountResult.promise,
+      });
+      const session = await openSession(adapter);
+      const outputs: HarnessOutput[] = [];
+      const collecting = (async () => {
+        for await (const output of session.outputs) outputs.push(output);
+      })();
+      try {
+        await session.execute(textTurn("cache-account-race"));
+        const transport = transports[0];
+        if (!transport) throw new Error("Expected a Claude transport");
+        transport.event({ type: "message.completed", messageId: "reply" });
+        const planLimit = { fiveHour: { utilizationPercent: 10 } };
+        if (!pushDuringInspection) transport.planLimit(planLimit);
+        const inspection = adapter.inspectAccount();
+        if (pushDuringInspection) transport.planLimit(planLimit);
+        accountResult.resolve(null);
+        await expect(inspection).resolves.toBeNull();
+        transport.finish({ status: "succeeded" });
+        await vi.waitFor(() =>
+          expect(
+            outputs.some(
+              (output) => output.kind === "event" && output.event.type === "turn.completed",
+            ),
+          ).toBe(true),
+        );
+        const usages = outputs.flatMap((output) =>
+          output.kind === "event" && output.event.type === "session.usage.changed"
+            ? [output.event.usage]
+            : [],
+        );
+        expect(usages.at(-1)?.composerIndicators).toHaveLength(pushDuringInspection ? 1 : 0);
+        if (pushDuringInspection) {
+          expect(adapter.credits()).toEqual({ usedPercent: 10, periodType: "five_hour" });
+        }
+      } finally {
+        accountResult.resolve(null);
+        await adapter.close();
+        await collecting;
+      }
+    },
+  );
+
   it("restores the last main assistant response from native history without restarting the clock", async () => {
     const { adapter, history } = fixture({}, { accountCreditsSupported: true });
     await adapter.inspectAccount();

@@ -3095,15 +3095,19 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
   }
 
   async #readAccount(): Promise<HarnessAccountSnapshot | null> {
+    const planLimitAtStart = this.#latestPlanLimit;
     let inspector: ClaudeModelInspector | undefined;
     try {
       this.#dependencies.inspectInstallation();
       inspector = this.#dependencies.createInspector({ cwd: process.cwd() });
       this.#inspectors.add(inspector);
       const account = (await inspector.inspectAccount?.()) ?? null;
-      this.#accountCreditsSupported = account?.credits !== undefined;
-      for (const session of this.#sessions) {
-        session.publishAccountCreditsSupport(this.#accountCreditsSupported);
+      // A native quota push received during inspection is newer evidence than this result.
+      if (this.#latestPlanLimit === planLimitAtStart) {
+        this.#accountCreditsSupported = account?.credits !== undefined;
+        for (const session of this.#sessions) {
+          session.publishAccountCreditsSupport(this.#accountCreditsSupported);
+        }
       }
       return account;
     } catch {
