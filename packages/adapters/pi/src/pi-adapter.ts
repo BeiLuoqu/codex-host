@@ -1267,12 +1267,22 @@ class PiHarnessSession implements HarnessSession {
       completion,
       resolveCompletion,
     };
-    const nativeTurnRef = nativeTurnRefSchema.parse({
-      harnessId: this.harnessId,
-      nativeSessionId: transport.state.sessionId,
-      nativeTurnKey: turn.nativeTurnKey,
-      formatVersion: 1,
-    });
+    const nativeTurnRef = turn.nativeTurnKey
+      ? nativeTurnRefSchema.parse({
+          harnessId: this.harnessId,
+          nativeSessionId: transport.state.sessionId,
+          nativeTurnKey: turn.nativeTurnKey,
+          formatVersion: 1,
+        })
+      : undefined;
+    const checkpoint = nativeTurnRef
+      ? nativeCheckpointRefSchema.parse({
+          harnessId: this.harnessId,
+          nativeSessionId: transport.state.sessionId,
+          checkpointId: nativeTurnRef.nativeTurnKey,
+          formatVersion: 1,
+        })
+      : undefined;
     this.#active = active;
     this.#event({ type: "turn.autonomous.started", turnId, input: [] });
     this.#event({ type: "turn.started", turnId });
@@ -1281,18 +1291,32 @@ class PiHarnessSession implements HarnessSession {
     try {
       for (const event of turn.events) this.#handleTurnEvent(active, event);
       if (turn.result.status === "succeeded") {
-        this.#completeTurn(active, { status: "succeeded" }, turn.result.text, nativeTurnRef);
+        if (!nativeTurnRef) throw new Error("Pi autonomous Turn has no native identity");
+        this.#completeTurn(
+          active,
+          { status: "succeeded", ...(checkpoint ? { checkpoint } : {}) },
+          turn.result.text,
+          nativeTurnRef,
+        );
       } else if (turn.result.status === "cancelled") {
         this.#completeTurn(
           active,
-          { status: "cancelled", reason: turn.result.reason },
+          {
+            status: "cancelled",
+            reason: turn.result.reason,
+            ...(checkpoint ? { checkpoint } : {}),
+          },
           turn.result.text,
           nativeTurnRef,
         );
       } else {
         this.#completeTurn(
           active,
-          { status: "failed", error: normalizedError(turn.result.error, "nativeFailure") },
+          {
+            status: "failed",
+            error: normalizedError(turn.result.error, "nativeFailure"),
+            ...(checkpoint ? { checkpoint } : {}),
+          },
           turn.result.text,
           nativeTurnRef,
         );
@@ -2260,8 +2284,11 @@ export class PiAdapter implements HarnessAdapter {
         );
         if (!rolledBack.ok) {
           throw new PiAdapterFaultError({
-            code: "invalidState",
-            message: "Pi Native Session has no Turn to roll back",
+            code: rolledBack.reason === "unsupported" ? "unsupported" : "invalidState",
+            message:
+              rolledBack.reason === "unsupported"
+                ? "Pi cannot roll back a custom-triggered Turn at an exact native boundary"
+                : "Pi Native Session has no Turn to roll back",
             retryable: false,
           });
         }
