@@ -72,7 +72,7 @@ import {
 
 import { resolveAntigravityExecutable } from "./command.js";
 import { forkAntigravitySession } from "./fork.js";
-import { AntigravityHistory } from "./history.js";
+import { AntigravityHistory, antigravityHookDirectory } from "./history.js";
 import {
   antigravityAvailableThinkingOptions,
   antigravityModelArguments,
@@ -653,30 +653,36 @@ class AntigravitySession implements HarnessSession {
     }
 
     let questions: AntigravityQuestionBridge;
-    this.#preparingQuestions = AntigravityQuestionBridge.create({
-      turnId: command.turnId,
-      nativeSessionId: () =>
-        this.#active?.command === command && !this.#active.cancellationRequested
-          ? this.#nativeRef?.nativeSessionId
-          : undefined,
-      schedule: (action) => {
-        if (this.#active?.command === command) this.#enqueue(this.#active, action);
-        else action();
-      },
-      emit: (output) => {
-        const active = this.#active;
-        if (!active || active.command !== command) return;
-        if (output.kind === "event" && output.event.type === "item.started" && active.agentItem) {
-          this.#completeItem(active, active.agentItem, { status: "succeeded" });
-          active.agentItem = null;
-          active.agentText = "";
-        }
-        if (output.kind === "event" && output.event.type === "item.completed") {
-          active.completedItems.push(output.event.snapshot);
-        }
-        this.#channel.emit(output);
-      },
-    });
+    const hookDirectory = antigravityHookDirectory(this.#environment);
+    // The Thread's Hook directory outlives each Turn, while the previous Turn's agy may still be
+    // exiting and its bridge closing; the next bridge rewrites the directory only after that.
+    this.#preparingQuestions = this.#questionCleanup.then(() =>
+      AntigravityQuestionBridge.create({
+        ...(hookDirectory ? { directory: hookDirectory } : {}),
+        turnId: command.turnId,
+        nativeSessionId: () =>
+          this.#active?.command === command && !this.#active.cancellationRequested
+            ? this.#nativeRef?.nativeSessionId
+            : undefined,
+        schedule: (action) => {
+          if (this.#active?.command === command) this.#enqueue(this.#active, action);
+          else action();
+        },
+        emit: (output) => {
+          const active = this.#active;
+          if (!active || active.command !== command) return;
+          if (output.kind === "event" && output.event.type === "item.started" && active.agentItem) {
+            this.#completeItem(active, active.agentItem, { status: "succeeded" });
+            active.agentItem = null;
+            active.agentText = "";
+          }
+          if (output.kind === "event" && output.event.type === "item.completed") {
+            active.completedItems.push(output.event.snapshot);
+          }
+          this.#channel.emit(output);
+        },
+      }),
+    );
     try {
       questions = await this.#preparingQuestions;
     } catch (error) {
