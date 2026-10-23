@@ -36,6 +36,8 @@ Thinking 使用 `session.model.setReasoningEffort`，只接受当前模型公布
 
 一次用户输入包含整个原生 Agent Loop。内部 `assistant.turn_end` 和 `assistant.idle` 都不是用户 Turn 终态；等待 `session.idle`，取消还需 aborted 确认。turn.start 在原生根 user.message 的逻辑身份确认后才报告接受，避免立即取消时将未落盘请求误归到上一轮。
 
+`turn.steer` 明确返回 `unsupported`，不提交输入或取消原生执行；公共 Host 按停止当前 Turn 后新开一轮的流程处理。不将 SDK 的隐式排队或隐藏消息注入当作已验证的同 Turn 插入能力。
+
 取消 RPC 的成功、失败和超时处理绑定发起时的执行实例；原生已确认旧轮终结后，迟到响应不得取消新轮交互或将新轮置为故障。交互清理按所属 Turn 执行，重复清理不重复发送关闭事件。
 
 Native Session Ref 的 formatVersion 为 1，locator 为 `{storage:"copilot-cli",version:1}`；无人值守另含 `executionPolicy:"unattended-full-access"`。使用目标用户的原生存储，不能把 Ref 移到另一用户或另一原生配置目录冒充恢复。Native Turn key 是持久根 messageId；Item 身份使用原生 messageId、reasoningId 和 toolCallId。

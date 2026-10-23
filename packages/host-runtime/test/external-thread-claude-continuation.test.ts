@@ -114,6 +114,9 @@ it("preserves a live Claude continuation identity through refresh, reload and ex
           });
           return { status: "succeeded" };
         },
+        steer: async () => {
+          throw new Error("Unexpected steer in the continuation fixture");
+        },
         respondToInteraction: async () => undefined,
         abort: async () => undefined,
         abortContinuation: async () => undefined,

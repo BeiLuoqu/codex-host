@@ -108,6 +108,46 @@ const terminal = (outputs: HarnessOutput[]) =>
   );
 
 describe("Copilot public Session lifecycle (synthetic races)", () => {
+  it.each(["draft", "active"])(
+    "rejects steering without taking input in a %s Session",
+    async (phase) => {
+      const { session, outputs, consume } = open();
+      client.native.send.mockImplementation(async () => {
+        emit(event("user.message", { messageId: "message-1", content: "original" }));
+        return "message-1";
+      });
+      try {
+        if (phase === "active") {
+          expect(
+            await session.execute({
+              type: "turn.start",
+              turnId,
+              input: [{ type: "text", text: "original" }],
+            }),
+          ).toMatchObject({ ok: true });
+        }
+        expect(
+          await session.execute({
+            type: "turn.steer",
+            turnId,
+            input: [{ type: "text", text: "must not be sent" }],
+          }),
+        ).toMatchObject({ ok: false, error: { code: "unsupported", retryable: false } });
+        expect(client.native.send).toHaveBeenCalledTimes(phase === "active" ? 1 : 0);
+        expect(client.native.abort).not.toHaveBeenCalled();
+        expect(terminal(outputs)).toHaveLength(0);
+        if (phase === "draft") expect(createCopilotClient).not.toHaveBeenCalled();
+        else {
+          emit(event("session.idle", { mode: "interactive" }));
+          await vi.waitFor(() => expect(terminal(outputs)).toHaveLength(1));
+          expect(terminal(outputs)[0]?.outcome.status).toBe("succeeded");
+        }
+      } finally {
+        await session.close();
+        await consume;
+      }
+    },
+  );
   it("keeps a still-active background tool's completion after assistant.idle", async () => {
     const { session, outputs, consume } = open();
     client.native.send.mockImplementation(async () => {

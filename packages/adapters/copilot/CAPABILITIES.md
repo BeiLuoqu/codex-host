@@ -23,7 +23,7 @@
 | A2 | 工厂 | 必做 | P0 | 支持 | src/plugin.ts | 真实 Loader 独立实例测试 | 工厂复制环境；SDK 只在插件 Bundle 中 |
 | A3 | 检查 | 必做 | P0 | 受限 | src/adapter.ts、src/client.ts | test/adapter.test.ts；scripts/probe.mjs；原生记录 G1 | 同 cwd 检查合并，成功结果保留至 refresh 或 close；refresh 跳过完成缓存并共享进行中检查，外部认证/配置变化后需刷新；失败可重试，close 停止并排空；inspect 不创建会话，BYOK 尚未实测 |
 | A4 | 创建 Session | 必做 | P0 | 支持 | src/session.ts | test/session.test.ts；原生记录 G2 | 默认惰性创建；配置或无人值守先真实确认；只清理未提交草稿 |
-| A5 | 执行 Turn | 必做 | P0 | 支持 | src/session.ts、src/projection.ts | test/session.test.ts、projection.test.ts；真实 Host 接收委派测试 | 先确认逻辑消息身份再接受 Turn；早到事件有界缓冲，包含完整原生工具循环 |
+| A5 | 执行 Turn | 必做 | P0 | 支持 | src/session.ts、src/projection.ts | test/session.test.ts、projection.test.ts；真实 Host 接收委派测试 | 先确认逻辑消息身份再接受 Turn；早到事件有界缓冲，包含完整原生工具循环；turn.steer 明确 unsupported，不接收输入，交由公共 Host 停止后新开一轮 |
 | A6 | 取消 | 必做 | P0 | 支持 | src/session.ts、src/interactions.ts | 原生记录 G4；session.test.ts 合成取消竞态；app-server-host.copilot.real.test.ts | 等待 session.idle.aborted；取消 RPC 成功/失败/超时绑定执行实例，交互按 Turn 清理；旧回调不影响用户或自主新轮 |
 | A7 | 只读快照 | 必做 | P0 | 支持 | src/history.ts、src/projection.ts | test/history.test.ts、projection.test.ts；原生 compaction/分页记录 | 稳定消息/Item 身份；历史缺少持久终态时 unknown；expired 有界重读，不返回部分历史 |
 | A8 | 持久身份 + resume | 必做 | P0 | 支持 | src/refs.ts、src/session.ts | test/resume.test.ts、resume.native.test.ts、projection.test.ts；原生 cold resume/环境覆盖记录 | 原生严格 resume，无重复全量预读；缺失/损坏日志不替换为空会话；完整快照与 Fork 分页保留 |

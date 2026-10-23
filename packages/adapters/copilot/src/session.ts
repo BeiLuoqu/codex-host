@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { CopilotClient, CopilotSession, SessionEvent } from "@github/copilot-sdk";
 import {
   HarnessOutputChannel,
+  unsupportedSteer,
   type HarnessSession,
   type HarnessOutput,
   type HarnessResult,
@@ -38,6 +39,8 @@ import {
 } from "./refs.js";
 import type {
   TurnStartCommand,
+  TurnSteerCommand,
+  TurnSteerAccepted,
   TurnCancelCommand,
   InteractionRespondCommand,
   ModelSelectCommand,
@@ -581,6 +584,7 @@ export class CopilotHarnessSession implements HarnessSession {
   }
 
   execute(command: TurnStartCommand): Promise<HarnessResult<TurnStartAccepted>>;
+  execute(command: TurnSteerCommand): Promise<HarnessResult<TurnSteerAccepted>>;
   execute(command: TurnCancelCommand): Promise<HarnessResult<TurnCancelAccepted>>;
   execute(command: InteractionRespondCommand): Promise<HarnessResult<InteractionRespondAccepted>>;
   execute(
@@ -590,10 +594,15 @@ export class CopilotHarnessSession implements HarnessSession {
     command: HostCommand,
   ): Promise<
     HarnessResult<
-      TurnStartAccepted | TurnCancelAccepted | InteractionRespondAccepted | ModelSelectCompleted
+      | TurnStartAccepted
+      | TurnSteerAccepted
+      | TurnCancelAccepted
+      | InteractionRespondAccepted
+      | ModelSelectCompleted
     >
   > {
     if (this.closed || this.faulted) return failure("invalidState", "Copilot session is closed.");
+    if (command.type === "turn.steer") return unsupportedSteer("Copilot");
     if (command.type === "interaction.respond") {
       const cancel = this.interactions.cancelsTurn(command);
       const result = this.interactions.respond(command);

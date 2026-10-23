@@ -23,18 +23,19 @@ import {
   claudeBypassPermissionsAvailable,
   type ClaudePermissionMode,
 } from "../src/permission-modes.js";
-import type {
-  ClaudeAdapterDependencies,
-  ClaudeApprovalRequest,
-  ClaudeAutonomousTurnHandler,
-  ClaudeIdleTurnHandler,
-  ClaudeInteractionResponse,
-  ClaudePlanLimitEvent,
-  ClaudeQuestionRequest,
-  ClaudeTransportContextUsage,
-  ClaudeTransportTurnResult,
-  ClaudeTurnEvent,
-  ClaudeTurnTransport,
+import {
+  ClaudeSteerMissedTurnError,
+  type ClaudeAdapterDependencies,
+  type ClaudeApprovalRequest,
+  type ClaudeAutonomousTurnHandler,
+  type ClaudeIdleTurnHandler,
+  type ClaudeInteractionResponse,
+  type ClaudePlanLimitEvent,
+  type ClaudeQuestionRequest,
+  type ClaudeTransportContextUsage,
+  type ClaudeTransportTurnResult,
+  type ClaudeTurnEvent,
+  type ClaudeTurnTransport,
 } from "../src/transport.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -112,6 +113,15 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
   readonly initCalls: string[] = [];
   readonly recapCalls: string[] = [];
   readonly turns: Array<{ text: string; userMessageId: string }> = [];
+  readonly steers: Array<{ text: string; messageId: string; priority: "next" }> = [];
+  /** Whether the fake CLI reported `msg_lifecycle_v1` in its init capabilities. */
+  nativeSteer = true;
+  /** Whether the fake requested Turn currently runs a root tool call. */
+  rootToolRunning = true;
+  readonly #pendingSteers = new Map<
+    string,
+    { resolve(): void; reject(error: ClaudeSteerMissedTurnError): void }
+  >();
   #assistantMessageId: string | null = null;
   #active:
     | {
@@ -188,6 +198,35 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
     });
   }
 
+  supportsNativeSteer(): boolean {
+    return this.nativeSteer;
+  }
+
+  canSteerActiveTurn(): boolean {
+    return this.nativeSteer && this.#active !== undefined && this.rootToolRunning;
+  }
+
+  steer(text: string, messageId: string): Promise<void> {
+    if (!this.#active) return Promise.reject(new ClaudeSteerMissedTurnError());
+    this.steers.push({ text, messageId, priority: "next" });
+    return new Promise((resolve, reject) => {
+      this.#pendingSteers.set(messageId, { resolve, reject });
+    });
+  }
+
+  recordSteer(messageId: string): void {
+    const pending = this.#pendingSteers.get(messageId);
+    if (!pending) throw new Error(`No pending Claude steer ${messageId}`);
+    this.#pendingSteers.delete(messageId);
+    pending.resolve();
+  }
+
+  #rejectPendingSteers(): void {
+    const error = new ClaudeSteerMissedTurnError();
+    for (const pending of this.#pendingSteers.values()) pending.reject(error);
+    this.#pendingSteers.clear();
+  }
+
   event(event: ClaudeTurnEvent): void {
     if (this.#active) {
       this.#active.onEvent(event);
@@ -228,6 +267,7 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
 
   finish(result: ClaudeTransportTurnResult): void {
     if (this.#active) {
+      // A written steer stays Claude's to deliver after the Turn ends, like the SDK transport.
       this.#active.resolve(result);
       this.#active = undefined;
       this.#assistantMessageId = null;
@@ -242,6 +282,7 @@ class FakeClaudeTransport implements ClaudeTurnTransport {
   }
 
   fault(error: unknown): void {
+    this.#rejectPendingSteers();
     this.#active?.reject(error);
     this.#active = undefined;
     this.#assistantMessageId = null;
@@ -363,6 +404,14 @@ async function nextOutput(iterator: AsyncIterator<HarnessOutput>) {
       return output;
     }
   }
+}
+
+function hasUserMessageItem(output: HarnessOutput): boolean {
+  if (output.kind !== "event") return false;
+  if (output.event.type === "item.started") return output.event.item.type === "userMessage";
+  if (output.event.type === "item.completed")
+    return output.event.snapshot.item.type === "userMessage";
+  return false;
 }
 
 async function nextEvent(iterator: AsyncIterator<HarnessOutput>) {
@@ -1084,6 +1133,8 @@ describe("Claude Code HarnessAdapter", () => {
       },
       history: { fork: true, forkAcrossCwd: false, rollbackLastTurn: true },
       subagents: { observe: true, readTranscript: true },
+      // No CLI has reported its init capabilities yet.
+      steer: false,
     });
     const iterator = session.outputs[Symbol.asyncIterator]();
     await expect(
@@ -1118,6 +1169,115 @@ describe("Claude Code HarnessAdapter", () => {
     if (configured.ok) await configured.value.close();
     expect(dependencies.createTransport).not.toHaveBeenCalled();
     await session.close();
+  });
+
+  it("declares and accepts native steering only when the CLI confirms steers", async () => {
+    const { adapter, transports } = fixture();
+    const session = await openSession(adapter);
+    const outputs: HarnessOutput[] = [];
+    const consuming = (async () => {
+      for await (const output of session.outputs) outputs.push(output);
+    })();
+    await session.execute(textTurn("turn-1"));
+    await vi.waitFor(() => expect(transports[0]?.turns).toHaveLength(1));
+    expect(session.capabilities.steer).toBe(true);
+    const transport = transports[0];
+    if (!transport) throw new Error("Fake transport was not created");
+    // Without a running root tool call the steer could run as the next Turn instead.
+    transport.rootToolRunning = false;
+    expect(session.capabilities.steer).toBe(false);
+    transport.rootToolRunning = true;
+    transport.nativeSteer = false;
+    expect(session.capabilities.steer).toBe(false);
+    await expect(
+      session.execute({
+        type: "turn.steer",
+        turnId: hostTurnIdSchema.parse("turn-1"),
+        input: [{ type: "text", text: "not confirmed" }],
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "unsupported" } });
+    expect(transport.steers).toHaveLength(0);
+    transport.finish({ status: "succeeded" });
+    await session.close();
+    await consuming;
+    await adapter.close();
+  });
+
+  it("inserts a steer into the active Turn and does not emit a userMessage item", async () => {
+    const { adapter, transports } = fixture();
+    const session = await openSession(adapter);
+    const outputs: HarnessOutput[] = [];
+    const consuming = (async () => {
+      for await (const output of session.outputs) outputs.push(output);
+    })();
+    const started = session.execute(textTurn("turn-1"));
+    await vi.waitFor(() => expect(transports[0]?.turns).toHaveLength(1));
+    await started;
+    const steer = session.execute({
+      type: "turn.steer",
+      turnId: hostTurnIdSchema.parse("turn-1"),
+      input: [{ type: "text", text: "steer this" }],
+    });
+    await vi.waitFor(() => expect(transports[0]?.steers).toHaveLength(1));
+    expect(transports[0]?.steers).toEqual([
+      { text: "steer this", messageId: "claude-id-3", priority: "next" },
+    ]);
+    transports[0]?.recordSteer("claude-id-3");
+    await expect(steer).resolves.toEqual({ ok: true, value: { accepted: true } });
+    expect(outputs.some(hasUserMessageItem)).toBe(false);
+    await expect(session.execute(textTurn("turn-2"))).resolves.toMatchObject({
+      ok: false,
+      error: { code: "sessionBusy" },
+    });
+    expect(transports[0]?.turns).toHaveLength(1);
+    await expect(
+      session.execute({
+        type: "turn.steer",
+        turnId: hostTurnIdSchema.parse("turn-2"),
+        input: [{ type: "text", text: "other" }],
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "invalidState" } });
+    await expect(
+      session.execute({
+        type: "turn.steer",
+        turnId: hostTurnIdSchema.parse("turn-1"),
+        input: [{ type: "text", text: "" }],
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "invalidRequest" } });
+    expect(transports[0]?.steers).toHaveLength(1);
+    const late = session.execute({
+      type: "turn.steer",
+      turnId: hostTurnIdSchema.parse("turn-1"),
+      input: [{ type: "text", text: "late" }],
+    });
+    await vi.waitFor(() => expect(transports[0]?.steers).toHaveLength(2));
+    transports[0]?.finish({ status: "succeeded" });
+    // Claude already holds the written input and runs it next, so it is still accepted.
+    transports[0]?.recordSteer("claude-id-4");
+    await expect(late).resolves.toEqual({ ok: true, value: { accepted: true } });
+    await vi.waitFor(() =>
+      expect(
+        outputs.some((output) => output.kind === "event" && output.event.type === "turn.completed"),
+      ).toBe(true),
+    );
+    await expect(
+      session.execute({
+        type: "turn.steer",
+        turnId: hostTurnIdSchema.parse("turn-1"),
+        input: [{ type: "text", text: "idle" }],
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "invalidState" } });
+    await session.close();
+    await expect(
+      session.execute({
+        type: "turn.steer",
+        turnId: hostTurnIdSchema.parse("turn-1"),
+        input: [{ type: "text", text: "closed" }],
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "invalidState" } });
+    expect(outputs.some(hasUserMessageItem)).toBe(false);
+    await consuming;
+    await adapter.close();
   });
 
   it("omits Auto when no runtime Model explicitly supports it", async () => {
@@ -6607,6 +6767,7 @@ describe("Claude Code HarnessAdapter", () => {
       readSubagentMessages: async () => [],
       createTransport: () => ({
         sessionId: "claude-id",
+        steer: async () => undefined,
         setAutonomousTurnHandler: () => undefined,
         setIdleTurnHandler: () => undefined,
         setThreadEventHandler: () => undefined,
