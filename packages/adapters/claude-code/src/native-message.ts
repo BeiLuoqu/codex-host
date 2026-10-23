@@ -612,6 +612,7 @@ export class ClaudeNativeTurnAccumulator {
     events.push({
       type: "message.completed",
       messageId,
+      localCommand: true,
       ...(checkpointId ? { checkpointId } : {}),
     });
   }
