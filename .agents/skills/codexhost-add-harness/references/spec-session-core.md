@@ -54,7 +54,7 @@
 2. 已验证的原生默认行为天然满足：可以有测试依据地不做任何事。例如 Pi 没有对应权限参数，就不传。
 3. 无法保证：类型化拒绝。不静默忽略，也不伪造审批回答。例如 Cursor 无法确认 `--force` 最终是否生效，因此返回 `unsupported`。
 
-`permissionModeScope: "atCreate"` 表示只能在创建时选择（参考 Grok）；Session 中途的切换必须明确拒绝。`live` 表示运行中也可以切换。显式指定的权限模式与无人值守意图冲突时（例如 Qoder 的非 bypass 模式），拒绝创建。
+`permissionModeScope: "atCreate"` 表示只能在创建时选择；Session 中途的切换必须明确拒绝。`live` 表示创建后也可以切换。参考 Grok 的原生权限通知与实际状态确认：无确认回执的通知不能仅凭发送成功就报告生效。显式指定的权限模式与无人值守意图冲突时（例如 Qoder 的非 bypass 模式），拒绝创建。
 
 ## 配置与状态：requested 不等于 effective
 

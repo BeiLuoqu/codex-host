@@ -179,6 +179,7 @@ export interface GrokAcpTransportLike {
     onEvent: (event: GrokTransportEvent) => void,
   ): Promise<GrokCompactResult>;
   setModel(modelId: string, reasoningEffort?: string, contextWindowTokens?: number): Promise<void>;
+  setPermissionMode(permissionModeId: HarnessPermissionModeId): Promise<void>;
   cancel(): Promise<void>;
   close(): Promise<void>;
   /** Latest native command list of the open Session; absent on older transports. */
@@ -239,7 +240,7 @@ function capabilitiesForModels(modelState: GrokModelState): HarnessSessionCapabi
       selectModel: modelState.catalog.models.length > 0,
       selectThinkingOption: modelState.catalog.thinkingOptions.length > 0,
       selectPermissionMode: true,
-      permissionModeScope: "atCreate",
+      permissionModeScope: "live",
     },
     history: { fork: true, forkAcrossCwd: true, rollbackLastTurn: true },
     subagents: { observe: true, readTranscript: true },
@@ -841,14 +842,29 @@ class GrokHarnessSession implements HarnessSession {
         },
       };
     }
-    return {
-      ok: false,
-      error: {
-        code: "invalidRequest",
-        message: "Grok Permission Mode is fixed at Session creation",
-        retryable: false,
-      },
-    };
+    if (this.#active || this.#configuring) {
+      return {
+        ok: false,
+        error: {
+          code: "sessionBusy",
+          message: "Grok Session cannot configure permissions during another operation",
+          retryable: true,
+        },
+      };
+    }
+    this.#configuring = true;
+    try {
+      await this.#transport.setPermissionMode(command.permissionModeId);
+      if (this.#phase !== "open")
+        return { ok: false, error: invalidState("Grok Session is closed") };
+      this.#state = { ...this.#state, effectivePermissionModeId: command.permissionModeId };
+      this.#event({ type: "session.state.changed", state: this.#state });
+      return { ok: true, value: { completed: true } };
+    } catch (error) {
+      return { ok: false, error: normalizeError(error, "nativeFailure") };
+    } finally {
+      this.#configuring = false;
+    }
   }
 
   async #cancel(command: TurnCancelCommand): Promise<HarnessResult<TurnCancelAccepted>> {
@@ -1943,6 +1959,7 @@ export class GrokAdapter implements HarnessAdapter {
           ]);
         }
       }
+      await transport.setPermissionMode(initialPermissionModeId);
       const history = await transport.getHistory();
       let initialUsage =
         input.kind === "resume" || input.kind === "fork" || input.kind === "rollbackLastTurn"
