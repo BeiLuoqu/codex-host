@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import {
+  unsupportedSteer,
   HarnessOutputChannel,
   validateHostQuestionResponse,
   type HarnessAdapter,
@@ -53,6 +54,8 @@ import {
   type TurnCancelCommand,
   type TurnOutcome,
   type TurnStartAccepted,
+  type TurnSteerAccepted,
+  type TurnSteerCommand,
   type TurnStartCommand,
 } from "@codexhost/harness-adapter";
 import {
@@ -574,6 +577,7 @@ class PiHarnessSession implements HarnessSession {
   }
 
   execute(command: TurnStartCommand): Promise<HarnessResult<TurnStartAccepted>>;
+  execute(command: TurnSteerCommand): Promise<HarnessResult<TurnSteerAccepted>>;
   execute(command: TurnCancelCommand): Promise<HarnessResult<TurnCancelAccepted>>;
   execute(command: InteractionRespondCommand): Promise<HarnessResult<InteractionRespondAccepted>>;
   execute(command: ModelSelectCommand): Promise<HarnessResult<ModelSelectCompleted>>;
@@ -586,6 +590,7 @@ class PiHarnessSession implements HarnessSession {
   ): Promise<
     HarnessResult<
       | TurnStartAccepted
+      | TurnSteerAccepted
       | TurnCancelAccepted
       | InteractionRespondAccepted
       | ModelSelectCompleted
@@ -596,6 +601,7 @@ class PiHarnessSession implements HarnessSession {
     if (this.#phase !== "open") {
       return { ok: false, error: invalidState("Pi Session is not open") };
     }
+    if (command.type === "turn.steer") return unsupportedSteer("Pi");
     if (command.type === "turn.cancel") return this.#cancel(command);
     if (command.type === "interaction.respond") return this.#respond(command);
     if (command.type === "model.select") return this.#selectModel(command);
