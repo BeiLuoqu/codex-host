@@ -9,8 +9,10 @@ codexhost 对外部 Harness Thread 保留一个「调整方向」操作，按当
 
 ## 原生同轮插入
 
-- `HarnessSessionCapabilities.steer` 是实时值：只有 Session 此刻能把输入交给原生插入原语、并且插入会并入当前 Turn 时才为 `true`；缺省表示不支持。
-- `TurnSteerCommand { turnId, input }` 定义在 `packages/harness-adapter/src/text-session.ts`。Adapter 在 Harness 确认接受或入队后返回 `{ accepted: true }`，不等待插入实际执行完毕。返回失败即表示 Harness **没有收下**这条输入。没有原生插入的 Adapter 用 `unsupportedSteer()` 拒绝。
+- `HarnessSessionCapabilities.steer` 表示 Session 当前是否允许原生同轮插入；缺省表示不支持。直连 Adapter 可用普通属性或实时 getter。跨进程 Session 可提供 `readCapabilities()`，Host 在预判和未指定送达方式的执行请求中优先读取它；读取失败不使用旧快照发送输入。
+- Harness Broker 通过 `session.readCapabilities` 按需读取原生 Session 的能力，不轮询、不要求 Adapter 发布能力变更事件。打开响应声明是否支持这项查询；连接旧 Broker 时保持停止后重发，不向其发送未知方法。普通 Adapter 不必实现 `readCapabilities()`，Broker 可以直接读取它的 `capabilities`。
+- 能力查询不是对执行时机的预留。Adapter 在 `turn.steer` 最终写入之前必须再次检查目标 Turn 和原生插入条件；不满足时不写入并拒绝。GUI 已选择同轮展示时，拒绝只报错，不偷偷改走新轮。
+- `TurnSteerCommand { turnId, input }` 定义在 `packages/harness-adapter/src/text-session.ts`。Adapter 在 Harness 确认接受或入队后返回 `{ accepted: true }`，不等待插入实际执行完毕。返回失败即表示 Harness **没有收下**这条输入。已经写入但丢失回执不能作为未收下处理；Broker 对无法确认结果的请求抛错，不转换成触发停止后重发的拒绝结果。没有原生插入的 Adapter 用 `unsupportedSteer()` 拒绝。
 - `ExternalTurnSteering`（`packages/host-runtime/src/external-turn-steering.ts`）对两种送达方式统一校验非空文本、`expectedTurnId` 和 `threadId + clientUserMessageId` 去重，并按以下顺序决定送达方式：
   1. `turn/steer` 带有 `codexhostSteerDelivery`（Renderer 已经按该方式展示）时照它执行：`newTurn` 停止后重发；`activeTurn` 原生插入，Harness 没收下时报错、不改走退路，避免和 Desktop 已有的展示不一致。
   2. 输入是 Harness 命令（Session 提供命令、文本以 `/命令` 开头）时停止后重发，命令照常解析和执行。
@@ -19,6 +21,10 @@ codexhost 对外部 Harness Thread 保留一个「调整方向」操作，按当
 - `codexhost/thread/steering/inspect { threadId, text? }` 按同样的规则（第 2、3 步）预先给出送达方式；读取失败返回 `-32081`。
 
 原生同轮插入成功后，Host 在当前 Turn 发布 `userMessage` Item。Desktop 提交带 `clientUserMessageId` 时，投影把它写入 Item 的 `clientId`，用于结算 Desktop 的乐观 steer 消息；Adapter 不发布这条 Host Item。Host 会让并发的 Turn 终态投影等待这条已接受输入完成实时投影，避免 Harness 接受输入后立刻结束时遗漏乐观消息结算。刷新后的历史仍完全按 Adapter 的原生历史解析，不把不同的原生 Turn 强行合并。
+
+### 后续 Adapter 接入
+
+已有原生同轮插入能力的 Harness，只需在自己的 Adapter 中声明能力、处理 `turn.steer`、保证写入前校验与失败语义，并适配本 Harness 的原生历史读取。Host、Broker 和 Renderer 不按 Harness ID 增加分支。公共输入目前仅支持文本；非同轮的排队原语不能声明为此能力。真实原生执行、取消和历史行为仍需由各 Adapter 验证。
 
 ### Fork 与撤销窗口
 
@@ -64,7 +70,7 @@ Host 和 Renderer 接入必须配套发布；仅升级 Host、让旧 Renderer �
 接入点依据 Codex Desktop **26.901.51231 / build 8109** 的 `app-initial-cadb12d4a15e.js`：`steerTurn`、`startTurn`、`sendRequest`、`getTurnCoordinator()` 的 submissionHost，以及队列的 `loadMessages` / `readMessages` / `mutate`。这些是版本相关的 Desktop JavaScript 绑定，不是 Harness SDK 契约。更新 Desktop 后需重新核实。
 
 - 当前公共 Harness 输入仅支持文本。图片等非文本输入、空输入、tool response 在停止前拒绝，不静默丢弃后再取消旧轮。
-- 新输入作为普通文本 `turn.start` 提交，不另行解释成 Harness command。原有独立 command 路径不变。
+- 停止后重发复用普通输入启动路径；Harness 命令在该路径中解析执行，不作为原生 steer 文本插入。
 - 当前轮尚无确认的 Turn ID 时不猜测目标，也不把过期目标改为另一轮重试。
 - 停止后重发时，旧轮和新轮在 Native Session 历史中是两个真实 Turn，不复用旧 ID、不伪造同轮注入，不合并 Fork/Rollback 身份。
 - 原生同轮插入的乐观消息结算依据 Codex Desktop **26.915.31945 / build 9922** 的只读 Bundle 核查：`clientId` 等于 `clientUserMessageId` 的 `userMessage` 会结算待定 `steeringUserMessage`。
@@ -94,6 +100,8 @@ Codex Desktop **26.924.22138 / build 11645** 的本地队列在 `turnCompleted` 
 ## 验证
 
 针对性测试：
+
+- `packages/host-runtime/test/app-server-host.broker-steering.test.ts`：非 Claude 的合成 Adapter 经真实 Broker socket 与 Host RPC，验证打开后能力变化、同轮消息投影，以及不支持时停止后重发；不代表该 Harness 的原生 steer 已接入。
 
 - `packages/host-runtime/test/app-server-host.native-steering.test.ts`：原生插入的 `clientId` 投影、送达方式查询、Fork/撤销窗口和重新读取后放行；Harness 没收下时改走停止后重发、`codexhostSteerDelivery` 两种取值都照办、Harness 命令停止后重发、撤销只限制包含 steered Turn 的范围。
 - `packages/renderer-extension/test/renderer-external-steering.test.ts`（`steer delivery handshake`）：inspect 带文本、两种展示方式分别标记 `codexhostSteerDelivery`、Host 不支持 inspect 时改用 Thread 所有权。

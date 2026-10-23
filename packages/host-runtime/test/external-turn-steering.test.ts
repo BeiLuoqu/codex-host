@@ -6,7 +6,8 @@ import type {
   TurnCancelCommand,
 } from "@codexhost/harness-adapter";
 
-import { hostTurnIdSchema } from "@codexhost/shared-contracts";
+import { FakeHarnessSession } from "@codexhost/harness-adapter/testing";
+import { harnessIdSchema, hostTurnIdSchema } from "@codexhost/shared-contracts";
 
 import {
   ExternalSteerNotTakenError,
@@ -297,6 +298,20 @@ describe("Host native steering", () => {
     expect(f.start).toHaveBeenCalledOnce();
   });
 
+  it("does not cancel a different Turn when native refusal arrives late", async () => {
+    const f = fixture();
+    f.thread.session.capabilities.steer = true;
+    f.insert.mockImplementationOnce(async () => {
+      f.thread.activeTurnId = hostTurnIdSchema.parse("autonomous");
+      throw new ExternalSteerNotTakenError("requested Turn ended");
+    });
+    await expect(f.coordinator.run(f.thread, f.params, f.start, f.insert)).rejects.toMatchObject({
+      code: -32074,
+    });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.start).not.toHaveBeenCalled();
+  });
+
   it("waits for an ending Turn whose cancel is refused as inactive", async () => {
     const f = fixture();
     f.thread.session.capabilities.steer = true;
@@ -309,6 +324,79 @@ describe("Host native steering", () => {
     await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
     f.complete();
     await expect(result).resolves.toEqual(f.replaced);
+  });
+
+  it("reads remote capabilities without trusting the open-time snapshot", async () => {
+    const f = fixture();
+    const capabilities = {
+      ...new FakeHarnessSession(harnessIdSchema.parse("pi")).capabilities,
+      steer: true,
+    };
+    const readCapabilities = vi.fn(async () => capabilities);
+    const thread = { ...f.thread, session: { ...f.thread.session, readCapabilities } };
+    await expect(externalSteeringDelivery(thread)).resolves.toBe("activeTurn");
+    await expect(f.coordinator.run(thread, f.params, f.start, f.insert)).resolves.toMatchObject({
+      delivery: "activeTurn",
+    });
+    expect(readCapabilities).toHaveBeenCalledTimes(2);
+    expect(f.execute).not.toHaveBeenCalled();
+    capabilities.steer = false;
+    await expect(externalSteeringDelivery(thread)).resolves.toBe("newTurn");
+  });
+
+  it.each(["ended", "changed", "closed", "failed", "interrupt", "fault"])(
+    "does not deliver after capability read %s",
+    async (reason) => {
+      const f = fixture();
+      const read =
+        Promise.withResolvers<
+          Awaited<ReturnType<NonNullable<HarnessSession["readCapabilities"]>>>
+        >();
+      const thread = Object.assign(f.thread, {
+        session: { ...f.thread.session, readCapabilities: () => read.promise },
+      });
+      const result = f.coordinator.run(thread, f.params, f.start, f.insert);
+      const rejected = expect(result).rejects.toBeInstanceOf(Error);
+      if (reason === "ended") f.complete();
+      if (reason === "changed") f.thread.activeTurnId = hostTurnIdSchema.parse("other");
+      if (reason === "closed") f.coordinator.close();
+      if (reason === "interrupt") f.coordinator.interrupt("thread", "old");
+      if (reason === "fault") f.coordinator.fault("thread", new Error("session fault"));
+      if (reason === "failed") read.reject(new Error("broker disconnected"));
+      else
+        read.resolve({
+          ...new FakeHarnessSession(harnessIdSchema.parse("pi")).capabilities,
+          steer: true,
+        });
+      await rejected;
+      expect(f.insert).not.toHaveBeenCalled();
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.start).not.toHaveBeenCalled();
+      expect(f.coordinator.hasPending()).toBe(false);
+    },
+  );
+
+  it("reserves the Thread during remote capability reads and coalesces retries", async () => {
+    const f = fixture();
+    const read =
+      Promise.withResolvers<Awaited<ReturnType<NonNullable<HarnessSession["readCapabilities"]>>>>();
+    const readCapabilities = vi.fn(() => read.promise);
+    const thread = Object.assign(f.thread, { session: { ...f.thread.session, readCapabilities } });
+    const first = f.coordinator.run(thread, f.params, f.start, f.insert);
+    const retry = f.coordinator.run(thread, f.params, f.start, f.insert);
+    expect(f.coordinator.hasPending("thread")).toBe(true);
+    await expect(
+      f.coordinator.run(thread, { ...f.params, clientUserMessageId: "another" }, f.start, f.insert),
+    ).rejects.toMatchObject({ code: -32072 });
+    read.resolve({
+      ...new FakeHarnessSession(harnessIdSchema.parse("pi")).capabilities,
+      steer: true,
+    });
+    await expect(first).resolves.toMatchObject({ delivery: "activeTurn" });
+    await expect(retry).resolves.toMatchObject({ delivery: "activeTurn" });
+    expect(readCapabilities).toHaveBeenCalledOnce();
+    expect(f.insert).toHaveBeenCalledOnce();
+    expect(f.coordinator.hasPending()).toBe(false);
   });
 
   it("decides delivery from the live capability, and always restarts for commands", () => {

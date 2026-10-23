@@ -3477,7 +3477,7 @@ export class AppServerHost {
         location.kind !== "external"
           ? "official"
           : thread
-            ? externalSteeringDelivery(thread, params.data.text)
+            ? await externalSteeringDelivery(thread, params.data.text)
             : "newTurn";
     } catch {
       await this.#writer.json(

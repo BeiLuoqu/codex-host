@@ -178,6 +178,7 @@ function sessionMetadata(record: ServerSession): object {
     sessionId: record.id,
     sessionGeneration: record.generation,
     capabilities: record.session.capabilities,
+    readCapabilities: true,
     initialState: {
       ...initialState,
       ...(record.nativeRef ? { nativeRef: record.nativeRef } : {}),
@@ -782,6 +783,10 @@ export async function startHarnessBrokerServer(input: {
             record.selection.permissionModeId = command.permissionModeId;
         }
         return result;
+      }
+      if (request.method === "session.readCapabilities") {
+        const session = requireSession(request.params).session;
+        return session.readCapabilities ? session.readCapabilities() : session.capabilities;
       }
       if (request.method === "session.readSnapshot") {
         return requireSession(request.params).session.readSnapshot();

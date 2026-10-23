@@ -489,7 +489,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
     string,
     {
       resolve(): void;
-      reject(error: ClaudeSteerMissedTurnError): void;
+      reject(error: Error): void;
       timer: ReturnType<typeof setTimeout> | undefined;
     }
   >();
@@ -853,7 +853,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
    * after a bounded wait so callers that serialize requests are never held indefinitely.
    */
   steer(text: string, messageId: string): Promise<void> {
-    if (this.#closePromise || !this.#started || !this.#query || !this.#active) {
+    if (this.#closePromise || !this.#started || !this.#query || !this.canSteerActiveTurn()) {
       return Promise.reject(new ClaudeSteerMissedTurnError());
     }
     const promise = new Promise<void>((resolve, reject) => {
@@ -1256,7 +1256,8 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
   #rejectPendingSteers(): void {
     const pending = [...this.#pendingSteers.values()];
     this.#pendingSteers.clear();
-    const error = new ClaudeSteerMissedTurnError();
+    // Written input may still be delivered. Only pre-write failures are ClaudeSteerMissedTurnError.
+    const error = new Error("Claude Code steer receipt was lost after input was written");
     for (const entry of pending) {
       clearTimeout(entry.timer);
       entry.reject(error);

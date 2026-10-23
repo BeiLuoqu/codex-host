@@ -14,11 +14,11 @@ Host 在原生接受后自己发当前 Turn 的 `userMessage` Item。Adapter 不
 - 当前是用户发起的 Turn，不是后台通知等触发的自主 Turn（transport 没有对应的活跃 Turn）；
 - 有根级工具调用已经开始、还没返回结果（子 Agent 内部的工具调用不计入）。
 
-`turn.steer` 本身只要求前两项，因为 Renderer 按预先查询的结果展示后，会要求 Host 照原样执行；如果此时工具恰好刚结束，插入仍然写入，可能落到下一轮执行。Adapter 拒绝时都不写入输入流，返回失败即表示没有收下。Harness Broker 在打开 Session 时做一次能力快照，那时 CLI 尚未发出 init，因此经 Broker 的 Session 保持停止后重发。
+`turn.steer` 在写入输入流前同步复查上述三项，不依赖 Renderer 之前的查询结果；工具已经结束时拒绝且不写入。Renderer 已按同轮展示时，Host 报错而不停止后重发。Harness Broker 经公共 `readCapabilities()` 按需读取当前能力；旧 Broker 未声明支持查询时保持停止后重发。
 
 ## 接受
 
-CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；工具调用结束后发 `started`，这时插入进入正在运行的 Turn。Adapter 在 `queued` 时返回 `{ accepted: true }`：此后由 Claude 负责送达，不等 `started`，否则调用方要被整段工具调用挂住（Desktop 提交约 30 秒超时）。输入一旦写入就无法撤回，所以本轮的 `result` 先于 `queued` 到达时不拒绝，仍按接受处理；`queued` 回执迟迟不到时，等待 5 秒后同样按接受处理，避免串行处理请求的调用方（如 Harness Broker）被无限期占住。只有目标不是当前 Turn、CLI 不支持、当前是自主 Turn、输入写入失败，或会话在接受前关闭或出错时，才返回失败。空文本返回 `invalidRequest`。忙时 `turn.start` 仍是 `sessionBusy`。
+CLI 先发 `command_lifecycle` `queued`，表示 Claude 已接受这条输入；工具调用结束后发 `started`，这时插入进入正在运行的 Turn。Adapter 在 `queued` 时返回 `{ accepted: true }`：此后由 Claude 负责送达，不等 `started`，否则调用方要被整段工具调用挂住（Desktop 提交约 30 秒超时）。输入一旦写入就无法撤回，所以本轮的 `result` 先于 `queued` 到达时不拒绝，仍按接受处理；`queued` 回执迟迟不到时，等待 5 秒后同样按接受处理，避免串行处理请求的调用方（如 Harness Broker）被无限期占住。只有目标不是当前 Turn、CLI 不支持、当前是自主 Turn、没有根级工具执行，或输入写入失败时，才返回失败。写入后会话关闭或出错时抛出回执丢失异常，不返回表示未收下的拒绝结果，Host 不自动重发；Session 故障仍经原有故障路径报告。空文本返回 `invalidRequest`。忙时 `turn.start` 仍是 `sessionBusy`。
 
 插入被接受后、还没并入之前，如果用户停止了这一轮，按 SDK 的中断语义，仍在排队的插入会在下一轮执行。公开的 SDK 接口目前没有撤回单条排队消息的方法，Adapter 不处理这种情况；由于只在工具执行期间插入，这个窗口只剩当前那次工具调用的剩余时间。
 

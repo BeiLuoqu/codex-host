@@ -3170,6 +3170,28 @@ describe("ClaudeSdkTransport Workflow agent Interactions", () => {
 });
 
 describe("ClaudeSdkTransport steer", () => {
+  async function enableNativeSteer(
+    value: Pick<ReturnType<typeof fixture>, "transport" | "fakeQuery">,
+  ) {
+    value.fakeQuery.push({
+      type: "system",
+      subtype: "init",
+      capabilities: ["msg_lifecycle_v1"],
+    } as unknown as SDKMessage);
+    value.fakeQuery.push({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        id: "msg-steer-tool",
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "toolu_steer", name: "Bash", input: { command: "sleep 6" } },
+        ],
+      },
+    } as unknown as SDKMessage);
+    await vi.waitFor(() => expect(value.transport.canSteerActiveTurn()).toBe(true));
+  }
+
   it("can steer the active Turn only while a root tool call runs", async () => {
     const value = fixture();
     await value.transport.start();
@@ -3186,6 +3208,9 @@ describe("ClaudeSdkTransport steer", () => {
       () => undefined,
     );
     expect(value.transport.canSteerActiveTurn()).toBe(false);
+    await expect(
+      value.transport.steer("too early", "00000000-0000-4000-8000-000000000051"),
+    ).rejects.toBeInstanceOf(ClaudeSteerMissedTurnError);
     value.fakeQuery.push({
       type: "assistant",
       parent_tool_use_id: null,
@@ -3216,10 +3241,18 @@ describe("ClaudeSdkTransport steer", () => {
       },
     } as unknown as SDKMessage);
     await vi.waitFor(() => expect(value.transport.canSteerActiveTurn()).toBe(false));
+    await expect(
+      value.transport.steer("too late", "00000000-0000-4000-8000-000000000052"),
+    ).rejects.toBeInstanceOf(ClaudeSteerMissedTurnError);
     completeTurn(value.fakeQuery);
     await turn;
     expect(value.transport.canSteerActiveTurn()).toBe(false);
     await value.transport.close();
+    const prompt = value.queryInput().prompt;
+    if (typeof prompt === "string" || !prompt) throw new Error("expected streaming input");
+    const input = prompt[Symbol.asyncIterator]();
+    await expect(input.next()).resolves.toMatchObject({ value: { message: { content: "hello" } } });
+    await expect(input.next()).resolves.toMatchObject({ done: true });
   });
 
   it("supports native steering only after init reports msg_lifecycle_v1", async () => {
@@ -3241,7 +3274,7 @@ describe("ClaudeSdkTransport steer", () => {
     await value.transport.close();
   });
 
-  it("pushes priority next and accepts when Claude starts that command", async () => {
+  it("pushes priority next and accepts when Claude queues that command", async () => {
     const value = fixture();
     await value.transport.start();
     const prompt = value.queryInput().prompt;
@@ -3260,6 +3293,7 @@ describe("ClaudeSdkTransport steer", () => {
         parent_tool_use_id: null,
       },
     });
+    await enableNativeSteer(value);
     const steerId = "00000000-0000-4000-8000-000000000031";
     let settled = false;
     const steered = value.transport.steer("PIN", steerId).then(() => {
@@ -3299,6 +3333,7 @@ describe("ClaudeSdkTransport steer", () => {
       "00000000-0000-4000-8000-000000000034",
       () => undefined,
     );
+    await enableNativeSteer(value);
     const steerId = "00000000-0000-4000-8000-000000000035";
     let rejected = false;
     const steered = value.transport.steer("PIN", steerId).catch((error: unknown) => {
@@ -3344,6 +3379,7 @@ describe("ClaudeSdkTransport steer", () => {
       "00000000-0000-4000-8000-000000000038",
       () => undefined,
     );
+    await enableNativeSteer({ transport, fakeQuery: value.fakeQuery });
     await expect(
       transport.steer("PIN", "00000000-0000-4000-8000-000000000039"),
     ).resolves.toBeUndefined();
@@ -3352,14 +3388,17 @@ describe("ClaudeSdkTransport steer", () => {
     await transport.close();
   });
 
-  it("rejects a pending steer when the transport closes before Claude accepts it", async () => {
+  it("does not report written input as rejected when close loses the receipt", async () => {
     const value = fixture();
     await value.transport.start();
     void value.transport
       .runTurn("hello", "00000000-0000-4000-8000-000000000040", () => undefined)
       .catch(() => undefined);
+    await enableNativeSteer(value);
     const steered = value.transport.steer("PIN", "00000000-0000-4000-8000-000000000041");
+    const lostReceipt = expect(steered).rejects.toThrow("receipt was lost after input was written");
     await value.transport.close();
-    await expect(steered).rejects.toBeInstanceOf(ClaudeSteerMissedTurnError);
+    await lostReceipt;
+    await expect(steered).rejects.not.toBeInstanceOf(ClaudeSteerMissedTurnError);
   });
 });

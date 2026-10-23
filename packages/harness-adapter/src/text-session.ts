@@ -151,10 +151,11 @@ export interface TurnStartCommand {
 }
 
 /**
- * Native same-Turn input, sent only when `capabilities.steer` is true. The Adapter hands it to the
- * Harness's own insertion primitive, which takes it at its safe boundary without cancelling the
- * Turn, and succeeds once the Harness accepts it. The Host shows the accepted input live; history
- * snapshots group it however the native history does.
+ * Native same-Turn input. Capability inspection is advisory; the Adapter must recheck the target
+ * and native admission conditions before writing. A failure result guarantees input was not taken.
+ * Once written, an uncertain receipt must not be reported as rejection or retried automatically.
+ * The Harness takes input at its safe boundary without cancelling the Turn. The Host shows accepted
+ * input live; history snapshots group it however the native history does.
  */
 export interface TurnSteerCommand {
   type: "turn.steer";
@@ -599,6 +600,12 @@ export interface HarnessSession {
   readonly outputs: AsyncIterable<HarnessOutput>;
   readonly commands?: HarnessCommandCapability;
 
+  /**
+   * Fresh capabilities for transports whose synchronous property is only an open-time snapshot.
+   * Direct Adapters may omit this and expose live capabilities through the property instead.
+   * A read is advisory: turn.steer must recheck admission before handing input to the Harness.
+   */
+  readCapabilities?(): Promise<HarnessSessionCapabilities>;
   refreshUsage?(): Promise<void>;
   /** Native background work (e.g. a background command) is still running; the Session must not be released. */
   hasBackgroundWork?(): boolean;

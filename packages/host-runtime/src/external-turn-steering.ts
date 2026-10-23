@@ -34,6 +34,7 @@ interface SteeringThread {
   session: {
     readonly capabilities: Pick<HarnessSessionCapabilities, "steer">;
     readonly commands?: HarnessSession["commands"];
+    readCapabilities?: HarnessSession["readCapabilities"];
     execute(command: TurnCancelCommand): Promise<HarnessResult<TurnCancelAccepted>>;
   };
 }
@@ -62,8 +63,13 @@ function isHarnessCommand(thread: SteeringThread, text: string): boolean {
 export function externalSteeringDelivery(
   thread: SteeringThread,
   text?: string,
-): ThreadSteerDelivery {
+): ThreadSteerDelivery | Promise<ThreadSteerDelivery> {
   if (text !== undefined && isHarnessCommand(thread, text)) return "newTurn";
+  if (thread.session.readCapabilities) {
+    return thread.session
+      .readCapabilities()
+      .then((capabilities) => (capabilities.steer === true ? "activeTurn" : "newTurn"));
+  }
   return thread.session.capabilities.steer === true ? "activeTurn" : "newTurn";
 }
 
@@ -292,23 +298,53 @@ export class ExternalTurnSteering {
       input.delivery === "newTurn" || isHarnessCommand(thread, input.text)
         ? "newTurn"
         : (input.delivery ?? externalSteeringDelivery(thread));
-    if (delivery === "newTurn" || !thread.activeTurnId) return this.#replace(thread, input, start);
-    const native = insert({
-      turnId: thread.activeTurnId,
-      text: input.text,
-      ...(input.clientUserMessageId ? { clientUserMessageId: input.clientUserMessageId } : {}),
-    }).then((admitted) => ({ ...admitted, delivery: "activeTurn" as const }));
-    if (input.delivery === "activeTurn") return native;
-    return native.catch(async (error: unknown) => {
-      if (!(error instanceof ExternalSteerNotTakenError)) throw error;
-      if (thread.running || thread.activeTurnId) return this.#replace(thread, input, start);
-      // The Turn ended meanwhile; nothing is left to stop, so start the input as the next Turn.
-      const assertActive = (): void => {
-        if (this.#closed)
-          throw new ExternalSteerError(-32074, "External steering connection is closed");
-      };
-      return { ...(await start(input.text, assertActive)), delivery: "newTurn" as const };
-    });
+    const deliver = (mode: ThreadSteerDelivery): Promise<ExternalSteerStarted> => {
+      // A broker capability read may have yielded while the target ended or another request won.
+      if (this.#closed || !thread.running || thread.activeTurnId !== input.expectedTurnId) {
+        throw new ExternalSteerError(-32074, "External steering target is no longer active");
+      }
+      if (this.hasPending(thread.id))
+        throw new ExternalSteerError(-32072, "External Thread is already changing direction");
+      if (mode === "newTurn") return this.#replace(thread, input, start);
+      const native = insert({
+        turnId: thread.activeTurnId,
+        text: input.text,
+        ...(input.clientUserMessageId ? { clientUserMessageId: input.clientUserMessageId } : {}),
+      }).then((admitted) => ({ ...admitted, delivery: "activeTurn" as const }));
+      if (input.delivery === "activeTurn") return native;
+      return native.catch(async (error: unknown) => {
+        if (!(error instanceof ExternalSteerNotTakenError)) throw error;
+        if (thread.running || thread.activeTurnId) return deliver("newTurn");
+        // The Turn ended meanwhile; nothing is left to stop, so start the input as the next Turn.
+        const assertActive = (): void => {
+          if (this.#closed)
+            throw new ExternalSteerError(-32074, "External steering connection is closed");
+        };
+        return { ...(await start(input.text, assertActive)), delivery: "newTurn" as const };
+      });
+    };
+    if (typeof delivery === "string") return deliver(delivery);
+    // Reserve the Thread while a remote read is pending, just as during stop-then-start.
+    const failure = Promise.withResolvers<never>();
+    let failureReason: Error | null = null;
+    const pending: PendingSteer = {
+      turnId: input.expectedTurnId,
+      resolve: () => undefined,
+      reject(error) {
+        failureReason ??= error;
+        failure.reject(error);
+      },
+    };
+    this.#pending.set(thread.id, pending);
+    return Promise.race([delivery, failure.promise])
+      .then((mode) => {
+        if (failureReason) throw failureReason;
+        if (this.#pending.get(thread.id) === pending) this.#pending.delete(thread.id);
+        return deliver(mode);
+      })
+      .finally(() => {
+        if (this.#pending.get(thread.id) === pending) this.#pending.delete(thread.id);
+      });
   }
 
   terminal(threadId: string, turnId: string, outcome: TurnOutcome): void {
