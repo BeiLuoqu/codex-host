@@ -1407,7 +1407,8 @@ setTimeout(() => { process.exit(0); }, 50);
           await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
         }
       };
-      // Records each Turn's --add-dir values, then answers like agy resuming one Conversation.
+      // Records each Turn's --add-dir values and prompt, then answers like agy resuming one
+      // Conversation.
       const scriptContent = `
 const fs = require("node:fs");
 if (process.argv.includes("models")) {
@@ -1417,15 +1418,23 @@ if (process.argv.includes("models")) {
 // The quota probe runs as --print=/usage; Turns carry --print-timeout instead.
 if (process.argv.some((value) => value.startsWith("--print="))) process.exit(0);
 const addDirs = process.argv.filter((_, index, all) => all[index - 1] === "--add-dir");
-fs.appendFileSync(${JSON.stringify(runs)}, JSON.stringify(addDirs) + "\\n");
-const turn = fs.readFileSync(${JSON.stringify(runs)}, "utf8").trim().split("\\n").length;
-for (const event of [
-  { event: "init", conversation_id: "conv-hooks", init: { permission_mode: "dangerously-skip-permissions" } },
-  { event: "result", result: { conversation_id: "conv-hooks", status: "SUCCESS", num_turns: turn, response: "ok" } },
-]) {
-  process.stdout.write(JSON.stringify(event) + "\\n");
-}
-process.stdin.resume();
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  if (input.includes("\\n")) return;
+  input += chunk;
+  const newline = input.indexOf("\\n");
+  if (newline === -1) return;
+  const prompt = JSON.parse(input.slice(0, newline)).message.content;
+  fs.appendFileSync(${JSON.stringify(runs)}, JSON.stringify({ addDirs, prompt }) + "\\n");
+  const turn = fs.readFileSync(${JSON.stringify(runs)}, "utf8").trim().split("\\n").length;
+  for (const event of [
+    { event: "init", conversation_id: "conv-hooks", init: { permission_mode: "dangerously-skip-permissions" } },
+    { event: "result", result: { conversation_id: "conv-hooks", status: "SUCCESS", num_turns: turn, response: "ok" } },
+  ]) {
+    process.stdout.write(JSON.stringify(event) + "\\n");
+  }
+});
 process.stdin.on("end", () => process.exit(0));
 `;
       const jsPath = path.join(directory, "agy.cjs");
@@ -1487,12 +1496,16 @@ process.stdin.on("end", () => process.exit(0));
         const recorded = (await readFile(runs, "utf8"))
           .trim()
           .split("\n")
-          .map((line) => JSON.parse(line) as string[]);
-        expect(recorded).toEqual([
+          .map((line) => JSON.parse(line) as { addDirs: string[]; prompt: string });
+        expect(recorded.map(({ addDirs }) => addDirs)).toEqual([
           [cwd, hookDirectory],
           [cwd, hookDirectory],
           [cwd, hookDirectory],
         ]);
+        for (const { prompt } of recorded) {
+          expect(prompt).toContain(`The project working directory is ${JSON.stringify(cwd)}.`);
+          expect(prompt.endsWith("hello")).toBe(true);
+        }
         await expect(access(path.join(hookDirectory, "question-hook.cjs"))).resolves.toBe(
           undefined,
         );
@@ -1866,6 +1879,17 @@ if (count === 0) {
 
       // Idempotency: does not double-inject if instruction already present
       expect(formatAntigravityTurnPrompt(formatted)).toBe(formatted);
+
+      // The Hook directory is also a workspace, so the project directory is named explicitly.
+      const project = path.join(os.tmpdir(), "project dir");
+      const located = formatAntigravityTurnPrompt(normalPrompt, project);
+      expect(located.startsWith(ANTIGRAVITY_WORKSPACE_FILE_INSTRUCTION)).toBe(true);
+      expect(located).toContain(
+        `[System Instruction: The project working directory is ${JSON.stringify(project)}.`,
+      );
+      expect(located.endsWith(`]\n\n${normalPrompt}`)).toBe(true);
+      expect(formatAntigravityTurnPrompt(slashCommand, project)).toBe(slashCommand);
+      expect(formatAntigravityTurnPrompt(located, project)).toBe(located);
     });
   });
 });

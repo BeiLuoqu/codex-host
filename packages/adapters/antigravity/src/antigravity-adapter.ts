@@ -247,11 +247,20 @@ function invalidState(message: string): HarnessError {
 export const ANTIGRAVITY_WORKSPACE_FILE_INSTRUCTION =
   "[System Instruction: When creating new files in the workspace, you MUST use the write_to_file tool. When modifying existing files, use the replace_file_content tool. CRITICAL: NEVER include ArtifactMetadata when calling write_to_file for workspace files (ArtifactMetadata is strictly reserved for artifacts in the brain directory, and providing it for workspace files causes a path validation rejection). Do NOT use terminal commands (such as Set-Content, Out-File, echo, or cat) to create or write code files. For clarification, ask_question is connected to the codexhost Desktop through a Hook. Use single-choice or text questions. The Hook returns the actual user response in its reason while blocking the native auto-skip behavior; do not retry merely because the native tool reports it was blocked.]\n\n";
 
-export function formatAntigravityTurnPrompt(text: string): string {
+/**
+ * agy also receives the Question Hook directory as a workspace (`--add-dir`), so the Turn prompt
+ * names the project directory; otherwise a terminal command can run in the Hook directory.
+ */
+function antigravityWorkingDirectoryInstruction(cwd: string): string {
+  return `[System Instruction: The project working directory is ${JSON.stringify(cwd)}. Run terminal commands and resolve relative file paths in this directory unless the task requires another one.]\n\n`;
+}
+
+export function formatAntigravityTurnPrompt(text: string, cwd?: string): string {
   if (text.startsWith("/") || text.includes("ArtifactMetadata")) {
     return text;
   }
-  return `${ANTIGRAVITY_WORKSPACE_FILE_INSTRUCTION}${text}`;
+  const workingDirectory = cwd ? antigravityWorkingDirectoryInstruction(cwd) : "";
+  return `${ANTIGRAVITY_WORKSPACE_FILE_INSTRUCTION}${workingDirectory}${text}`;
 }
 
 /**
@@ -823,7 +832,7 @@ class AntigravitySession implements HarnessSession {
       });
     });
     try {
-      const turnPrompt = formatAntigravityTurnPrompt(text);
+      const turnPrompt = formatAntigravityTurnPrompt(text, this.#cwd);
       if (child.stdin.writable) {
         child.stdin.write(
           `${JSON.stringify({ event: "user", message: { content: turnPrompt } })}\n`,
