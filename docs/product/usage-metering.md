@@ -67,6 +67,12 @@ Pi、OMP、OpenCode v2、Claude Code、DeepSeek Harness（dsh）、CodeBuddy、W
 - 不计入：子代理、原生不给出模型的后台请求（如 OpenCode v2 的标题生成与压缩）、按次收费项目和长上下文分档价格。
 - 分叉会话按原生历史计算，包含从父会话复制来的轮次；撤销上一轮后，被撤销轮次不再计入。
 
+## Copilot 原生 AI Credits
+
+Copilot 使用原生 usage.getMetrics 的累计 totalNanoAiu / 1e9 提供会话 AI Credits，不根据 Token 或模型价格估算，也不转换 USD。原生声明 partial/unavailable 时不展示为完整花费，旧版本缺少完整性字段时只采用正的原生累计值。账号预算单独来自 quota.refresh 的权威 providerQuotas，经公共 inspectAccount 与 credits()/refreshCredits() 展示；额度查询没有模型 Turn，临时草稿会清理。
+
+Copilot 的实时速度与最近缓存命中率来自原生 assistant.usage，按 apiCallId 绑定根消息再按逻辑 Turn 汇总。生成 TPS 排除 outputTtftMs；API 平均速度包含首字等待，并以独立字段/标签展示。输出 Token 已含推理，工具等待不进入 API 输出区间。缓存平均值来自完整原生 sessionCacheUsage，保留原生 Credits 计费。没有可靠事件关联或计时时不补造；冷恢复只恢复累计缓存，速度等待新请求。
+
 ## 账号额度与会话用量分离
 
 会话用量查询可以附带 Adapter 的账号额度缓存，但它不是该历史 Thread 实际使用的 Account/Billing Source 绑定。插件通过正式可选 `credits()` / `refreshCredits()` 提供读取与刷新；Host 校验快照并隔离失败，用 `accountCreditsSupported` 声明是否存在这项能力，客户端不维护 Harness 白名单。设置页的 `inspectAccount(s)` 仍执行新鲜账号查询，两者不互相代替。

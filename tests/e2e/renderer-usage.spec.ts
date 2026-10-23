@@ -114,6 +114,19 @@ const { outputFiles } = await build({
             costSource: "publicPrice",
           }, "zh-CN");
         };
+        globalThis.updateRendererCopilotUsage = () => {
+          renderRendererUsageControl(usage, {
+            outputTokensPerSecond: 236 / (5.557 - 3.111924417),
+            apiOutputTokensPerSecond: 236 / 5.557,
+            cacheHitRatePercent: 0,
+            sessionCacheHitRatePercent: 0,
+            totalCredits: 0.173055,
+            inputTokens: 12901,
+            outputTokens: 236,
+            cachedInputTokens: 0,
+            cacheWriteInputTokens: 12898,
+          }, "zh-CN");
+        };
         globalThis.updateRendererUsagePartialCost = () => {
           renderRendererUsageControl(usage, {
             cacheHitRatePercent: 99.6,
@@ -544,4 +557,20 @@ test("omits plan limits from the Usage trigger and popover", async ({ page }) =>
   await expect(popover).not.toContainText("45%");
   await expect(popover).not.toContainText("12%");
   await expect(popover).not.toContainText("7-day limit");
+});
+
+test("shows Copilot generation/API rates and known-zero cache rates", async ({ page }) => {
+  await page.setContent('<!doctype html><body style="margin:0;padding-top:320px"></body>');
+  await page.addScriptTag({ content: browserBundle });
+  await page.evaluate(() => {
+    Reflect.get(globalThis, "setupRendererUsage")();
+    Reflect.get(globalThis, "updateRendererCopilotUsage")();
+  });
+  const usage = page.locator('[data-codexhost-usage-control="usage-composer"]');
+  await usage.hover();
+  const popover = page.locator('[role="dialog"][aria-label="对话用量详情"]');
+  await expect(popover).toContainText("输出速度（TPS）96.5 tok/s");
+  await expect(popover).toContainText("API 平均速度42.5 tok/s");
+  await expect(popover).toContainText("最近缓存命中（CH）0%");
+  await expect(popover).toContainText("平均缓存命中0%");
 });

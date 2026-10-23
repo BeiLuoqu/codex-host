@@ -93,6 +93,12 @@
 | [`harnesses/grok/subagent-status-and-model.md`](harnesses/grok/subagent-status-and-model.md) | Grok Subagent 状态、Model、Transcript 与 Desktop 投影；修改 Grok Subagent 时阅读。 |
 | [`harnesses/grok/permission-modes.md`](harnesses/grok/permission-modes.md) | Grok 会话内权限切换、原生生效确认、失败处理与验证范围。 |
 
+### Copilot
+
+| 文档 | 内容 |
+| --- | --- |
+| [`harnesses/copilot/copilot-harness-integration.md`](harnesses/copilot/copilot-harness-integration.md) | 官方 SDK/headless stdio、原生登录、稳定历史与派生、接收委派和当前验证限制。 |
+
 ### ZCode
 
 | 文档 | 内容与阅读时机 |
