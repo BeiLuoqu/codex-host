@@ -1,4 +1,4 @@
-import { mkdtemp, cp, chmod, rm } from "node:fs/promises";
+import { mkdtemp, cp, chmod, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -37,7 +37,8 @@ describe("official Copilot SDK process transport (synthetic RPC peer)", () => {
       const response = await client.ping();
       const facts = JSON.parse(response.message ?? "{}");
       expect(facts).toMatchObject({ marker: "session", deleted: true, home: environment.HOME });
-      expect(facts.cwd).toBe(await import("node:fs/promises").then((fs) => fs.realpath(directory)));
+      // Windows process.cwd() can retain an 8.3 alias that realpath expands.
+      expect(await realpath(facts.cwd)).toBe(await realpath(directory));
       expect(facts.config).toBe(environment.COPILOT_HOME);
       expect(facts.keychainDisabled).toBe(environment.COPILOT_DISABLE_KEYTAR !== undefined);
       expect(facts.arguments).toEqual(
