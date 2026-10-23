@@ -4364,6 +4364,70 @@ describe("Claude Code HarnessAdapter", () => {
     await session.close();
   });
 
+  it("holds the Root Turn for an Agent that Claude runs asynchronously without run_in_background", async () => {
+    const { adapter, transports } = fixture();
+    const session = await openSession(adapter);
+    const iterator = session.outputs[Symbol.asyncIterator]();
+
+    await session.execute(textTurn("launch default async agent"));
+    await nextEvent(iterator);
+    await nextEvent(iterator);
+    await nextEvent(iterator);
+    const transport = transports[0];
+    if (!transport) throw new Error("Fake Claude transport was not created");
+    transport.event({
+      type: "subagent.started",
+      operation: "spawn",
+      callId: "call_default_async",
+      description: "Explore",
+      background: false,
+    });
+    await nextEvent(iterator);
+    transport.event({
+      type: "subagent.completed",
+      callId: "call_default_async",
+      isError: false,
+      continuesInBackground: true,
+      nativeSubagentId: "native-default-async",
+      resultSummary: "Async agent launched successfully",
+    });
+    await nextEvent(iterator);
+    await nextEvent(iterator);
+    transport.delta("started", "root-1");
+    await nextEvent(iterator);
+    transport.event({ type: "message.completed", messageId: "root-1", checkpointId: "root-1" });
+    await nextEvent(iterator);
+    transport.finish({ status: "succeeded" });
+    await expect(session.execute(textTurn("follow-up"))).resolves.toMatchObject({
+      ok: false,
+      error: { code: "sessionBusy" },
+    });
+
+    transport.event({
+      type: "subagent.settled",
+      nativeSubagentId: "native-default-async",
+      callId: "call_default_async",
+      status: "completed",
+    });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: "subagent.state.changed",
+      nativeSubagentId: "native-default-async",
+      status: "completed",
+    });
+    transport.delta("report", "root-2");
+    expect(await nextEvent(iterator)).toMatchObject({ type: "item.started" });
+    expect(await nextEvent(iterator)).toMatchObject({ type: "item.updated" });
+    transport.event({ type: "message.completed", messageId: "root-2", checkpointId: "root-2" });
+    expect(await nextEvent(iterator)).toMatchObject({ type: "item.completed" });
+    transport.finish({ status: "succeeded" });
+    // The continuation stays on the requested Turn, so its Fork Checkpoint is the report.
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: "turn.completed",
+      outcome: { status: "succeeded", checkpoint: { checkpointId: "root-2" } },
+    });
+    await session.close();
+  });
+
   it("emits a reliable File Change immediately after a successful Edit", async () => {
     const { adapter, transports } = fixture();
     const session = await openSession(adapter);

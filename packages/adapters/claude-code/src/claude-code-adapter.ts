@@ -1937,9 +1937,9 @@ class ClaudeHarnessSession implements HarnessSession {
           active.cancellationRequested,
         );
         if (subagent.status === "running") {
-          if (subagent.nativeSubagentId) {
-            this.#occupancy.bind(event.callId, subagent.nativeSubagentId);
-          }
+          // Claude Code may run an Agent asynchronously without `run_in_background`; the
+          // Tool Result is then the first proof that it owes the Root a continuation.
+          this.#occupancy.occupySpawn(event.callId, subagent.nativeSubagentId);
           return;
         }
         this.#occupancy.release(event.callId, subagent.nativeSubagentId);
