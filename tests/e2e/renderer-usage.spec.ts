@@ -65,10 +65,13 @@ const { outputFiles } = await build({
             periodType: "weekly",
             resetsAt: "2026-08-31T16:00:00.000Z",
             productUsage: [
-              { product: "GrokBuild", usagePercent: 82, resetsAt: "2027-03-15T10:00:00.000Z" },
-              { product: "GrokChat", usagePercent: 45 },
+              { product: "Build", usagePercent: 82, resetsAt: "2027-03-15T10:00:00.000Z" },
+              { product: "Chat", usagePercent: 45 },
             ],
           });
+        };
+        globalThis.updateRendererCreditsPercent = (usedPercent) => {
+          renderRendererCreditsControl(credits, { usedPercent, periodType: "unknown" });
         };
         globalThis.updateRendererCreditsChinese = () => {
           renderRendererCreditsControl(credits, {
@@ -76,7 +79,7 @@ const { outputFiles } = await build({
             periodType: "five_hour",
             resetsAt: "2026-08-31T16:00:00.000Z",
             productUsage: [
-              { product: "7-day window", usagePercent: 73, resetsAt: "2026-09-05T18:00:00.000Z" },
+              { product: "7-day window", periodType: "seven_day", usagePercent: 73, resetsAt: "2026-09-05T18:00:00.000Z" },
             ],
           }, "zh-CN");
         };
@@ -322,7 +325,8 @@ test("keeps Usage in place and shows credits after the leading composer control"
   const trigger = usage.locator("button");
   await expect(usage).toHaveText("CH 99.9% · $0.822");
   await expect(credits).toBeHidden();
-  await expect(trigger).toHaveCSS("max-width", "180px");
+  await expect(usage).toHaveCSS("max-width", "240px");
+  await expect(trigger).toHaveCSS("max-width", "100%");
   await expect(usage.locator("xpath=following-sibling::*[1]")).toHaveAttribute(
     "data-codexhost-model-control",
     "usage-composer",
@@ -338,7 +342,8 @@ test("keeps Usage in place and shows credits after the leading composer control"
   await expect(credits).toHaveText("53%");
   await expect(credits.locator("button")).toHaveAttribute("aria-label", "Weekly limit 53%");
   await expect(credits.locator("[data-codexhost-credits-ring] svg")).toHaveCount(1);
-  await expect(trigger).toHaveCSS("max-width", "180px");
+  await expect(usage).toHaveCSS("max-width", "240px");
+  await expect(trigger).toHaveCSS("max-width", "100%");
   await expect(usage.locator("xpath=following-sibling::*[1]")).toHaveAttribute(
     "data-codexhost-model-control",
     "usage-composer",
@@ -365,6 +370,47 @@ test("keeps Usage in place and shows credits after the leading composer control"
   // One "Resets" line under the headline, one under the Build tile (Chat has none).
   await expect(popover.getByText("Resets", { exact: false })).toHaveCount(2);
 });
+
+for (const width of [650, 1024]) {
+  test(`rounds the account button percentage and retains popover precision at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 600 });
+    await page.setContent('<!doctype html><body style="margin:8px;padding-top:300px"></body>');
+    await page.addScriptTag({ content: browserBundle });
+    await page.evaluate(() => {
+      Reflect.get(globalThis, "setupRendererUsage")();
+      Reflect.get(globalThis, "updateRendererUsage")();
+    });
+    const credits = page.locator('[data-codexhost-credits-control="usage-composer"]');
+    const label = credits.locator("[data-codexhost-credits-label]");
+    for (const [usedPercent, remaining] of [
+      [6.4, "94%"],
+      [6.6, "93%"],
+      [0, "100%"],
+      [100, "0%"],
+    ] as const) {
+      await page.evaluate(
+        (value) => Reflect.get(globalThis, "updateRendererCreditsPercent")(value),
+        usedPercent,
+      );
+      await expect(label).toHaveText(remaining);
+      if (usedPercent === 6.4) {
+        await expect(credits.locator("button")).toHaveAttribute("title", "Account limit 93.6%");
+        await credits.hover();
+        await expect(page.getByRole("dialog", { name: "Account limit details" })).toContainText(
+          "Remaining 93.6%",
+        );
+      }
+      expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+        true,
+      );
+      const box = await credits.boundingBox();
+      if (!box) throw new Error("Credits geometry is unavailable");
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+    }
+  });
+}
 
 test("renders remaining five-hour and seven-day credits clearly in Chinese", async ({ page }) => {
   await page.setContent('<!doctype html><body style="margin:0"></body>');
