@@ -13,22 +13,34 @@ export const ANTIGRAVITY_DISABLE_AUTO_UPDATE_ENV = "AGY_CLI_DISABLE_AUTO_UPDATE"
  * Environment for the agy processes the Adapter starts: Sessions, the Model catalog and quota.
  * On Windows, agy's background self-updater re-runs agy (`--version`) from a detached process,
  * and that console child opens a visible terminal window that `windowsHide` cannot reach. The
- * updater is therefore switched off there unless the user configured the switch. Updates stay
- * explicit through the Harness update action, which keeps the unmodified environment.
+ * updater is disabled by default on Windows and macOS unless the user configured the switch.
+ * Updates stay explicit through the Harness update action, which keeps the unmodified environment.
  */
 export function antigravityProcessEnvironment(
   environment: NodeJS.ProcessEnv,
   platform: string,
 ): NodeJS.ProcessEnv {
-  if (platform !== "win32") return environment;
-  // Windows environment names are case-insensitive, and an undefined value never reaches agy.
-  const configured = Object.entries(environment).some(
-    ([name, value]) =>
-      value !== undefined && name.toUpperCase() === ANTIGRAVITY_DISABLE_AUTO_UPDATE_ENV,
+  if (platform !== "win32" && platform !== "darwin") return environment;
+  const isWindows = platform === "win32";
+  const matchesSwitch = (name: string): boolean =>
+    isWindows
+      ? name.toUpperCase() === ANTIGRAVITY_DISABLE_AUTO_UPDATE_ENV
+      : name === ANTIGRAVITY_DISABLE_AUTO_UPDATE_ENV;
+  const entries = Object.entries(environment);
+  const configured = entries.some(([name, value]) => matchesSwitch(name) && value !== undefined);
+  const hasUndefinedSwitch = entries.some(
+    ([name, value]) => matchesSwitch(name) && value === undefined,
   );
+  // On Windows, an undefined case variant can win Node's case-insensitive environment merge and
+  // hide a defined value. Remove undefined spellings before passing the environment to agy.
+  const cleanEnvironment = hasUndefinedSwitch
+    ? Object.fromEntries(
+        entries.filter(([name, value]) => !matchesSwitch(name) || value !== undefined),
+      )
+    : environment;
   return configured
-    ? environment
-    : { ...environment, [ANTIGRAVITY_DISABLE_AUTO_UPDATE_ENV]: "true" };
+    ? cleanEnvironment
+    : { ...cleanEnvironment, [ANTIGRAVITY_DISABLE_AUTO_UPDATE_ENV]: "true" };
 }
 
 export function createHarnessAdapter(context: HarnessPluginContext): AntigravityAdapter {

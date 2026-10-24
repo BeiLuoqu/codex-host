@@ -80,21 +80,42 @@ describe("Antigravity plugin environment", () => {
     }
   });
 
-  it("treats a switch without a value as not configured", () => {
-    // Node leaves an undefined variable out of the child process environment.
-    expect(
-      antigravityProcessEnvironment({ agy_cli_disable_auto_update: undefined }, "win32"),
-    ).toEqual({ agy_cli_disable_auto_update: undefined, AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
+  it("removes undefined Windows variants without losing a defined user value", () => {
+    const environment = {
+      AGY_CLI_DISABLE_AUTO_UPDATE: undefined,
+      agy_cli_disable_auto_update: "false",
+    };
+    expect(antigravityProcessEnvironment(environment, "win32")).toEqual({
+      agy_cli_disable_auto_update: "false",
+    });
   });
 
-  it.each(["darwin", "linux"])("leaves the %s environment unchanged", (platform) => {
+  it("treats an undefined switch as unset and adds the documented default", () => {
+    // Node leaves an undefined variable out of the child process environment.
+    expect(
+      antigravityProcessEnvironment({ AGY_CLI_DISABLE_AUTO_UPDATE: undefined }, "win32"),
+    ).toEqual({ AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
+  });
+
+  it("disables auto-update on macOS while preserving the exact user setting", () => {
+    const environment = { AGY_CLI_DISABLE_AUTO_UPDATE: "false" };
+    expect(antigravityProcessEnvironment({ PATH: "/usr/bin" }, "darwin")).toEqual({
+      PATH: "/usr/bin",
+      AGY_CLI_DISABLE_AUTO_UPDATE: "true",
+    });
+    expect(antigravityProcessEnvironment(environment, "darwin")).toBe(environment);
+  });
+
+  it("leaves Linux environments unchanged", () => {
     const environment = { PATH: "/usr/bin" };
-    expect(antigravityProcessEnvironment(environment, platform)).toBe(environment);
+    expect(antigravityProcessEnvironment(environment, "linux")).toBe(environment);
   });
 
   it.each([
     ["win32", undefined, "true"],
     ["win32", "false", "false"],
+    ["darwin", undefined, "true"],
+    ["darwin", "false", "false"],
     ["linux", undefined, "<unset>"],
   ] as const)(
     "starts agy on %s with the switch set to the expected value (user value %s)",
