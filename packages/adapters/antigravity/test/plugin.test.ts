@@ -80,6 +80,13 @@ describe("Antigravity plugin environment", () => {
     }
   });
 
+  it("treats a switch without a value as not configured", () => {
+    // Node leaves an undefined variable out of the child process environment.
+    expect(
+      antigravityProcessEnvironment({ agy_cli_disable_auto_update: undefined }, "win32"),
+    ).toEqual({ agy_cli_disable_auto_update: undefined, AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
+  });
+
   it.each(["darwin", "linux"])("leaves the %s environment unchanged", (platform) => {
     const environment = { PATH: "/usr/bin" };
     expect(antigravityProcessEnvironment(environment, platform)).toBe(environment);

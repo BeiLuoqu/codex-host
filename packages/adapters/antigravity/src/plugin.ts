@@ -21,9 +21,10 @@ export function antigravityProcessEnvironment(
   platform: string,
 ): NodeJS.ProcessEnv {
   if (platform !== "win32") return environment;
-  // Windows environment names are case-insensitive.
-  const configured = Object.keys(environment).some(
-    (name) => name.toUpperCase() === ANTIGRAVITY_DISABLE_AUTO_UPDATE_ENV,
+  // Windows environment names are case-insensitive, and an undefined value never reaches agy.
+  const configured = Object.entries(environment).some(
+    ([name, value]) =>
+      value !== undefined && name.toUpperCase() === ANTIGRAVITY_DISABLE_AUTO_UPDATE_ENV,
   );
   return configured
     ? environment
