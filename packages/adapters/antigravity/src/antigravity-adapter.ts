@@ -118,6 +118,11 @@ export interface AntigravityAdapterOptions {
   printTimeout?: string;
   toolOutputLimit?: number;
   subagentObservationTimeoutMs?: number;
+  /**
+   * How long a Turn waits for the previous Turn's agy to exit and its Question bridge to close
+   * before it reuses the Thread's Hook directory.
+   */
+  turnCleanupWaitMs?: number;
 }
 
 interface ActiveTurn {
@@ -166,6 +171,8 @@ const DEFAULT_INSPECT_TIMEOUT_MS = 20_000;
 const DEFAULT_PRINT_TIMEOUT = "30m";
 const DEFAULT_TOOL_OUTPUT_LIMIT = 64_000;
 const DEFAULT_SUBAGENT_OBSERVATION_TIMEOUT_MS = 30_000;
+/** Covers the previous agy's exit after stdin closes and its 2 s kill fallback. */
+const DEFAULT_TURN_CLEANUP_WAIT_MS = 5_000;
 const CONTEXT_USAGE_TIMEOUT_MS = 8_000;
 const CONTEXT_USAGE_RETRY_MS = 100;
 const TRAJECTORY_TIMEOUT_MS = 2_000;
@@ -242,6 +249,18 @@ function errorMessage(error: unknown): string {
 
 function invalidState(message: string): HarnessError {
   return { code: "invalidState", message, retryable: false };
+}
+
+/** Resolves once `promise` settles or `timeoutMs` passes, whichever comes first. */
+function settledWithin(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    const settle = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    void promise.then(settle, settle);
+  });
 }
 
 export const ANTIGRAVITY_WORKSPACE_FILE_INSTRUCTION =
@@ -510,6 +529,7 @@ class AntigravitySession implements HarnessSession {
   readonly #printTimeout: string;
   readonly #toolOutputLimit: number;
   readonly #subagentObservationTimeoutMs: number;
+  readonly #turnCleanupWaitMs: number;
   readonly #history: AntigravityHistory;
   readonly #subagentObservers = new Set<AntigravitySubagents>();
   #active: ActiveTurn | null = null;
@@ -537,6 +557,7 @@ class AntigravitySession implements HarnessSession {
     thinkingOptionId?: HarnessThinkingOptionId;
     toolOutputLimit: number;
     subagentObservationTimeoutMs: number;
+    turnCleanupWaitMs: number;
     onClosed(): void;
   }) {
     this.#catalog = input.catalog;
@@ -551,6 +572,7 @@ class AntigravitySession implements HarnessSession {
     this.#thinkingOptionId = input.thinkingOptionId ?? input.history.thinkingOptionId;
     this.#toolOutputLimit = input.toolOutputLimit;
     this.#subagentObservationTimeoutMs = input.subagentObservationTimeoutMs;
+    this.#turnCleanupWaitMs = input.turnCleanupWaitMs;
     this.#onClosed = input.onClosed;
     this.initialState = this.#state();
     this.outputs = this.#channel.outputs;
@@ -664,8 +686,11 @@ class AntigravitySession implements HarnessSession {
     let questions: AntigravityQuestionBridge;
     const hookDirectory = antigravityHookDirectory(this.#environment);
     // The Thread's Hook directory outlives each Turn, while the previous Turn's agy may still be
-    // exiting and its bridge closing; the next bridge rewrites the directory only after that.
-    this.#preparingQuestions = this.#questionCleanup.then(() =>
+    // exiting and its bridge closing; the next bridge rewrites the directory after that. The wait
+    // is bounded so an agy that does not exit cannot stall the Thread; the kept directory is
+    // never removed, so a late cleanup cannot take it from the new Turn.
+    const previousTurn = settledWithin(this.#questionCleanup, this.#turnCleanupWaitMs);
+    this.#preparingQuestions = previousTurn.then(() =>
       AntigravityQuestionBridge.create({
         ...(hookDirectory ? { directory: hookDirectory } : {}),
         turnId: command.turnId,
@@ -1500,6 +1525,7 @@ export class AntigravityAdapter implements HarnessAdapter {
   readonly #sessions = new Set<AntigravitySession>();
   readonly #toolOutputLimit: number;
   readonly #subagentObservationTimeoutMs: number;
+  readonly #turnCleanupWaitMs: number;
   #closed = false;
   #quota: AntigravityQuotaSnapshot | null = null;
   #quotaCwd: string | null = null;
@@ -1518,6 +1544,7 @@ export class AntigravityAdapter implements HarnessAdapter {
       throw new RangeError("subagentObservationTimeoutMs must be a finite positive number");
     }
     this.#subagentObservationTimeoutMs = subagentObservationTimeoutMs;
+    this.#turnCleanupWaitMs = options.turnCleanupWaitMs ?? DEFAULT_TURN_CLEANUP_WAIT_MS;
   }
 
   async inspect(input: InspectHarnessInput = {}): Promise<HarnessInspection> {
@@ -1720,6 +1747,7 @@ export class AntigravityAdapter implements HarnessAdapter {
             ...(params.thinkingOptionId ? { thinkingOptionId: params.thinkingOptionId } : {}),
             toolOutputLimit: this.#toolOutputLimit,
             subagentObservationTimeoutMs: this.#subagentObservationTimeoutMs,
+            turnCleanupWaitMs: this.#turnCleanupWaitMs,
             onClosed: () => this.#sessions.delete(session),
           });
           this.#sessions.add(session);
@@ -1759,6 +1787,7 @@ export class AntigravityAdapter implements HarnessAdapter {
             ...(params.thinkingOptionId ? { thinkingOptionId: params.thinkingOptionId } : {}),
             toolOutputLimit: this.#toolOutputLimit,
             subagentObservationTimeoutMs: this.#subagentObservationTimeoutMs,
+            turnCleanupWaitMs: this.#turnCleanupWaitMs,
             onClosed: () => this.#sessions.delete(session),
           });
           this.#sessions.add(session);
@@ -1822,6 +1851,7 @@ export class AntigravityAdapter implements HarnessAdapter {
       ...(thinkingOptionId ? { thinkingOptionId } : {}),
       toolOutputLimit: this.#toolOutputLimit,
       subagentObservationTimeoutMs: this.#subagentObservationTimeoutMs,
+      turnCleanupWaitMs: this.#turnCleanupWaitMs,
       onClosed: () => this.#sessions.delete(session),
     });
     this.#sessions.add(session);
