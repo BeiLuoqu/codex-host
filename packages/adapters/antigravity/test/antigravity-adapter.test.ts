@@ -126,6 +126,15 @@ describe("Antigravity Adapter", () => {
     },
   );
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    "rejects invalid Turn cleanup wait %s",
+    (turnCleanupWaitMs) => {
+      expect(() => new AntigravityAdapter({ turnCleanupWaitMs })).toThrow(
+        new RangeError("turnCleanupWaitMs must be a finite non-negative number"),
+      );
+    },
+  );
+
   it("reads account quota without a Thread and hides it after native authentication stops returning data", async () => {
     const fixture = await fakeAgy([
       JSON.stringify({ event: "command_result", command: USAGE_COMMAND }),
@@ -1516,9 +1525,10 @@ process.stdin.on("end", () => process.exit(0));
     });
 
     it.each([
-      // A Thread's kept Hook directory waits for the previous Turn only up to the bound.
+      // A Thread's kept Hook directory waits for the previous cleanup, which gives up on the
+      // held output after the bound.
       { scenario: "for a Thread", threadId: "thread-linger", turnCleanupWaitMs: 200 },
-      // A private per-Turn directory never waits, however long the bound is.
+      // A private per-Turn directory never waits, however long that cleanup may take.
       { scenario: "without a Thread ID", threadId: undefined, turnCleanupWaitMs: 60_000 },
     ])(
       "starts the next Turn $scenario when the previous Turn's agy keeps its output open",
@@ -1612,6 +1622,11 @@ process.stdin.on("end", () => process.exit(0));
           if (holder === undefined) throw new Error("The first Turn did not start its child");
           // The second Turn ran while the first Turn's output was still held open.
           expect(() => process.kill(holder, 0)).not.toThrow();
+          if (threadId) {
+            // Every queued cleanup and close() finish while that output is still held open.
+            await session.close();
+            expect(() => process.kill(holder, 0)).not.toThrow();
+          }
         } finally {
           if (holderPid !== undefined) {
             try {

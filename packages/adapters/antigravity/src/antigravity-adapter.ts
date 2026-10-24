@@ -119,8 +119,8 @@ export interface AntigravityAdapterOptions {
   toolOutputLimit?: number;
   subagentObservationTimeoutMs?: number;
   /**
-   * How long a Turn waits for the previous Turn's agy to exit and its Question bridge to close
-   * before it reuses the Thread's Hook directory.
+   * How long a finished Turn's cleanup waits for its agy to report closing after signalling it.
+   * A child that keeps agy's output open must not hold later Turns' cleanup or close().
    */
   turnCleanupWaitMs?: number;
 }
@@ -171,7 +171,8 @@ const DEFAULT_INSPECT_TIMEOUT_MS = 20_000;
 const DEFAULT_PRINT_TIMEOUT = "30m";
 const DEFAULT_TOOL_OUTPUT_LIMIT = 64_000;
 const DEFAULT_SUBAGENT_OBSERVATION_TIMEOUT_MS = 30_000;
-/** Covers the previous agy's exit after stdin closes and its 2 s kill fallback. */
+/** How long a finished Turn's agy may take to exit after its stdin closes before it is signalled. */
+const NATIVE_EXIT_GRACE_MS = 2_000;
 const DEFAULT_TURN_CLEANUP_WAIT_MS = 5_000;
 const CONTEXT_USAGE_TIMEOUT_MS = 8_000;
 const CONTEXT_USAGE_RETRY_MS = 100;
@@ -686,13 +687,9 @@ class AntigravitySession implements HarnessSession {
     let questions: AntigravityQuestionBridge;
     const hookDirectory = antigravityHookDirectory(this.#environment);
     // The Thread's Hook directory outlives each Turn, while the previous Turn's agy may still be
-    // exiting and its bridge closing; the next bridge rewrites the directory after that. The wait
-    // is bounded so an agy that does not exit cannot stall the Thread; the kept directory is
-    // never removed, so a late cleanup cannot take it from the new Turn. A private per-Turn
-    // directory is shared with no one and needs no wait.
-    const previousTurn = hookDirectory
-      ? settledWithin(this.#questionCleanup, this.#turnCleanupWaitMs)
-      : Promise.resolve();
+    // exiting and its bridge closing; the next bridge rewrites the directory after that cleanup,
+    // which is itself bounded. A private per-Turn directory is shared with no one.
+    const previousTurn = hookDirectory ? this.#questionCleanup : Promise.resolve();
     this.#preparingQuestions = previousTurn.then(() =>
       AntigravityQuestionBridge.create({
         ...(hookDirectory ? { directory: hookDirectory } : {}),
@@ -1269,8 +1266,11 @@ class AntigravitySession implements HarnessSession {
         if (outcome.status !== "succeeded") await active.subagents.cancel();
         await active.subagents.settled;
         if (active.process.stdin.writable) active.process.stdin.end();
-        const timer = setTimeout(() => active.process.kill(), 2_000);
-        await active.exited.finally(() => clearTimeout(timer));
+        const timer = setTimeout(() => active.process.kill(), NATIVE_EXIT_GRACE_MS);
+        // A child that keeps agy's output open can delay `close` indefinitely, and later Turns'
+        // cleanup and close() queue behind this one.
+        await settledWithin(active.exited, NATIVE_EXIT_GRACE_MS + this.#turnCleanupWaitMs);
+        clearTimeout(timer);
         await active.questions.dispose();
         this.#subagentObservers.delete(active.subagents);
       })
@@ -1547,7 +1547,11 @@ export class AntigravityAdapter implements HarnessAdapter {
       throw new RangeError("subagentObservationTimeoutMs must be a finite positive number");
     }
     this.#subagentObservationTimeoutMs = subagentObservationTimeoutMs;
-    this.#turnCleanupWaitMs = options.turnCleanupWaitMs ?? DEFAULT_TURN_CLEANUP_WAIT_MS;
+    const turnCleanupWaitMs = options.turnCleanupWaitMs ?? DEFAULT_TURN_CLEANUP_WAIT_MS;
+    if (!Number.isFinite(turnCleanupWaitMs) || turnCleanupWaitMs < 0) {
+      throw new RangeError("turnCleanupWaitMs must be a finite non-negative number");
+    }
+    this.#turnCleanupWaitMs = turnCleanupWaitMs;
   }
 
   async inspect(input: InspectHarnessInput = {}): Promise<HarnessInspection> {
