@@ -46,6 +46,7 @@ import {
   type TurnSteerAccepted,
   type TurnSteerCommand,
 } from "@codexhost/harness-adapter";
+import { LocalMediaMarkdownStream } from "@codexhost/harness-adapter/local-media-markdown";
 import {
   harnessIdSchema,
   hostInteractionIdSchema,
@@ -101,7 +102,9 @@ import {
   isNotStartedToolResult,
   modernCheckpointRef,
   modernItemId,
+  modernMediaRoots,
   modernNativeTurnRef,
+  modernWorkingDirectory,
   projectModernHistory,
 } from "./history.js";
 import {
@@ -214,6 +217,11 @@ interface LiveTextItem<T extends HostAgentMessageItem | HostReasoningItem> {
   text: string;
 }
 
+/** `text` is native; `item.text` is what `media` has published from it. */
+interface LiveAgentItem extends LiveTextItem<HostAgentMessageItem> {
+  readonly media: LocalMediaMarkdownStream;
+}
+
 interface LiveReasoningItem extends LiveTextItem<HostReasoningItem> {
   readonly attemptId?: string;
   readonly provisional: boolean;
@@ -231,7 +239,7 @@ interface ActiveHostTurn {
   readonly nativeTurn: number;
   readonly input: HostTextInput[];
   readonly autonomous: boolean;
-  agent?: LiveTextItem<HostAgentMessageItem>;
+  agent?: LiveAgentItem;
   reasoning?: LiveReasoningItem;
   reasoningOrdinal: number;
   compaction?: { nativeId: string; item: HostContextCompactionItem };
@@ -361,6 +369,8 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
   readonly #flushSession: (() => Promise<void>) | undefined;
   readonly #fallbackModel: HarnessModelRef;
   readonly #fallbackThinkingOptionId: HarnessThinkingOptionId | undefined;
+  readonly #sessionDirectory: string | undefined;
+  #workingDirectory: string | undefined;
   readonly #channel = new HarnessOutputChannel<HarnessOutput>();
   readonly #validator: ModernEventValidator;
   readonly #events: ModernJournalEvent[];
@@ -449,7 +459,12 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
     this.#events = [...options.journal.events];
     this.#historyBytes = journalHistoryBytes(this.#events, this.#maxHistoryBytes);
     this.#validator = new ModernEventValidator(this.#maxEvents, this.#profile);
-    for (const event of this.#events) this.#validator.accept(event);
+    this.#sessionDirectory = options.journal.header.cwd;
+    this.#workingDirectory = this.#sessionDirectory;
+    for (const event of this.#events) {
+      this.#validator.accept(event);
+      this.#workingDirectory = modernWorkingDirectory(this.#workingDirectory, event);
+    }
 
     const projection = projectModernHistory({
       harnessId: this.harnessId,
@@ -544,7 +559,7 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
     if (this.#reading) return Promise.resolve({ ok: false, error: busyError("read history") });
     this.#reading = true;
     try {
-      const projection = this.#project();
+      const projection = this.#project(true);
       const configuration = this.#readConfiguration();
       return Promise.resolve({
         ok: true,
@@ -1743,6 +1758,7 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
     this.#validator.accept(event);
     this.#observeAssistantSettlement(event);
     this.#events.push(event);
+    this.#workingDirectory = modernWorkingDirectory(this.#workingDirectory, event);
     this.#meterUsage(event);
     this.#historyBytes += bytes;
     this.#receive(event);
@@ -1896,8 +1912,8 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
   #cancelAgentItem(active: ActiveHostTurn): void {
     const agent = active.agent;
     if (!agent) return;
-    agent.text += CANCELLED_ASSISTANT_ATTEMPT_SUFFIX;
-    agent.item = { ...agent.item, text: agent.text };
+    this.#flushAgent(active, agent);
+    agent.item = { ...agent.item, text: agent.item.text + CANCELLED_ASSISTANT_ATTEMPT_SUFFIX };
     this.#emit({
       type: "item.updated",
       turnId: active.turnId,
@@ -2436,16 +2452,27 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
         ),
         text: "",
       };
-      active.agent = { item, text: "" };
+      const roots = modernMediaRoots(this.#workingDirectory, this.#sessionDirectory) ?? [];
+      active.agent = { item, text: "", media: new LocalMediaMarkdownStream(roots) };
       this.#emit({ type: "item.started", turnId: active.turnId, item });
     }
     active.agent.text += text;
-    active.agent.item = { ...active.agent.item, text: active.agent.text };
+    this.#publishAgent(active, active.agent, active.agent.media.append(text));
+  }
+
+  /** Publish text the media projection held for a trailing construct before the Item ends. */
+  #flushAgent(active: ActiveHostTurn, agent: LiveAgentItem): void {
+    this.#publishAgent(active, agent, agent.media.flush());
+  }
+
+  #publishAgent(active: ActiveHostTurn, agent: LiveAgentItem, delta: string): void {
+    if (!delta) return;
+    agent.item = { ...agent.item, text: agent.media.text };
     this.#emit({
       type: "item.updated",
       turnId: active.turnId,
-      itemId: active.agent.item.itemId,
-      update: { type: "text.append", text },
+      itemId: agent.item.itemId,
+      update: { type: "text.append", text: delta },
     });
   }
 
@@ -2554,6 +2581,7 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
       current = active.agent;
     }
     if (!current) return;
+    this.#flushAgent(active, current);
     delete active.agent;
     this.#completeItem(active, current.item, { status: "succeeded" });
   }
@@ -2731,9 +2759,10 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
       this.#completeItem(active, item, outcome);
     }
     if (active.agent) {
-      const item = active.agent.item;
+      const agent = active.agent;
+      this.#flushAgent(active, agent);
       delete active.agent;
-      this.#completeItem(active, item, outcome);
+      this.#completeItem(active, agent.item, outcome);
     }
     for (const tool of active.tools.values()) this.#completeItem(active, tool.item, outcome);
     active.tools.clear();
@@ -2766,12 +2795,14 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
     }
   }
 
-  #project(): ReturnType<typeof projectModernHistory> {
+  /** `media` also resolves local media paths, which only displayed history needs. */
+  #project(media = false): ReturnType<typeof projectModernHistory> {
     return projectModernHistory({
       harnessId: this.harnessId,
       sessionId: this.#sessionId,
       events: this.#events,
       profile: this.#profile,
+      ...(media && this.#sessionDirectory !== undefined ? { cwd: this.#sessionDirectory } : {}),
       ...(this.#fallbackModel ? { fallbackModel: this.#fallbackModel } : {}),
       ...(this.#fallbackThinkingOptionId
         ? { fallbackThinkingOptionId: this.#fallbackThinkingOptionId }
