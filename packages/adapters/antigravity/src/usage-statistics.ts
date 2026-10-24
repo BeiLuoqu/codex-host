@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { lstat, opendir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -35,14 +36,29 @@ function transcriptPath(brainRoot: string, conversationId: string): string {
   return path.join(brainRoot, conversationId, ".system_generated", "logs", "transcript.jsonl");
 }
 
+function isMissing(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/** A missing path is null; any other failure must not hide usage, so it propagates. */
+async function lstatIfPresent(target: string): Promise<Stats | null> {
+  try {
+    return await lstat(target);
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+}
+
 /** A transcript's identity, size and modification time, or null when it has nothing to read. */
 async function transcriptFingerprint(file: string): Promise<string | null> {
-  const info = await lstat(file).catch((error: unknown) => {
-    // A Conversation without logs has no transcript; any other failure must not hide usage.
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return null;
-    throw error;
-  });
+  const logs = path.dirname(file);
+  // A link below the Conversation could point the read outside agy's store.
+  for (const directory of [path.dirname(logs), logs]) {
+    if (!(await lstatIfPresent(directory))?.isDirectory()) return null;
+  }
+  const info = await lstatIfPresent(file);
   return info?.isFile() && info.size > 0 ? `${info.ino}:${info.size}:${info.mtimeMs}` : null;
 }
 
@@ -122,10 +138,21 @@ export function createAntigravityUsageStatistics(
       return sources;
     },
     async readSource(id: string, signal: AbortSignal) {
-      const entries = await readAntigravityUsage(id, signal);
+      const expected = listed.get(id);
+      let entries: HarnessUsageEntry[];
+      try {
+        entries = await readAntigravityUsage(id, signal);
+      } catch (error) {
+        // A listed transcript removed before it was opened is a changed source, not a failure.
+        if (expected !== undefined && isMissing(error)) {
+          throw new HarnessUsageSourceChangedError(
+            "Antigravity transcript disappeared before reading; refresh to retry",
+          );
+        }
+        throw error;
+      }
       // agy appends steps while a Turn runs. A read the listing no longer describes is not
       // returned, so the Host lists again and retries instead of caching it under that listing.
-      const expected = listed.get(id);
       if (expected !== undefined && (await transcriptFingerprint(id)) !== expected) {
         throw new HarnessUsageSourceChangedError(
           "Antigravity transcript changed while reading; refresh to retry",

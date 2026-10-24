@@ -1,4 +1,4 @@
-import { appendFile, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -211,6 +211,51 @@ describe("Antigravity usage statistics", () => {
     await mkdir(brain("conv-odd"), { recursive: true });
     await writeFile(brain("conv-odd", ".system_generated"), "");
     expect(await createAntigravityUsageStatistics(environment()).listSources(signal)).toEqual([]);
+  });
+
+  it("skips Conversations whose log directories link elsewhere", async () => {
+    const outside = path.join(home, "outside");
+    await mkdir(path.join(outside, "logs"), { recursive: true });
+    await writeFile(
+      path.join(outside, "logs", "transcript.jsonl"),
+      `${request(1, "2026-09-01T08:00:01Z", { input_tokens: 1, cache_read_tokens: 0, output_tokens: 1 })}\n`,
+    );
+    // Junctions need no extra privilege on Windows; elsewhere this is a directory link.
+    const type = process.platform === "win32" ? "junction" : "dir";
+    await mkdir(brain("conv-linked-system"), { recursive: true });
+    await symlink(outside, brain("conv-linked-system", ".system_generated"), type);
+    await mkdir(brain("conv-linked-logs", ".system_generated"), { recursive: true });
+    await symlink(
+      path.join(outside, "logs"),
+      brain("conv-linked-logs", ".system_generated", "logs"),
+      type,
+    );
+    const real = await transcript("conv-real", [
+      request(1, "2026-09-01T08:00:01Z", {
+        input_tokens: 1,
+        cache_read_tokens: 0,
+        output_tokens: 1,
+      }),
+    ]);
+    const sources = await createAntigravityUsageStatistics(environment()).listSources(signal);
+    expect(sources.map(({ id }) => id)).toEqual([real]);
+  });
+
+  it("reports a listed transcript removed before reading as a changed source", async () => {
+    const file = await transcript("conv-gone", [
+      request(1, "2026-09-01T08:00:01Z", {
+        input_tokens: 1,
+        cache_read_tokens: 0,
+        output_tokens: 1,
+      }),
+    ]);
+    const statistics = createAntigravityUsageStatistics(environment());
+    expect((await statistics.listSources(signal)).map(({ id }) => id)).toEqual([file]);
+    await rm(file);
+    await expect(statistics.readSource(file, signal)).rejects.toSatisfy(
+      HarnessUsageSourceChangedError.is,
+    );
+    expect(await statistics.listSources(signal)).toEqual([]);
   });
 
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
