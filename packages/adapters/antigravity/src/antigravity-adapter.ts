@@ -688,8 +688,11 @@ class AntigravitySession implements HarnessSession {
     // The Thread's Hook directory outlives each Turn, while the previous Turn's agy may still be
     // exiting and its bridge closing; the next bridge rewrites the directory after that. The wait
     // is bounded so an agy that does not exit cannot stall the Thread; the kept directory is
-    // never removed, so a late cleanup cannot take it from the new Turn.
-    const previousTurn = settledWithin(this.#questionCleanup, this.#turnCleanupWaitMs);
+    // never removed, so a late cleanup cannot take it from the new Turn. A private per-Turn
+    // directory is shared with no one and needs no wait.
+    const previousTurn = hookDirectory
+      ? settledWithin(this.#questionCleanup, this.#turnCleanupWaitMs)
+      : Promise.resolve();
     this.#preparingQuestions = previousTurn.then(() =>
       AntigravityQuestionBridge.create({
         ...(hookDirectory ? { directory: hookDirectory } : {}),

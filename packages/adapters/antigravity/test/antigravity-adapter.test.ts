@@ -1515,20 +1515,27 @@ process.stdin.on("end", () => process.exit(0));
       }
     });
 
-    it("starts the next Turn when the previous Turn's agy keeps its output open", async () => {
-      const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-agy-linger-"));
-      const cwd = await mkdtemp(path.join(os.tmpdir(), "codexhost-agy-linger-cwd-"));
-      const dataDir = await mkdtemp(path.join(os.tmpdir(), "codexhost-agy-linger-data-"));
-      const runs = path.join(directory, "runs.txt");
-      const holderPidFile = path.join(directory, "holder.pid");
-      const cleanup = async (): Promise<void> => {
-        for (const target of [directory, cwd, dataDir]) {
-          await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-        }
-      };
-      // The first Turn leaves a child holding its output pipes, as a lingering native helper
-      // would, so that Turn's process does not report closing until the child is stopped.
-      const scriptContent = `
+    it.each([
+      // A Thread's kept Hook directory waits for the previous Turn only up to the bound.
+      { scenario: "for a Thread", threadId: "thread-linger", turnCleanupWaitMs: 200 },
+      // A private per-Turn directory never waits, however long the bound is.
+      { scenario: "without a Thread ID", threadId: undefined, turnCleanupWaitMs: 60_000 },
+    ])(
+      "starts the next Turn $scenario when the previous Turn's agy keeps its output open",
+      async ({ threadId, turnCleanupWaitMs }) => {
+        const directory = await mkdtemp(path.join(os.tmpdir(), "codexhost-agy-linger-"));
+        const cwd = await mkdtemp(path.join(os.tmpdir(), "codexhost-agy-linger-cwd-"));
+        const dataDir = await mkdtemp(path.join(os.tmpdir(), "codexhost-agy-linger-data-"));
+        const runs = path.join(directory, "runs.txt");
+        const holderPidFile = path.join(directory, "holder.pid");
+        const cleanup = async (): Promise<void> => {
+          for (const target of [directory, cwd, dataDir]) {
+            await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+          }
+        };
+        // The first Turn leaves a child holding its output pipes, as a lingering native helper
+        // would, so that Turn's process does not report closing until the child is stopped.
+        const scriptContent = `
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 if (process.argv.includes("models")) {
@@ -1556,61 +1563,69 @@ for (const event of [
 process.stdin.resume();
 process.stdin.on("end", () => process.exit(0));
 `;
-      const jsPath = path.join(directory, "agy.cjs");
-      await writeFile(jsPath, scriptContent);
-      let command: string;
-      if (process.platform === "win32") {
-        command = path.join(directory, "agy.cmd");
-        await writeFile(command, `@node "${jsPath}" %*\r\n`);
-      } else {
-        command = path.join(directory, "agy");
-        await writeFile(command, `#!/usr/bin/env node\n${scriptContent}`);
-        await chmod(command, 0o755);
-      }
+        const jsPath = path.join(directory, "agy.cjs");
+        await writeFile(jsPath, scriptContent);
+        let command: string;
+        if (process.platform === "win32") {
+          command = path.join(directory, "agy.cmd");
+          await writeFile(command, `@node "${jsPath}" %*\r\n`);
+        } else {
+          command = path.join(directory, "agy");
+          await writeFile(command, `#!/usr/bin/env node\n${scriptContent}`);
+          await chmod(command, 0o755);
+        }
 
-      const adapter = new AntigravityAdapter({
-        command,
-        environment: { ...process.env, CODEXHOST_DATA_DIR: dataDir },
-        turnCleanupWaitMs: 200,
-      });
-      let holderPid: number | undefined;
-      try {
-        const opened = await adapter.open({
-          kind: "create",
-          cwd,
-          environment: { CODEXHOST_THREAD_ID: "thread-linger" },
+        // The test process may itself run inside a Host Thread.
+        const environment = Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([name]) => name !== "CODEXHOST_THREAD_ID" && name !== "CODEXHOST_DELEGATION_THREAD_ID",
+          ),
+        );
+        const adapter = new AntigravityAdapter({
+          command,
+          environment: { ...environment, CODEXHOST_DATA_DIR: dataDir },
+          turnCleanupWaitMs,
         });
-        if (!opened.ok) throw new Error(opened.error.message);
-        const session = opened.value;
-        const iterator = session.outputs[Symbol.asyncIterator]();
-        for (const turnId of ["turn-linger-1", "turn-linger-2"]) {
-          const started = await session.execute({
-            type: "turn.start",
-            turnId: hostTurnIdSchema.parse(turnId),
-            input: [{ type: "text", text: "hello" }],
+        let holderPid: number | undefined;
+        try {
+          const opened = await adapter.open({
+            kind: "create",
+            cwd,
+            environment: threadId ? { CODEXHOST_THREAD_ID: threadId } : {},
           });
-          expect(started.ok).toBe(true);
-          while ((await nextEvent(iterator)).type !== "turn.completed") {
-            // This Turn's remaining events are not under test.
+          if (!opened.ok) throw new Error(opened.error.message);
+          const session = opened.value;
+          const iterator = session.outputs[Symbol.asyncIterator]();
+          for (const turnId of ["turn-linger-1", "turn-linger-2"]) {
+            const started = await session.execute({
+              type: "turn.start",
+              turnId: hostTurnIdSchema.parse(turnId),
+              input: [{ type: "text", text: "hello" }],
+            });
+            expect(started.ok).toBe(true);
+            while ((await nextEvent(iterator)).type !== "turn.completed") {
+              // This Turn's remaining events are not under test.
+            }
+            holderPid ??= Number(await readFile(holderPidFile, "utf8"));
           }
-          holderPid ??= Number(await readFile(holderPidFile, "utf8"));
-        }
-        const holder = holderPid;
-        if (holder === undefined) throw new Error("The first Turn did not start its child");
-        // The second Turn ran while the first Turn's output was still held open.
-        expect(() => process.kill(holder, 0)).not.toThrow();
-      } finally {
-        if (holderPid !== undefined) {
-          try {
-            process.kill(holderPid);
-          } catch {
-            // Already stopped.
+          const holder = holderPid;
+          if (holder === undefined) throw new Error("The first Turn did not start its child");
+          // The second Turn ran while the first Turn's output was still held open.
+          expect(() => process.kill(holder, 0)).not.toThrow();
+        } finally {
+          if (holderPid !== undefined) {
+            try {
+              process.kill(holderPid);
+            } catch {
+              // Already stopped.
+            }
           }
+          await adapter.close();
+          await cleanup();
         }
-        await adapter.close();
-        await cleanup();
-      }
-    }, 20_000);
+      },
+      20_000,
+    );
 
     it("projects file steps as Tool Executions when the applied patch cannot be read", async () => {
       const streamLines = [
