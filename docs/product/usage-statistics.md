@@ -87,6 +87,7 @@
 - 适配器在既有 `createHarnessAdapter` 之外实现可选 `usageStatistics` 能力；Host 不包含 Antigravity 专用分支。
 - 只读用户主目录下 `.gemini/antigravity-cli/brain/<原生会话 ID>/.system_generated/logs/transcript.jsonl`（Windows 取 `USERPROFILE`，其他平台取 `HOME`），每个原生会话一个来源，包括未经 CodexHost 创建的会话。同目录的 `transcript_full.jsonl` 与 `chunks/` 重复相同步骤，不读取；不启动 agy，也不调用其 Language Server。
 - agy 为每次模型请求写一条 `PLANNER_RESPONSE` 步骤，带 `input_tokens`、`cache_read_tokens`、`output_tokens` 与 UTC 时间 `created_at`。已用本机 Antigravity CLI 1.4.6 的转录核对：`input_tokens` 不含缓存读取（下一次请求的 `cache_read_tokens` 约等于上一次请求的完整提示词），因此输入按统一口径加上缓存读取；缺 `cache_read_tokens` 时缓存保持未知。同一步骤重复写入时取最后一条。
+- 读取后核对列举时的文件指纹：Turn 运行期间转录被追加时报告来源变化，由 Host 重新列举后重试。会话没有日志目录时跳过；权限等其他访问错误不当作没有会话，而是报告读取失败。
 - 转录不记录模型、缓存写入、思考 Token 与工作目录：请求照常计入 Token，模型显示为未知且不计价，项目归入“未知项目”；会话只取目录名作为原生会话 ID。
 - 条目 ID 由 `created_at`、步骤序号与 Token 组成，不含会话 ID，派生会话（分叉、回滚）复制的历史请求因此按 ID 去重。本机现有转录未出现跨会话复制的记录，原生分叉是否复制历史步骤尚未实测。
 

@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { HarnessUsageSourceChangedError } from "@codexhost/harness-adapter/usage-statistics";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AntigravityAdapter } from "../src/antigravity-adapter.js";
@@ -176,6 +177,63 @@ describe("Antigravity usage statistics", () => {
     expect(sources[0]?.fingerprint).toMatch(/^\d+:\d+:[\d.]+$/u);
     await expect(statistics.listSources(AbortSignal.abort())).rejects.toThrow();
   });
+
+  it("rejects a transcript appended after listing and reads it once listed again", async () => {
+    const file = await transcript("conv-live", [
+      request(1, "2026-09-01T08:00:01Z", {
+        input_tokens: 100,
+        cache_read_tokens: 0,
+        output_tokens: 10,
+      }),
+    ]);
+    const statistics = createAntigravityUsageStatistics(environment());
+    const [listed] = await statistics.listSources(signal);
+    // agy writes the next step while a Turn is still running.
+    await appendFile(
+      file,
+      `${request(3, "2026-09-01T08:00:09Z", {
+        input_tokens: 40,
+        cache_read_tokens: 101,
+        output_tokens: 12,
+      })}\n`,
+    );
+    await expect(statistics.readSource(file, signal)).rejects.toSatisfy(
+      HarnessUsageSourceChangedError.is,
+    );
+    const [relisted] = await statistics.listSources(signal);
+    expect(relisted?.fingerprint).not.toBe(listed?.fingerprint);
+    expect(
+      (await statistics.readSource(file, signal)).map(({ inputTokens }) => inputTokens),
+    ).toEqual([100, 141]);
+  });
+
+  it("skips a Conversation whose log path is not a directory", async () => {
+    await mkdir(brain("conv-odd"), { recursive: true });
+    await writeFile(brain("conv-odd", ".system_generated"), "");
+    expect(await createAntigravityUsageStatistics(environment()).listSources(signal)).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "reports a transcript it is not allowed to inspect instead of hiding it",
+    async () => {
+      await transcript("conv-locked", [
+        request(1, "2026-09-01T08:00:01Z", {
+          input_tokens: 1,
+          cache_read_tokens: 0,
+          output_tokens: 1,
+        }),
+      ]);
+      const locked = brain("conv-locked", ".system_generated");
+      await chmod(locked, 0o000);
+      try {
+        await expect(
+          createAntigravityUsageStatistics(environment()).listSources(signal),
+        ).rejects.toMatchObject({ code: "EACCES" });
+      } finally {
+        await chmod(locked, 0o700);
+      }
+    },
+  );
 
   it("is exposed by the Adapter for the Host's machine-wide statistics", async () => {
     const file = await transcript("conv-d", [

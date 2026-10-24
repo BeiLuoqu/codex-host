@@ -8,6 +8,7 @@ import type {
   HarnessUsageStatisticsCapability,
 } from "@codexhost/harness-adapter";
 import {
+  HarnessUsageSourceChangedError,
   jsonlRecords,
   nativeTimeMs,
   withUsageSession,
@@ -34,6 +35,17 @@ function transcriptPath(brainRoot: string, conversationId: string): string {
   return path.join(brainRoot, conversationId, ".system_generated", "logs", "transcript.jsonl");
 }
 
+/** A transcript's identity, size and modification time, or null when it has nothing to read. */
+async function transcriptFingerprint(file: string): Promise<string | null> {
+  const info = await lstat(file).catch((error: unknown) => {
+    // A Conversation without logs has no transcript; any other failure must not hide usage.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
+  });
+  return info?.isFile() && info.size > 0 ? `${info.ino}:${info.size}:${info.mtimeMs}` : null;
+}
+
 async function listTranscripts(
   brainRoot: string,
   signal: AbortSignal,
@@ -49,10 +61,8 @@ async function listTranscripts(
     signal.throwIfAborted();
     if (!entry.isDirectory()) continue;
     const file = transcriptPath(brainRoot, entry.name);
-    const info = await lstat(file).catch(() => null);
-    if (info?.isFile() && info.size > 0) {
-      sources.push({ id: file, fingerprint: `${info.ino}:${info.size}:${info.mtimeMs}` });
-    }
+    const fingerprint = await transcriptFingerprint(file);
+    if (fingerprint) sources.push({ id: file, fingerprint });
   }
   return sources;
 }
@@ -103,8 +113,25 @@ export function createAntigravityUsageStatistics(
   environment: NodeJS.ProcessEnv,
 ): HarnessUsageStatisticsCapability {
   const brainRoot = nativeBrainRoot(antigravityHome(environment));
+  /** Fingerprints of the latest listing; a read must still match the one it was listed with. */
+  let listed = new Map<string, string>();
   return Object.freeze({
-    listSources: (signal: AbortSignal) => listTranscripts(brainRoot, signal),
-    readSource: (id: string, signal: AbortSignal) => readAntigravityUsage(id, signal),
+    async listSources(signal: AbortSignal) {
+      const sources = await listTranscripts(brainRoot, signal);
+      listed = new Map(sources.map(({ id, fingerprint }) => [id, fingerprint]));
+      return sources;
+    },
+    async readSource(id: string, signal: AbortSignal) {
+      const entries = await readAntigravityUsage(id, signal);
+      // agy appends steps while a Turn runs. A read the listing no longer describes is not
+      // returned, so the Host lists again and retries instead of caching it under that listing.
+      const expected = listed.get(id);
+      if (expected !== undefined && (await transcriptFingerprint(id)) !== expected) {
+        throw new HarnessUsageSourceChangedError(
+          "Antigravity transcript changed while reading; refresh to retry",
+        );
+      }
+      return entries;
+    },
   });
 }
