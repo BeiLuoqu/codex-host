@@ -8,6 +8,8 @@ Agent 消息中的 Markdown 图片（`![alt](目标)`）只有在目标是绝对
 
 Harness 常按工作目录写相对路径，因此需要由 Adapter 改写。
 
+用户消息气泡中的缩略图只来自消息 `content` 里的 `image` / `localImage` 条目。Desktop 同时把附件清单（`# Files mentioned by the user:`）解析成文件标签；只有消息带图片条目时，才把对应图片从标签中移除。消息没有图片条目时，所贴图片只显示为文件名标签。
+
 ## Agent 消息：改写本地媒体路径
 
 `@codexhost/harness-adapter/local-media-markdown` 提供共用的改写：
@@ -27,3 +29,15 @@ Harness 常按工作目录写相对路径，因此需要由 Adapter 改写。
 | DeepSeek Harness | Agent 当前工作目录（随 `working-directory/change` 更新），再到 Session 工作目录 | 实时输出与历史（`readSnapshot`）；用量刷新不做改写 |
 
 其他 Harness 的 Agent 文本仍原样转发；它们输出相对路径时，图片仍显示为占位框。
+
+## 用户消息：还原图片附件
+
+Desktop 发送带图片的消息时，请求里既有 `localImage` 条目，也在文字的附件清单中写下每张图片的绝对路径，并标注 `Image attachment: true`。公共 Harness 输入只有文字，Host 转发时只保留文字，Harness 按路径读取图片；Native Session 历史同样只有文字。
+
+`protocol-core` 投影用户消息时，从文字中 `## My request:` 之前的附件清单读出这些路径，补回 `localImage` 条目，放在文字之后。开始 Turn、运行中插入和历史回放三处投影一致，因此新旧会话都显示缩略图，`imageCount` 也与 Desktop 的乐观消息一致。解析规则在 `@codexhost/shared-contracts` 的 `desktopImageAttachmentPaths`，Renderer 的远程附件补存使用同一规则。
+
+边界：
+
+- 只认附件清单中的绝对路径；用户在请求正文里写的路径不算附件。
+- 不读取、不复制图片。剪贴板截图通常保存在系统临时目录，文件被清理后缩略图无法加载。
+- 远程外部会话的图片路径位于远程主机，其缩略图显示尚未单独验证。
