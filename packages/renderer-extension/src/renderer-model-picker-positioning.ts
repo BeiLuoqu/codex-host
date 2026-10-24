@@ -1,10 +1,8 @@
-const MENU_GAP = 4;
-const MAIN_MENU_SIDE_OFFSET = 8;
 const COLLISION_PADDING = 8;
+const MODEL_PICKER_SIDE_OFFSET = 6;
+const SELECTION_NOTICE_SIDE_OFFSET = 8;
 
-export const RENDERER_MODEL_PICKER_MAIN_MENU_WIDTH = 260;
-const RENDERER_MODEL_PICKER_MODEL_MENU_WIDTH = 280;
-export const RENDERER_MODEL_PICKER_MODEL_MENU_MAX_HEIGHT = 360;
+export const MODEL_PICKER_WIDTH = 254;
 export const RENDERER_MODEL_SELECTION_NOTICE_MAX_WIDTH = 320;
 
 export interface RendererMenuRect {
@@ -13,17 +11,25 @@ export interface RendererMenuRect {
   top: number;
 }
 
+export interface RendererTriggerRect extends RendererMenuRect {
+  width: number;
+}
+
 export interface RendererViewport {
   width: number;
   height: number;
 }
 
-export interface RendererMenuPlacement {
+/**
+ * A picker popover opens bottom-up above its trigger, centered on the trigger and
+ * clamped to the viewport. `availableHeight` caps the popover at the space above
+ * it, and `originX` anchors the opening animation to the trigger's center.
+ */
+export interface RendererModelPickerPlacement {
   left: number;
-  top?: number;
-  bottom?: number;
-  width: number;
-  maxHeight?: number;
+  bottom: number;
+  availableHeight: number;
+  originX: number;
 }
 
 /**
@@ -48,78 +54,36 @@ function fitWidth(preferredWidth: number, viewportWidth: number): number {
   );
 }
 
-function fitHeight(viewport: RendererViewport, top = COLLISION_PADDING): number {
-  return Math.max(
+/**
+ * Codex applies its window zoom as a CSS transform, so `getBoundingClientRect`
+ * reports zoomed pixels while the popover is positioned in unzoomed ones.
+ */
+export function rendererModelPickerPlacement(
+  triggerRect: RendererTriggerRect,
+  viewport: RendererViewport,
+  popoverWidth: number,
+  windowZoom = 1,
+): RendererModelPickerPlacement {
+  const zoom = Number.isFinite(windowZoom) && windowZoom > 0 ? windowZoom : 1;
+  const viewportWidth = viewport.width / zoom;
+  const viewportHeight = viewport.height / zoom;
+  const left = triggerRect.left / zoom;
+  const width = triggerRect.width / zoom;
+  const top = triggerRect.top / zoom;
+  const menuWidth = Math.max(
     COLLISION_PADDING,
-    Math.min(
-      RENDERER_MODEL_PICKER_MODEL_MENU_MAX_HEIGHT,
-      viewport.height * 0.6,
-      viewport.height - top - COLLISION_PADDING,
-    ),
+    Math.min(popoverWidth || MODEL_PICKER_WIDTH, viewportWidth - COLLISION_PADDING * 2),
   );
-}
-
-export function rendererModelPickerMainMenuPlacement(
-  triggerRect: RendererMenuRect,
-  viewport: RendererViewport,
-  width = RENDERER_MODEL_PICKER_MAIN_MENU_WIDTH,
-): RendererMenuPlacement {
-  const maxLeft = viewport.width - COLLISION_PADDING - width;
+  const center = left + width / 2;
+  const menuLeft = Math.min(
+    Math.max(center - menuWidth / 2, COLLISION_PADDING),
+    Math.max(COLLISION_PADDING, viewportWidth - COLLISION_PADDING - menuWidth),
+  );
   return {
-    left: clampPosition(triggerRect.right - width, COLLISION_PADDING, maxLeft),
-    width,
-    bottom: Math.max(COLLISION_PADDING, viewport.height - triggerRect.top + MAIN_MENU_SIDE_OFFSET),
-  };
-}
-
-export function rendererModelPickerStandaloneModelMenuPlacement(
-  triggerRect: RendererMenuRect,
-  viewport: RendererViewport,
-): RendererMenuPlacement {
-  const width = fitWidth(RENDERER_MODEL_PICKER_MODEL_MENU_WIDTH, viewport.width);
-  const maxLeft = viewport.width - COLLISION_PADDING - width;
-  return {
-    left: clampPosition(triggerRect.right - width, COLLISION_PADDING, maxLeft),
-    width,
-    maxHeight: fitHeight(viewport),
-    bottom: Math.max(COLLISION_PADDING, viewport.height - triggerRect.top + MAIN_MENU_SIDE_OFFSET),
-  };
-}
-
-export function rendererModelPickerModelMenuPlacement(
-  mainRect: RendererMenuRect,
-  viewport: RendererViewport,
-): RendererMenuPlacement {
-  const preferredWidth = fitWidth(RENDERER_MODEL_PICKER_MODEL_MENU_WIDTH, viewport.width);
-  const rightLeft = mainRect.right + MENU_GAP;
-  const leftLeft = mainRect.left - MENU_GAP - preferredWidth;
-  const rightAvailable = viewport.width - rightLeft - COLLISION_PADDING;
-  const leftAvailable = mainRect.left - MENU_GAP - COLLISION_PADDING;
-
-  let width: number;
-  let left: number;
-  if (rightAvailable >= preferredWidth) {
-    width = preferredWidth;
-    left = rightLeft;
-  } else if (leftAvailable >= preferredWidth) {
-    width = preferredWidth;
-    left = leftLeft;
-  } else if (rightAvailable >= leftAvailable) {
-    width = Math.max(COLLISION_PADDING, rightAvailable);
-    left = rightLeft;
-  } else {
-    width = Math.max(COLLISION_PADDING, leftAvailable);
-    left = mainRect.left - MENU_GAP - width;
-  }
-
-  const top = clampPosition(mainRect.top, COLLISION_PADDING, viewport.height - COLLISION_PADDING);
-  const maxHeight = fitHeight(viewport, top);
-
-  return {
-    left: clampPosition(left, COLLISION_PADDING, viewport.width - COLLISION_PADDING - width),
-    top,
-    width,
-    maxHeight,
+    left: menuLeft,
+    bottom: Math.max(COLLISION_PADDING, viewportHeight - top + MODEL_PICKER_SIDE_OFFSET),
+    availableHeight: Math.max(120, top - MODEL_PICKER_SIDE_OFFSET - COLLISION_PADDING),
+    originX: Math.max(0, Math.min(menuWidth, center - menuLeft)),
   };
 }
 
@@ -132,7 +96,7 @@ export function rendererModelSelectionNoticePlacement(
   const maxWidth = fitWidth(preferredWidth, viewport.width);
   const bottom = Math.max(
     COLLISION_PADDING,
-    viewport.height - triggerRect.top + MAIN_MENU_SIDE_OFFSET,
+    viewport.height - triggerRect.top + SELECTION_NOTICE_SIDE_OFFSET,
   );
   return {
     right: clampPosition(

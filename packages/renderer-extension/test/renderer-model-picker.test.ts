@@ -6,11 +6,18 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
-  rendererModelPickerMainMenuPlacement,
-  rendererModelPickerModelMenuPlacement,
-  rendererModelPickerStandaloneModelMenuPlacement,
+  rendererModelPickerPlacement,
   rendererModelSelectionNoticePlacement,
 } from "../src/renderer-model-picker-positioning.js";
+
+import {
+  isMaximumThinkingOption,
+  modelPickerMessages,
+  modelPickerSliderLeft,
+  modelPickerSliderRangeTransform,
+  orderedThinkingOptions,
+  thinkingOptionRank,
+} from "../src/renderer-model-picker-intelligence.js";
 
 import {
   isRendererModelPickerDisabled,
@@ -61,51 +68,60 @@ describe("Renderer combined Model and Thinking picker presentation", () => {
       }),
     ).toMatchObject({ modelLabel: "provider / model", thinkingLabel: "High" });
   });
-  it("anchors the main menu's right edge to the model trigger", () => {
+  it("centers the picker on the Model trigger and caps it to the space above", () => {
     expect(
-      rendererModelPickerMainMenuPlacement(
-        { left: 700, right: 900, top: 820 },
+      rendererModelPickerPlacement(
+        { left: 700, right: 900, top: 820, width: 200 },
         { width: 1200, height: 900 },
-        180,
+        0,
       ),
-    ).toEqual({ left: 720, width: 180, bottom: 88 });
+    ).toEqual({ left: 673, bottom: 86, availableHeight: 806, originX: 127 });
   });
 
-  it("keeps the main menu inside the viewport when the trigger is near an edge", () => {
+  it("keeps the picker inside the viewport next to a screen edge", () => {
+    const placement = rendererModelPickerPlacement(
+      { left: 0, right: 50, top: 820, width: 50 },
+      { width: 240, height: 900 },
+      0,
+    );
+    expect(placement.left).toBe(8);
+    // The opening animation still starts at the trigger, even when clamped.
+    expect(placement.originX).toBe(17);
     expect(
-      rendererModelPickerMainMenuPlacement(
-        { left: 0, right: 50, top: 820 },
-        { width: 240, height: 900 },
-        180,
+      rendererModelPickerPlacement(
+        { left: 1150, right: 1199, top: 820, width: 49 },
+        { width: 1200, height: 900 },
+        0,
       ).left,
-    ).toBe(8);
+    ).toBe(938);
   });
 
-  it("opens the model-only picker directly above the model trigger", () => {
+  it("measures the trigger in unzoomed pixels for a zoomed Codex window", () => {
     expect(
-      rendererModelPickerStandaloneModelMenuPlacement(
-        { left: 700, right: 900, top: 820 },
-        { width: 1200, height: 900 },
+      rendererModelPickerPlacement(
+        { left: 1050, right: 1350, top: 1230, width: 300 },
+        { width: 1200, height: 1350 },
+        0,
+        1.5,
       ),
-    ).toEqual({ left: 620, width: 280, maxHeight: 360, bottom: 88 });
+    ).toEqual({ left: 538, bottom: 86, availableHeight: 806, originX: 254 });
   });
 
-  it("keeps the model submenu top-aligned with the main menu while flipping left", () => {
+  it("widens to the measured popover and clamps it to a narrow viewport", () => {
     expect(
-      rendererModelPickerModelMenuPlacement(
-        { left: 700, right: 1120, top: 100 },
+      rendererModelPickerPlacement(
+        { left: 700, right: 900, top: 820, width: 200 },
         { width: 1200, height: 900 },
-      ),
-    ).toEqual({ left: 416, top: 100, width: 280, maxHeight: 360 });
-  });
-
-  it("keeps the model submenu on the right when there is enough space", () => {
+        300,
+      ).left,
+    ).toBe(650);
     expect(
-      rendererModelPickerModelMenuPlacement(
-        { left: 100, right: 280, top: 100 },
-        { width: 1200, height: 900 },
+      rendererModelPickerPlacement(
+        { left: 100, right: 150, top: 400, width: 50 },
+        { width: 200, height: 900 },
+        400,
       ),
-    ).toEqual({ left: 284, top: 100, width: 280, maxHeight: 360 });
+    ).toMatchObject({ left: 8, availableHeight: 386 });
   });
 
   it("does not rewrite an unchanged Thinking label", () => {
@@ -430,5 +446,65 @@ describe("Renderer Model selection rejection notice", () => {
         { width: 1200, height: 900 },
       ).right,
     ).toBe(8);
+  });
+});
+
+describe("Renderer Model picker Thinking order and slider geometry", () => {
+  const option = (id: string, label = id) => ({
+    id: harnessThinkingOptionIdSchema.parse(id),
+    label,
+  });
+
+  it("ranks a Thinking option by its id or its label, from off to Ultracode", () => {
+    expect(thinkingOptionRank(option("off"))).toBe(0);
+    expect(thinkingOptionRank(option("xhigh"))).toBe(5);
+    expect(thinkingOptionRank(option("custom", "Ultracode"))).toBe(7);
+    expect(thinkingOptionRank(option("unknown-option"))).toBeUndefined();
+    expect(thinkingOptionRank(undefined)).toBeUndefined();
+  });
+
+  it("orders Thinking options low to high whatever the Harness reports", () => {
+    const ascending = [option("off"), option("low"), option("high")];
+    expect(orderedThinkingOptions(ascending)).toEqual(ascending);
+    const descending = [option("ultracode"), option("high"), option("off")];
+    expect(orderedThinkingOptions(descending).map(({ id }) => id)).toEqual([
+      "off",
+      "high",
+      "ultracode",
+    ]);
+    // Unranked Harnesses keep the order they reported.
+    const unranked = [option("alpha"), option("beta")];
+    expect(orderedThinkingOptions(unranked)).toEqual(unranked);
+  });
+
+  it("marks only the highest Thinking option as maximum", () => {
+    const ranked = [option("off"), option("high"), option("xhigh")];
+    expect(isMaximumThinkingOption(ranked, 2)).toBe(true);
+    expect(isMaximumThinkingOption(ranked, 1)).toBe(false);
+    expect(isMaximumThinkingOption(ranked, 0)).toBe(false);
+    expect(isMaximumThinkingOption([option("off"), option("medium")], 1)).toBe(false);
+    // Unranked options fall back to the catalog length.
+    const unranked = [option("a"), option("b"), option("c"), option("d")];
+    expect(isMaximumThinkingOption(unranked, 3)).toBe(true);
+    expect(isMaximumThinkingOption(unranked, 2)).toBe(false);
+  });
+
+  it("keeps the slider thumb and its filled range inside the track", () => {
+    expect(modelPickerSliderLeft(0)).toBe("calc(0% + 13px)");
+    expect(modelPickerSliderLeft(50)).toBe("calc(50% + 0px)");
+    expect(modelPickerSliderLeft(100)).toBe("calc(100% + -13px)");
+    expect(modelPickerSliderRangeTransform(0, 4)).toBe("translateX(calc(-100% + 0px))");
+    expect(modelPickerSliderRangeTransform(50, 4)).toBe("translateX(calc(-50% + 0px))");
+    expect(modelPickerSliderRangeTransform(100, 4)).toBe("translateX(calc(0% + 0px))");
+    expect(modelPickerSliderRangeTransform(50, 0)).toBe("translateX(-100%)");
+  });
+
+  it("localizes the trigger, list and slider strings", () => {
+    expect(modelPickerMessages("en").selectModel).toBe("Select model");
+    expect(modelPickerMessages("zh-CN").selectModel).toBe("选择模型");
+    expect(modelPickerMessages("zh-CN").thinkingValue("高", 2, 3)).toBe("高，第 2 项，共 3 项。");
+    expect(rendererModelPickerPresentation({ status: "error" }, "zh-CN").modelLabel).toBe(
+      "无法加载模型",
+    );
   });
 });
