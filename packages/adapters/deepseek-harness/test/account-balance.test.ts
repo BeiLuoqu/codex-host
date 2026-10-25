@@ -160,3 +160,31 @@ it("reports the balance as an Adapter account and stops after close", async () =
     vi.unstubAllGlobals();
   }
 });
+
+it("aborts a balance request in flight at close and drops its late result", async () => {
+  await writeFile(path.join(home, ".credentials.yaml"), CREDENTIALS);
+  let answer: (() => void) | undefined;
+  // The response arrives only after close, as if the request ignored the abort.
+  const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(
+    () =>
+      new Promise<Response>((resolve) => {
+        answer = () =>
+          resolve(Response.json({ balance_infos: [{ currency: "CNY", total_balance: "8.80" }] }));
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  try {
+    const adapter = new DeepSeekHarnessAdapter({ environment: { DSH_HOME: home } });
+    const inspection = adapter.inspectAccounts();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const signal = fetchMock.mock.calls[0]?.[1].signal;
+    expect(signal?.aborted).toBe(false);
+
+    await adapter.close();
+    expect(signal?.aborted).toBe(true);
+    answer?.();
+    expect(await inspection).toEqual([]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
