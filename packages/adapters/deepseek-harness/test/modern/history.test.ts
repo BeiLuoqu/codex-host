@@ -281,7 +281,7 @@ describe("DeepSeek Harness Modern history projection", () => {
       const b = path.join(shots, "b.png").replaceAll("\\", "/");
 
       expect(agentTexts(workspace)).toEqual([
-        `![a](${a}) ![b.png](${b}) ![b](b.png)`,
+        `![a](${a})\n\n![b.png](${b})\n\n![b](b.png)`,
         `![b](${b}) ![a](${a})`,
       ]);
       expect(agentTexts()).toEqual([

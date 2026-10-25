@@ -166,6 +166,7 @@ function projectLocalMedia(
       indexOfInlineTick(text, index),
     ]);
     if (next === -1) break;
+    const segmentStart = index;
     output += text.slice(index, next);
     index = next;
     if (text.startsWith("```", next)) {
@@ -203,16 +204,67 @@ function projectLocalMedia(
     }
     if (code.kind === "open") {
       if (!holdIncomplete) break;
-      return { text: output, consumed: next };
+      // The span may become media, which moves the colon introducing it.
+      const held = mediaIntroduction(text.slice(segmentStart, next)).length;
+      return { text: output.slice(0, output.length - held), consumed: next - held };
     }
     const resolved = resolveLocalMediaPath(code.content, roots, exists);
-    output +=
-      resolved === null
-        ? text.slice(next, code.end)
-        : mediaMarkdownImage(resolved, linkPath(resolved));
-    index = code.end;
+    if (resolved === null) {
+      output += text.slice(next, code.end);
+      index = code.end;
+      continue;
+    }
+    const image = mediaMarkdownImage(resolved, linkPath(resolved));
+    if (!canPlaceMediaBlock(output)) {
+      output += image;
+      index = code.end;
+      continue;
+    }
+    // A path the agent wrote inline becomes its own block, as when it writes the image itself:
+    // `…鱼：\`images/1.jpg\`。` reads `…鱼。` and then the image.
+    const punctuation = /^[。．.!！?？;；,，]*/u.exec(text.slice(code.end))?.[0] ?? "";
+    const spacing = /^\s*/u.exec(text.slice(code.end + punctuation.length))?.[0] ?? "";
+    const rest = code.end + punctuation.length + spacing.length;
+    const introduction = mediaIntroduction(text.slice(segmentStart, next));
+    if (rest === text.length && holdIncomplete) {
+      // Later text may still add punctuation to move before the image.
+      return {
+        text: output.slice(0, output.length - introduction.length),
+        consumed: next - introduction.length,
+      };
+    }
+    output = output.slice(0, output.length - introduction.length);
+    // Punctuation moves only onto a line that has text; otherwise it stays after the image.
+    const moved = /\S/u.test(output.slice(output.lastIndexOf("\n") + 1)) ? punctuation : "";
+    output += moved || introduction.trim();
+    if (output.length > 0 && !output.endsWith("\n\n"))
+      output += output.endsWith("\n") ? "\n" : "\n\n";
+    output += image + (moved ? "" : punctuation);
+    if (rest < text.length) output += "\n\n";
+    index = rest;
+  }
+  if (holdIncomplete && index < text.length) {
+    // A trailing colon or space may lead into a media path that has not arrived yet.
+    const held = mediaIntroduction(text.slice(index)).length;
+    if (held > 0) {
+      return {
+        text: output + text.slice(index, text.length - held),
+        consumed: text.length - held,
+      };
+    }
   }
   return { text: output + text.slice(index), consumed: text.length };
+}
+
+/** Trailing spacing, optionally after a colon, that leads into an inline media path. */
+function mediaIntroduction(text: string): string {
+  return /[：:]?[ \t]*$/u.exec(text)?.[0] ?? "";
+}
+
+/** Table rows and headings cannot hold a block, so media written there stays inline. */
+function canPlaceMediaBlock(output: string): boolean {
+  const line = output.slice(output.lastIndexOf("\n") + 1);
+  return !/^\s*[|#]/u.test(line);
 }
 
 function indexOfInlineTick(text: string, start: number): number {

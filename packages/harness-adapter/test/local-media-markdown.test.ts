@@ -54,7 +54,7 @@ describe("rewriteLocalMediaMarkdown", () => {
   it("resolves file URLs and absolute paths", () => {
     const absolute = path.join(workspace, "a.png");
     expect(rewrite(`![a](${pathToFileURL(absolute).href}) and \`${absolute}\``)).toBe(
-      `![a](${at("a.png")}) and ![a.png](${at("a.png")})`,
+      `![a](${at("a.png")}) and\n\n![a.png](${at("a.png")})`,
     );
   });
 
@@ -75,9 +75,27 @@ describe("rewriteLocalMediaMarkdown", () => {
     );
   });
 
+  it("puts a media path written as inline code on its own line, punctuation first", () => {
+    const a = at("a.png");
+    // Grok's usual reply: the image follows the sentence instead of splitting it.
+    expect(rewrite("画好了，是一只大肥鱼：`a.png`。")).toBe(
+      `画好了，是一只大肥鱼。\n\n![a.png](${a})`,
+    );
+    expect(rewrite("看图：`a.png`\n然后继续")).toBe(`看图：\n\n![a.png](${a})\n\n然后继续`);
+    expect(rewrite("see `a.png`. Next")).toBe(`see.\n\n![a.png](${a})\n\nNext`);
+    expect(rewrite("前文\n\n`a.png`")).toBe(`前文\n\n![a.png](${a})`);
+    // Nothing on the line to move punctuation onto.
+    expect(rewrite("`a.png`。")).toBe(`![a.png](${a})。`);
+    // A table row or heading cannot hold a block.
+    expect(rewrite("| 图 | `a.png` |")).toBe(`| 图 | ![a.png](${a}) |`);
+    expect(rewrite("# `a.png`")).toBe(`# ![a.png](${a})`);
+  });
+
   it("holds only a trailing construct that later text could still change", () => {
+    expect(rewrite("大肥鱼：`a.png`", true)).toBe("大肥鱼");
+    expect(rewrite("大肥鱼：", true)).toBe("大肥鱼");
     expect(rewrite("see ![a](a.p", true)).toBe("see ![a](");
-    expect(rewrite("see `a.p", true)).toBe("see ");
+    expect(rewrite("see `a.p", true)).toBe("see");
     expect(rewrite("see ![a", true)).toBe("see ![");
     expect(rewrite("![a](a.png bad) then ` stray\nmore", true)).toBe(
       "![a](a.png bad) then ` stray\nmore",
@@ -104,6 +122,10 @@ describe("LocalMediaMarkdownStream", () => {
     "a!![b](sub/b.png)!",
     "``a.png`` and `a.png`` and ```",
     "![e](截图/e.png)。",
+    "画好了，是一只大肥鱼：`a.png`。后面",
+    "see `a.png`. Next `x.png`",
+    "| 图 | `a.png` |\n`sub/b.png`：",
+    "前文\n\n`a.png`",
   ];
 
   function streamed(text: string, cuts: readonly number[]): { deltas: string[]; text: string } {
@@ -224,7 +246,7 @@ describe("links to media whose path holds a literal %", () => {
       text += stream.append(piece);
     text += stream.flush();
     expect(text).toBe(
-      `![a](${at("shot.png")}.alias) and ![shot.png](${at("shot.png")}.alias) again ![b](${at("shot.png")}.alias)`,
+      `![a](${at("shot.png")}.alias) and\n\n![shot.png](${at("shot.png")}.alias)\n\nagain ![b](${at("shot.png")}.alias)`,
     );
     expect(linkPath).toHaveBeenCalledTimes(1);
   });
