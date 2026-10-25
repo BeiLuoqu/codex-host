@@ -316,10 +316,11 @@ function indexOfLineStartTilde(text: string, start: number): number {
 
 /**
  * End of the line that closes a fence opened before `start`: the same marker, at least as long,
- * indented at most three spaces and followed only by spaces or tabs. -1 while still inside.
+ * indented at most three spaces and followed only by spaces or tabs (and the `\r` of a CRLF line
+ * ending). -1 while still inside.
  */
 function closingFenceEnd(text: string, start: number, marker: string, length: number): number {
-  const closing = new RegExp(`^ {0,3}${marker === "`" ? "`" : "~"}{${length},}[ \\t]*$`, "u");
+  const closing = new RegExp(`^ {0,3}${marker === "`" ? "`" : "~"}{${length},}[ \\t]*\\r?$`, "u");
   // The opening line's info string is never a closing fence.
   let lineStart = text.indexOf("\n", start);
   while (lineStart !== -1) {

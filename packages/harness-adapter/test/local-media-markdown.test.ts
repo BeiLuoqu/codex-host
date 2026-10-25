@@ -121,6 +121,10 @@ describe("rewriteLocalMediaMarkdown", () => {
     expect(rewrite("~~~~\n`a.png`\n~~~~~\nafter `a.png`")).toBe(
       `~~~~\n\`a.png\`\n~~~~~\nafter\n\n![a.png](${a})`,
     );
+    // A CRLF line ending closes a fence too.
+    expect(rewrite("```\r\n`a.png`\r\n``` \r\nafter `a.png`")).toBe(
+      `\`\`\`\r\n\`a.png\`\r\n\`\`\` \r\nafter\n\n![a.png](${a})`,
+    );
     // Backtick runs inside a line are not fences, so later media still resolves.
     expect(rewrite("use ``` here, then ![a](a.png)")).toBe(`use \`\`\` here, then ![a](${a})`);
     expect(rewrite("    ```\n`a.png`")).toBe(`    \`\`\`\n\n![a.png](${a})`);
@@ -167,6 +171,7 @@ describe("LocalMediaMarkdownStream", () => {
     "````\n```\n`a.png`\n```\n````\nthen `a.png`",
     "~~~\n![a](a.png)\n~~\n~~~ \nafter ![a](a.png)",
     "use ``` here `a.png`",
+    "```\r\n`a.png`\r\n```\r\nthen `a.png`",
   ];
 
   function streamed(text: string, cuts: readonly number[]): { deltas: string[]; text: string } {
