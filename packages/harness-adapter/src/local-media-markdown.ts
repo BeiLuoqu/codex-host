@@ -1,4 +1,6 @@
-import { existsSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, linkSync, mkdirSync, rmSync, statSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,8 +25,13 @@ const MEDIA_EXTENSIONS = new Set([
 /** Whether an absolute candidate path is a media file Codex Desktop can load. */
 export type LocalMediaExists = (absolutePath: string) => boolean;
 
+/** The path a Markdown destination should name for a resolved local media file. */
+export type LocalMediaLinkPath = (absolutePath: string) => string;
+
 export interface RewriteLocalMediaMarkdownOptions {
   exists?: LocalMediaExists;
+  /** Defaults to {@link linkableLocalMediaPath}. */
+  linkPath?: LocalMediaLinkPath;
   /**
    * Hold back a trailing construct that later text could still complete or invalidate
    * (an open image or inline code span), so a growing text projects prefix-stably.
@@ -48,6 +55,7 @@ export function rewriteLocalMediaMarkdown(
     roots,
     options.exists ?? mediaFileExists,
     options.holdIncomplete === true,
+    options.linkPath ?? linkableLocalMediaPath,
   ).text;
 }
 
@@ -59,14 +67,28 @@ export function rewriteLocalMediaMarkdown(
 export class LocalMediaMarkdownStream {
   readonly #roots: readonly string[];
   readonly #exists: LocalMediaExists;
+  readonly #linkPath: LocalMediaLinkPath;
   #native = "";
   #text = "";
   /** Native text length represented by `#text`; the rest is held. */
   #consumed = 0;
   #verbatim = false;
 
-  constructor(roots: readonly string[], exists: LocalMediaExists = mediaFileExists) {
+  constructor(
+    roots: readonly string[],
+    exists: LocalMediaExists = mediaFileExists,
+    linkPath: LocalMediaLinkPath = linkableLocalMediaPath,
+  ) {
     this.#roots = [...roots];
+    const linked = new Map<string, string>();
+    this.#linkPath = (absolutePath) => {
+      let link = linked.get(absolutePath);
+      if (link === undefined) {
+        link = linkPath(absolutePath);
+        linked.set(absolutePath, link);
+      }
+      return link;
+    };
     const known = new Map<string, boolean>();
     this.#exists = (absolutePath) => {
       let found = known.get(absolutePath);
@@ -97,7 +119,7 @@ export class LocalMediaMarkdownStream {
   #advance(holdIncomplete: boolean): string {
     const next = this.#verbatim
       ? undefined
-      : projectLocalMedia(this.#native, this.#roots, this.#exists, holdIncomplete);
+      : projectLocalMedia(this.#native, this.#roots, this.#exists, holdIncomplete, this.#linkPath);
     let delta: string;
     if (next?.text.startsWith(this.#text)) {
       delta = next.text.slice(this.#text.length);
@@ -124,6 +146,7 @@ function projectLocalMedia(
   roots: readonly string[],
   exists: LocalMediaExists,
   holdIncomplete: boolean,
+  linkPath: LocalMediaLinkPath,
 ): LocalMediaProjection {
   let output = "";
   let index = 0;
@@ -167,7 +190,7 @@ function projectLocalMedia(
         resolved === null
           ? text.slice(next, image.end)
           : text.slice(next, image.destinationStart) +
-            markdownDestination(resolved, image.bracketed) +
+            markdownDestination(linkPath(resolved), image.bracketed) +
             text.slice(image.destinationEnd, image.end);
       index = image.end;
       continue;
@@ -183,7 +206,10 @@ function projectLocalMedia(
       return { text: output, consumed: next };
     }
     const resolved = resolveLocalMediaPath(code.content, roots, exists);
-    output += resolved === null ? text.slice(next, code.end) : mediaMarkdownImage(resolved);
+    output +=
+      resolved === null
+        ? text.slice(next, code.end)
+        : mediaMarkdownImage(resolved, linkPath(resolved));
     index = code.end;
   }
   return { text: output + text.slice(index), consumed: text.length };
@@ -315,9 +341,58 @@ function skipBlanks(text: string, start: number): number {
   return index;
 }
 
-function mediaMarkdownImage(absolutePath: string): string {
+function mediaMarkdownImage(absolutePath: string, link: string): string {
   const name = path.basename(absolutePath).replaceAll("]", "\\]");
-  return `![${name}](${markdownDestination(absolutePath, false)})`;
+  return `![${name}](${markdownDestination(link, false)})`;
+}
+
+/**
+ * Codex Desktop percent-decodes a local media destination twice before reading the file, so no
+ * single escaping keeps a literal `%` intact; Grok's session directories are the cwd encoded
+ * with encodeURIComponent and always contain one. Such a file is hard-linked (or copied) to a
+ * `%`-free alias under `<data directory>/media-links` and the alias is linked instead; if that
+ * fails, the path is escaped for exactly two decodes. Other paths are returned unchanged.
+ */
+export function linkableLocalMediaPath(
+  absolutePath: string,
+  aliasRoot: string = defaultMediaAliasRoot(),
+): string {
+  if (!absolutePath.includes("%")) return absolutePath;
+  return mediaAlias(absolutePath, aliasRoot) ?? absolutePath.replaceAll("%", "%2525");
+}
+
+function defaultMediaAliasRoot(): string {
+  const dataDirectory = process.env.CODEXHOST_DATA_DIR;
+  return path.join(
+    dataDirectory ? path.resolve(dataDirectory) : path.join(os.homedir(), ".codexhost"),
+    "media-links",
+  );
+}
+
+function mediaAlias(absolutePath: string, aliasRoot: string): string | null {
+  try {
+    const digest = createHash("sha256").update(absolutePath).digest("hex").slice(0, 16);
+    const directory = path.join(aliasRoot, digest);
+    const alias = path.join(directory, path.basename(absolutePath).replaceAll("%", "_"));
+    if (alias.includes("%")) return null;
+    const source = statSync(absolutePath);
+    if (!source.isFile()) return null;
+    if (existsSync(alias)) {
+      const current = statSync(alias);
+      // A hard link shares the source's inode; a copy is current when it is at least as new.
+      if (current.size === source.size && current.mtimeMs >= source.mtimeMs) return alias;
+      rmSync(alias, { force: true });
+    }
+    mkdirSync(directory, { recursive: true });
+    try {
+      linkSync(absolutePath, alias);
+    } catch {
+      copyFileSync(absolutePath, alias);
+    }
+    return alias;
+  } catch {
+    return null;
+  }
 }
 
 function markdownDestination(absolutePath: string, bracketed: boolean): string {

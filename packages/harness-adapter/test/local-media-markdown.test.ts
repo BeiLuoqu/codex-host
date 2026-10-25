@@ -1,3 +1,5 @@
+import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -5,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   LocalMediaMarkdownStream,
+  linkableLocalMediaPath,
   resolveLocalMediaPath,
   rewriteLocalMediaMarkdown,
 } from "../src/local-media-markdown.js";
@@ -148,5 +151,81 @@ describe("LocalMediaMarkdownStream", () => {
     stream.append("text");
     stream.flush();
     expect(check).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("links to media whose path holds a literal %", () => {
+  // Codex Desktop decodes a local media destination twice before it reads the file.
+  const desktopPath = (destination: string) => decodeURI(decodeURI(destination));
+
+  it("links a %-free hard link or copy of the file", async () => {
+    const temp = await mkdtemp(path.join(os.tmpdir(), "media-percent-"));
+    try {
+      // Grok names a session directory after its cwd, encoded with encodeURIComponent.
+      const session = path.join(temp, "sessions", "C%3A%5CUsers%5Cme%5C%E6%96%87");
+      await mkdir(path.join(session, "images"), { recursive: true });
+      const image = path.join(session, "images", "1%25.jpg");
+      await writeFile(image, "jpeg bytes");
+      const aliasRoot = path.join(temp, "media-links");
+      const linkPath = (absolutePath: string) => linkableLocalMediaPath(absolutePath, aliasRoot);
+
+      const output = rewriteLocalMediaMarkdown("![fish](images/1%25.jpg)", [session], {
+        linkPath,
+      });
+      expect(output).toMatch(/^!\[fish\]\([^%<>]+\)$/);
+      const destination = output.slice("![fish](".length, -1);
+      const alias = desktopPath(destination);
+      expect(alias.startsWith(md(aliasRoot) + "/")).toBe(true);
+      expect(path.basename(alias)).toBe("1_25.jpg");
+      expect(await readFile(alias, "utf8")).toBe("jpeg bytes");
+      // The same file keeps the same alias.
+      expect(rewriteLocalMediaMarkdown("`images/1%25.jpg`", [session], { linkPath })).toBe(
+        `![1%25.jpg](${destination})`,
+      );
+    } finally {
+      await rm(temp, { recursive: true, force: true });
+    }
+  });
+
+  it("escapes % for both decodes when no alias can be made", async () => {
+    const temp = await mkdtemp(path.join(os.tmpdir(), "media-percent-"));
+    try {
+      const image = path.join(temp, "C%3A%5Cdir", "1.png");
+      await mkdir(path.dirname(image));
+      await writeFile(image, "png");
+      // A file where the alias directory should be makes every alias fail.
+      const blocked = path.join(temp, "blocked");
+      await writeFile(blocked, "");
+      const destination = md(linkableLocalMediaPath(image, blocked));
+      expect(destination).toContain("%2525");
+      expect(path.resolve(desktopPath(destination))).toBe(image);
+    } finally {
+      await rm(temp, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves paths without % alone and creates no alias", async () => {
+    const temp = await mkdtemp(path.join(os.tmpdir(), "media-percent-"));
+    try {
+      const aliasRoot = path.join(temp, "media-links");
+      const image = path.join(workspace, "shot.png");
+      expect(linkableLocalMediaPath(image, aliasRoot)).toBe(image);
+      await expect(stat(aliasRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(temp, { recursive: true, force: true });
+    }
+  });
+
+  it("asks the stream's link path once per file so published text stays stable", () => {
+    const linkPath = vi.fn((absolutePath: string) => absolutePath + ".alias");
+    const stream = new LocalMediaMarkdownStream(roots, exists, linkPath);
+    let text = "";
+    for (const piece of ["![a](sho", "t.png) and `shot.p", "ng` again ![b](shot.png)"])
+      text += stream.append(piece);
+    text += stream.flush();
+    expect(text).toBe(
+      `![a](${at("shot.png")}.alias) and ![shot.png](${at("shot.png")}.alias) again ![b](${at("shot.png")}.alias)`,
+    );
+    expect(linkPath).toHaveBeenCalledTimes(1);
   });
 });
