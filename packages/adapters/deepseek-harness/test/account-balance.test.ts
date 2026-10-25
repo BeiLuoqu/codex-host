@@ -42,6 +42,21 @@ it("reads only the top-level refs entry of the credentials document", () => {
   expect(readCredentialRef("DEEPSEEK_API_KEY: sk-flat\n", "DEEPSEEK_API_KEY")).toBe("sk-flat");
 });
 
+it("ignores YAML end-of-line comments around the refs entry", () => {
+  const refs = (entry: string) =>
+    readCredentialRef(`version: 1\nrefs:\n  ${entry}\n`, "DEEPSEEK_API_KEY");
+  expect(
+    readCredentialRef(
+      'version: 1\nrefs: # API keys\n  DEEPSEEK_API_KEY: "sk-quoted" # primary\n',
+      "DEEPSEEK_API_KEY",
+    ),
+  ).toBe("sk-quoted");
+  expect(refs("DEEPSEEK_API_KEY: 'sk-single' # note")).toBe("sk-single");
+  expect(refs("DEEPSEEK_API_KEY: sk-bare # note")).toBe("sk-bare");
+  // A value that is only a comment holds no key.
+  expect(refs("DEEPSEEK_API_KEY: # unset")).toBeUndefined();
+});
+
 it("follows DSH precedence: credentials file, then environment, then .env", async () => {
   const environment = { DSH_HOME: home, DEEPSEEK_API_KEY: "sk-env" };
   await writeFile(path.join(home, ".env"), "DEEPSEEK_API_KEY=sk-dotenv\n");

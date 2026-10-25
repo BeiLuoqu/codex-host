@@ -24,14 +24,10 @@ function dshHome(environment: NodeJS.ProcessEnv): string {
 
 function unquote(value: string): string {
   const trimmed = value.trim();
-  if (
-    trimmed.length >= 2 &&
-    ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'")))
-  ) {
-    return trimmed.slice(1, -1).trim();
-  }
-  return trimmed.replace(/\s+#.*$/u, "").trim();
+  // A quoted value may be followed by a comment: `"sk-…" # primary`.
+  const quoted = /^(["'])(.*?)\1\s*(?:#.*)?$/u.exec(trimmed);
+  if (quoted) return (quoted[2] ?? "").trim();
+  return trimmed.replace(/(?:^|\s+)#.*$/u, "").trim();
 }
 
 /** `refs.<name>` of a `version: 1` credentials document, or a legacy flat entry. */
@@ -45,7 +41,7 @@ export function readCredentialRef(text: string, name: string): string | undefine
     if (!line.trim() || line.trimStart().startsWith("#")) continue;
     const indent = line.length - line.trimStart().length;
     if (indent === 0) {
-      inRefs = /^refs\s*:\s*$/u.test(line);
+      inRefs = /^refs\s*:\s*(?:#.*)?$/u.test(line);
       refsIndent = -1;
       if (!versioned) {
         const flat = entry.exec(line);
