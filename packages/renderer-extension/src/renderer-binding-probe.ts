@@ -199,6 +199,17 @@ export function rendererUsageRefreshDelay(attempt: number): number {
   return rendererUsageRefreshDelays[index] ?? rendererUsageRefreshDelays[0];
 }
 
+/**
+ * Missing usage keeps retrying. Once usage is shown, a quota or balance that never arrives (no
+ * key, an invalid key, an account without quota) gets one pass of the backoff, not endless polls.
+ */
+export function canScheduleExternalThreadUsageRefresh(
+  usage: ThreadUsageSnapshot | null,
+  attempt: number,
+): boolean {
+  return usage === null || attempt < rendererUsageRefreshDelays.length;
+}
+
 /** Retry quota only when the Host confirms that this source supplies it. */
 export function shouldRetryExternalThreadUsage(
   accountCreditsSupported: boolean,
@@ -1281,6 +1292,7 @@ export function installRendererBindingProbe(
   const scheduleThreadUsageRefresh = (mounted: MountedComposer): void => {
     if (usageRefreshTimers.has(mounted.composer)) return;
     const attempt = usageRefreshAttempts.get(mounted.composer) ?? 0;
+    if (!canScheduleExternalThreadUsageRefresh(mounted.usage, attempt)) return;
     usageRefreshAttempts.set(mounted.composer, attempt + 1);
     const timer = window.setTimeout(() => {
       usageRefreshTimers.delete(mounted.composer);
