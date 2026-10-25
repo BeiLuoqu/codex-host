@@ -135,6 +135,28 @@ it("reports the balance as an Adapter account and stops after close", async () =
   const adapter = new DeepSeekHarnessAdapter({ environment: { DSH_HOME: home } });
   expect(await adapter.inspectAccounts()).toEqual([]);
   expect(await adapter.inspectAccount()).toBeNull();
-  await adapter.close();
-  expect(await adapter.inspectAccounts()).toEqual([]);
+
+  // The key DSH stores under DSH_HOME reaches the balance request.
+  await writeFile(path.join(home, ".credentials.yaml"), CREDENTIALS);
+  const fetchMock = vi.fn(async () =>
+    Response.json({ balance_infos: [{ currency: "CNY", total_balance: "8.80" }] }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  try {
+    const account = {
+      label: "DeepSeek API",
+      balance: { amount: 8.8, currency: "CNY", label: "DeepSeek API" },
+    };
+    expect(await adapter.inspectAccounts()).toEqual([account]);
+    expect(await adapter.inspectAccount()).toEqual(account);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(DEEPSEEK_BALANCE_ENDPOINT);
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer sk-from-file");
+
+    await adapter.close();
+    expect(await adapter.inspectAccounts()).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
