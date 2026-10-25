@@ -208,6 +208,8 @@ interface NativeTurnBuffer {
   active?: ActiveHostTurn;
   compacting?: string;
   replayed: number;
+  /** Working directory as of the last replayed event, which media in projected text resolves against. */
+  workingDirectory: string | undefined;
   sawUserMessage: boolean;
   reachedCorrelationBoundary: boolean;
 }
@@ -503,12 +505,19 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
     };
     let resumedAutonomousBuffer: NativeTurnBuffer | undefined;
     if (projection.incompleteTurn) {
+      // The incomplete Turn is the journal's tail; replay starts from the directory before it.
+      let workingDirectory = this.#sessionDirectory;
+      const turnStart = this.#events.length - projection.incompleteTurn.events.length;
+      for (const event of this.#events.slice(0, turnStart)) {
+        workingDirectory = modernWorkingDirectory(workingDirectory, event);
+      }
       const buffer: NativeTurnBuffer = {
         nativeTurn: projection.incompleteTurn.turn,
         events: [...projection.incompleteTurn.events],
         input: [],
         initialResume: true,
         replayed: 0,
+        workingDirectory,
         sawUserMessage: false,
         reachedCorrelationBoundary: false,
       };
@@ -2083,6 +2092,7 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
         input: [],
         initialResume: false,
         replayed: 0,
+        workingDirectory: this.#workingDirectory,
         sawUserMessage: false,
         reachedCorrelationBoundary: false,
       };
@@ -2333,6 +2343,7 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
     while (!this.#closed && buffer.replayed < buffer.events.length) {
       const event = buffer.events[buffer.replayed] as ModernJournalEvent;
       buffer.replayed += 1;
+      buffer.workingDirectory = modernWorkingDirectory(buffer.workingDirectory, event);
       this.#projectLiveEvent(buffer, event, initialReplay);
     }
     this.#projectAssistantLiveChunks();
@@ -2452,7 +2463,11 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
         ),
         text: "",
       };
-      const roots = modernMediaRoots(this.#workingDirectory, this.#sessionDirectory);
+      // The directory where the Turn's replay stands, not the journal's latest: replay may lag.
+      const buffer = this.#buffer;
+      const workingDirectory =
+        buffer?.active === active ? buffer.workingDirectory : this.#workingDirectory;
+      const roots = modernMediaRoots(workingDirectory, this.#sessionDirectory);
       active.agent = { item, text: "", media: new LocalMediaMarkdownStream(roots) };
       this.#emit({ type: "item.started", turnId: active.turnId, item });
     }

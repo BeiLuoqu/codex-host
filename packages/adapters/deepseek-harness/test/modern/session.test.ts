@@ -1478,6 +1478,63 @@ describe("DeepSeek Harness Modern Session", () => {
     }
   });
 
+  it("resolves resumed media against the directory of its message, not a later one", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "codexhost-dsh-media-"));
+    const shots = path.join(workspace, "shots");
+    const later = path.join(workspace, "later");
+    try {
+      await mkdir(shots);
+      await mkdir(later);
+      await writeFile(path.join(shots, "a.png"), "png");
+      const feed = new EventFeed();
+      const session = new ModernHarnessSession({
+        remote: new FakeRemote([]),
+        journal: {
+          header: { version: 4, id: SESSION_ID, createdAt: 1, isSeeded: false, cwd: workspace },
+          cursor: 6,
+          projections: { asOfSeq: -1, values: {} },
+          // The incomplete Turn changes directory after the message naming the media.
+          events: [
+            event(0, "turn/start", { turn: 1 }),
+            event(1, "step/start", { turn: 1, step: 1 }),
+            userMessage(2, "show", "old-request"),
+            event(3, "working-directory/change", { cwd: shots }),
+            finalAssistantMessage(4, 1, "![a](a.png)", "think"),
+            event(5, "step/end", { turn: 1, step: 1 }),
+            event(6, "working-directory/change", { cwd: later }),
+          ],
+          live: feed,
+          close: () => {
+            feed.finish();
+            return Promise.resolve();
+          },
+        },
+        control: new FakeControl(),
+        eventGateway: new ModernEventGateway(new FakeRemote([])),
+        modelCatalog: MODEL_CATALOG,
+        permissionModes: null,
+        sessionId: SESSION_ID,
+        randomUUID: () => "autonomous-resume",
+        now: () => 10,
+      });
+      const outputs = lifecycleOutputs(session);
+      const a = path.join(shots, "a.png").replaceAll("\\", "/");
+      let agentText: string | undefined;
+      while (agentText === undefined) {
+        const entry = await nextEvent(outputs);
+        if (entry.type === "item.completed" && entry.snapshot.item.type === "agentMessage") {
+          agentText = entry.snapshot.item.text;
+        }
+      }
+      expect(agentText).toBe(`![a](${a})`);
+      feed.push(event(7, "turn/end", { turn: 1, reason: { kind: "completed" } }));
+      await eventsThrough(outputs, "turn.completed");
+      await session.close();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a live Turn healthy through the DSH 0.2.1-rc.2 search request with disabled thinking", async () => {
     const test = setup([() => accepted()], [], ["request-1"]);
     const outputs = lifecycleOutputs(test.session);
