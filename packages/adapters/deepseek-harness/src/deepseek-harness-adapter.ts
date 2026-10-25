@@ -1,3 +1,4 @@
+import { fetchDeepSeekBalances } from "./account-balance.js";
 import { createDshUsageStatistics } from "./modern/usage-statistics.js";
 import { deepSeekHarnessCommandCatalog } from "./harness-commands.js";
 
@@ -17,6 +18,7 @@ import {
   harnessIdSchema,
   nativeSessionRefSchema,
   type DeepSeekModernSessionCandidate,
+  type HarnessAccountSnapshot,
   type HarnessId,
 } from "@codexhost/shared-contracts";
 
@@ -175,6 +177,16 @@ export class DeepSeekHarnessAdapter implements HarnessAdapter {
   close(): Promise<void> {
     this.#closePromise ??= this.#performClose();
     return this.#closePromise;
+  }
+
+  /** DSH holds no Account; this reports the configured DeepSeek API key's prepaid balance. */
+  async inspectAccounts(): Promise<readonly HarnessAccountSnapshot[]> {
+    if (this.#closed) return [];
+    return fetchDeepSeekBalances({ environment: this.#options.environment ?? process.env });
+  }
+
+  async inspectAccount(): Promise<HarnessAccountSnapshot | null> {
+    return (await this.inspectAccounts())[0] ?? null;
   }
 
   async #listSessionImportCandidates(): Promise<
