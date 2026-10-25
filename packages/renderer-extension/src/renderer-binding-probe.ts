@@ -15,6 +15,7 @@ import {
   type HarnessPermissionModeId,
   type HarnessPermissionModeScope,
   type HarnessThinkingOptionId,
+  type AccountBalanceSnapshot,
   type AccountCreditsSnapshot,
   type ThreadInspection,
   type ThreadUsageInspection,
@@ -203,8 +204,12 @@ export function shouldRetryExternalThreadUsage(
   accountCreditsSupported: boolean,
   usage: ThreadUsageSnapshot | null,
   accountCredits: AccountCreditsSnapshot | null = null,
+  accountBalance: AccountBalanceSnapshot | null = null,
 ): boolean {
-  return usage === null || (accountCreditsSupported && accountCredits === null);
+  return (
+    usage === null ||
+    (accountCreditsSupported && accountCredits === null && accountBalance === null)
+  );
 }
 
 export function shouldReloadExternalCatalogAfterAvailabilityRefresh(
@@ -580,6 +585,7 @@ interface MountedComposer {
   threadConfiguration: HarnessModelSelectionState | undefined;
   usage: ThreadUsageSnapshot | null;
   accountCredits: AccountCreditsSnapshot | null;
+  accountBalance: AccountBalanceSnapshot | null;
   accountCreditsSupported: boolean;
   hostId: string | null;
   usageRequestGeneration: number;
@@ -1027,6 +1033,7 @@ export function installRendererBindingProbe(
       settingsLifecycle.locale,
       currentCodexAccount ?? null,
       mounted.ownershipStatus === "error",
+      mounted.accountBalance,
     );
     showCodexUsageGateStatus(mounted, mounted.codexUsageGate.update(externalSubmissionReady));
     if (mounted.control.usage) {
@@ -1147,6 +1154,7 @@ export function installRendererBindingProbe(
       mounted.usageRequestGeneration += 1;
       mounted.usage = update.usage;
       mounted.accountCredits = update.accountCredits ?? null;
+      mounted.accountBalance = update.accountBalance ?? null;
       if (update.accountCreditsSupported !== undefined)
         mounted.accountCreditsSupported = update.accountCreditsSupported;
       usageRefreshAttempts.delete(mounted.composer);
@@ -1170,6 +1178,7 @@ export function installRendererBindingProbe(
     const generation = ++mounted.usageRequestGeneration;
     mounted.usage = null;
     mounted.accountCredits = null;
+    mounted.accountBalance = null;
     renderMounted(mounted);
     if (!accountId || !client?.inspectCodexAccountUsage) return;
     try {
@@ -1206,6 +1215,7 @@ export function installRendererBindingProbe(
     if (!threadId || !modelControl) {
       mounted.usage = null;
       mounted.accountCredits = null;
+      mounted.accountBalance = null;
       usageRefreshAttempts.delete(mounted.composer);
       renderMounted(mounted);
       return;
@@ -1233,8 +1243,12 @@ export function installRendererBindingProbe(
       }
       mounted.usage = result.usage;
       mounted.accountCredits = result.accountCredits ?? null;
+      mounted.accountBalance = result.accountBalance ?? null;
       mounted.accountCreditsSupported = result.accountCreditsSupported ?? false;
-      if (result.usage !== null && (!mounted.accountCreditsSupported || result.accountCredits)) {
+      if (
+        result.usage !== null &&
+        (!mounted.accountCreditsSupported || result.accountCredits || result.accountBalance)
+      ) {
         usageRefreshAttempts.delete(mounted.composer);
       }
       renderMounted(mounted);
@@ -1243,6 +1257,7 @@ export function installRendererBindingProbe(
           mounted.accountCreditsSupported,
           result.usage,
           result.accountCredits ?? null,
+          result.accountBalance ?? null,
         )
       ) {
         scheduleThreadUsageRefresh(mounted);
@@ -1452,6 +1467,7 @@ export function installRendererBindingProbe(
       mounted.ownershipStatus = "loading";
       mounted.usage = null;
       mounted.accountCredits = null;
+      mounted.accountBalance = null;
       mounted.usageRequestGeneration += 1;
       usageRefreshAttempts.delete(mounted.composer);
       if (previousTarget?.[0] === "conversation") renderMounted(mounted);
@@ -2485,6 +2501,7 @@ export function installRendererBindingProbe(
         mounted.permissionModeView = { status: "idle" };
         mounted.usage = null;
         mounted.accountCredits = null;
+        mounted.accountBalance = null;
         mounted.usageRequestGeneration += 1;
         const state = controller.get(mounted.composer);
         if (applyDraftAgentCarrier(mounted.composer, state.agent)) {
@@ -2507,6 +2524,7 @@ export function installRendererBindingProbe(
       mounted.ownershipStatus = "loading";
       mounted.usage = null;
       mounted.accountCredits = null;
+      mounted.accountBalance = null;
       mounted.usageRequestGeneration += 1;
       usageRefreshAttempts.delete(mounted.composer);
       const timer = usageRefreshTimers.get(mounted.composer);
@@ -2736,6 +2754,7 @@ export function installRendererBindingProbe(
       threadConfiguration: inherited?.threadConfiguration,
       usage: inherited?.usage ?? null,
       accountCredits: inherited?.accountCredits ?? null,
+      accountBalance: inherited?.accountBalance ?? null,
       accountCreditsSupported: inherited?.accountCreditsSupported ?? false,
       hostId: inherited?.hostId ?? hostId,
       usageRequestGeneration: 0,
@@ -2756,6 +2775,7 @@ export function installRendererBindingProbe(
         mounted.accountCreditsSupported,
         mounted.usage,
         mounted.accountCredits,
+        mounted.accountBalance,
       )
     ) {
       scheduleThreadUsageRefresh(mounted);

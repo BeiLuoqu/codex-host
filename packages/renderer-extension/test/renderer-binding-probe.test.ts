@@ -421,6 +421,12 @@ describe("Renderer Composer DOM behavior", () => {
       ),
     ).toBe(false);
     expect(shouldRetryExternalThreadUsage(false, { totalCostUsd: 0.168 })).toBe(false);
+    expect(
+      shouldRetryExternalThreadUsage(true, { totalCostUsd: 0.168 }, null, {
+        amount: 12.34,
+        currency: "CNY",
+      }),
+    ).toBe(false);
     expect(shouldRetryExternalThreadUsage(true, { totalCostUsd: 0.168 })).toBe(true);
     expect(
       shouldRetryExternalThreadUsage(
