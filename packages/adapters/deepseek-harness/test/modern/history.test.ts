@@ -4,8 +4,10 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { LocalMediaMarkdownStream } from "@codexhost/harness-adapter/local-media-markdown";
 import {
   matchesModernForkHistory,
+  modernMediaRoots,
   ModernEventValidator,
   ModernHistoryError,
   resolveModernForkBoundary,
@@ -288,6 +290,30 @@ describe("DeepSeek Harness Modern history projection", () => {
         "![a](shots/a.png) `shots/b.png` ![b](b.png)",
         "![b](b.png) ![a](shots/a.png)",
       ]);
+
+      // A journal without a header cwd still reloads with the images live output showed.
+      const absolute = path.join(shots, "a.png");
+      const live = new LocalMediaMarkdownStream(modernMediaRoots(undefined, undefined));
+      const liveText = live.append(`see \`${absolute}\``) + live.flush();
+      const reloaded = (media?: boolean) =>
+        projectModernHistory({
+          sessionId: SESSION_ID,
+          events: [
+            event(0, "turn/start", { turn: 1 }),
+            event(1, "step/start", { turn: 1, step: 1 }),
+            userMessage(2, ["show"]),
+            assistantMessage(3, 1, 1, `see \`${absolute}\``, "think"),
+            event(4, "step/end", { turn: 1, step: 1 }),
+            event(5, "turn/end", { turn: 1, reason: { kind: "completed" } }),
+          ],
+          ...(media === undefined ? {} : { media }),
+        }).snapshot.turns.flatMap(({ items }) =>
+          items.flatMap(({ item }) => (item.type === "agentMessage" ? [item.text] : [])),
+        );
+      expect(liveText).toBe(`see\n\n![a.png](${a})`);
+      expect(reloaded(true)).toEqual([liveText]);
+      // Usage projections do not ask for media and keep the native text.
+      expect(reloaded()).toEqual([`see \`${absolute}\``]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

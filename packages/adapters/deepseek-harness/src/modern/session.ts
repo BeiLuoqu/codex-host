@@ -2452,7 +2452,7 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
         ),
         text: "",
       };
-      const roots = modernMediaRoots(this.#workingDirectory, this.#sessionDirectory) ?? [];
+      const roots = modernMediaRoots(this.#workingDirectory, this.#sessionDirectory);
       active.agent = { item, text: "", media: new LocalMediaMarkdownStream(roots) };
       this.#emit({ type: "item.started", turnId: active.turnId, item });
     }
@@ -2802,7 +2802,12 @@ export class ModernHarnessSession implements HarnessSession, ModernEventSink {
       sessionId: this.#sessionId,
       events: this.#events,
       profile: this.#profile,
-      ...(media && this.#sessionDirectory !== undefined ? { cwd: this.#sessionDirectory } : {}),
+      ...(media
+        ? {
+            media: true,
+            ...(this.#sessionDirectory !== undefined ? { cwd: this.#sessionDirectory } : {}),
+          }
+        : {}),
       ...(this.#fallbackModel ? { fallbackModel: this.#fallbackModel } : {}),
       ...(this.#fallbackThinkingOptionId
         ? { fallbackThinkingOptionId: this.#fallbackThinkingOptionId }

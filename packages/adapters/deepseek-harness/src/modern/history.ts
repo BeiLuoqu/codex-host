@@ -784,10 +784,15 @@ export interface ProjectModernHistoryInput {
   readonly maxEvents?: number;
   readonly profile?: DeepSeekModernProfile;
   /**
-   * Session working directory from the journal header. When present, local media that agent
-   * messages reference by relative path becomes absolute, so Codex Desktop can display it.
+   * Session working directory from the journal header. Relative media paths in agent messages
+   * resolve against it when {@link media} is on.
    */
   readonly cwd?: string;
+  /**
+   * Rewrite local media in agent messages exactly as live output does, so a reloaded Thread
+   * shows the same images. Defaults to on when `cwd` is given.
+   */
+  readonly media?: boolean;
 }
 
 /** Strictly validate and project one complete authoritative Modern journal prefix. */
@@ -808,6 +813,7 @@ export function projectModernHistory(input: ProjectModernHistoryInput): ModernHi
   let contextWindowTokens: number | undefined;
   let usage: HostUsage | null = null;
   let workingDirectory = input.cwd;
+  const media = input.media ?? input.cwd !== undefined;
   const rawUsageByStep = new Map<string, unknown>();
 
   const rebuildUsage = (): void => {
@@ -881,7 +887,7 @@ export function projectModernHistory(input: ProjectModernHistoryInput): ModernHi
               active,
               input.sessionId,
               data,
-              modernMediaRoots(workingDirectory, input.cwd),
+              media ? modernMediaRoots(workingDirectory, input.cwd) : undefined,
             );
           }
         }
@@ -1039,9 +1045,12 @@ export function modernWorkingDirectory(
 export function modernMediaRoots(
   workingDirectory: string | undefined,
   sessionDirectory: string | undefined,
-): string[] | undefined {
-  if (sessionDirectory === undefined) return undefined;
-  return [...new Set([workingDirectory ?? sessionDirectory, sessionDirectory])];
+): string[] {
+  return [
+    ...new Set(
+      [workingDirectory ?? sessionDirectory, sessionDirectory].filter((root) => root !== undefined),
+    ),
+  ];
 }
 
 function projectAssistantMessage(
