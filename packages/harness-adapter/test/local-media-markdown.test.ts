@@ -91,7 +91,24 @@ describe("rewriteLocalMediaMarkdown", () => {
     expect(rewrite("# `a.png`")).toBe(`# ![a.png](${a})`);
   });
 
+  it("shows a link to local media as an image and leaves other links alone", () => {
+    const a = at("a.png");
+    // Grok sometimes links the generated file instead of embedding it.
+    expect(rewrite("画好了：\n\n[Claude 御姐](a.png)\n\n想改再说。")).toBe(
+      `画好了：\n\n![Claude 御姐](${a})\n\n想改再说。`,
+    );
+    expect(rewrite("见 [图](sub/b.png)。")).toBe(`见。\n\n![图](${at("sub/b.png")})`);
+    const unchanged = [
+      "[site](https://example.com/a.png)",
+      "[notes](notes.txt) and [gone](missing.png)",
+      "- [ ] task\n- [x] done [1]",
+      `[![badge](${a})](a.png)`,
+    ].join("\n");
+    expect(rewrite(unchanged)).toBe(unchanged);
+  });
+
   it("holds only a trailing construct that later text could still change", () => {
+    expect(rewrite("见 [图](sub/b", true)).toBe("见");
     expect(rewrite("大肥鱼：`a.png`", true)).toBe("大肥鱼");
     expect(rewrite("大肥鱼：", true)).toBe("大肥鱼");
     expect(rewrite("see ![a](a.p", true)).toBe("see ![a](");
@@ -126,6 +143,8 @@ describe("LocalMediaMarkdownStream", () => {
     "see `a.png`. Next `x.png`",
     "| 图 | `a.png` |\n`sub/b.png`：",
     "前文\n\n`a.png`",
+    "画好了：\n\n[Claude 御姐](a.png)\n\n后面",
+    "[x](a.png) and [y](notes.txt) - [ ] t [z](https://e/a.png)",
   ];
 
   function streamed(text: string, cuts: readonly number[]): { deltas: string[]; text: string } {

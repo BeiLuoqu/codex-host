@@ -163,6 +163,7 @@ function projectLocalMedia(
     const next = earliestIndex([
       text.indexOf("```", index),
       text.indexOf("![", index),
+      text.indexOf("[", index),
       indexOfInlineTick(text, index),
     ]);
     if (next === -1) break;
@@ -196,35 +197,50 @@ function projectLocalMedia(
       index = image.end;
       continue;
     }
-    const code = parseInlineCode(text, next);
-    if (code.kind === "text") {
-      output += "`";
-      index = next + 1;
+    // A link or inline code naming local media becomes an image; anything else stays as is.
+    const construct =
+      text[next] === "["
+        ? parseMarkdownImage(text, next, 1)
+        : (() => {
+            const code = parseInlineCode(text, next);
+            return code.kind === "code"
+              ? { kind: "code" as const, destination: code.content, end: code.end }
+              : code.kind === "text"
+                ? { kind: "text" as const, end: next + 1 }
+                : code;
+          })();
+    if (construct.kind === "text") {
+      output += text.slice(next, construct.end);
+      index = construct.end;
       continue;
     }
-    if (code.kind === "open") {
+    if (construct.kind === "open") {
       if (!holdIncomplete) break;
-      // The span may become media, which moves the colon introducing it.
+      // The construct may become media, which moves the colon introducing it.
       const held = mediaIntroduction(text.slice(segmentStart, next)).length;
       return { text: output.slice(0, output.length - held), consumed: next - held };
     }
-    const resolved = resolveLocalMediaPath(code.content, roots, exists);
+    const resolved = resolveLocalMediaPath(construct.destination, roots, exists);
     if (resolved === null) {
-      output += text.slice(next, code.end);
-      index = code.end;
+      output += text.slice(next, construct.end);
+      index = construct.end;
       continue;
     }
-    const image = mediaMarkdownImage(resolved, linkPath(resolved));
+    const image =
+      construct.kind === "image"
+        ? `![${construct.label}](${markdownDestination(linkPath(resolved), construct.bracketed)})`
+        : mediaMarkdownImage(resolved, linkPath(resolved));
+    const end = construct.end;
     if (!canPlaceMediaBlock(output)) {
       output += image;
-      index = code.end;
+      index = end;
       continue;
     }
-    // A path the agent wrote inline becomes its own block, as when it writes the image itself:
+    // Media the agent named inline becomes its own block, as when it writes the image itself:
     // `…鱼：\`images/1.jpg\`。` reads `…鱼。` and then the image.
-    const punctuation = /^[。．.!！?？;；,，]*/u.exec(text.slice(code.end))?.[0] ?? "";
-    const spacing = /^\s*/u.exec(text.slice(code.end + punctuation.length))?.[0] ?? "";
-    const rest = code.end + punctuation.length + spacing.length;
+    const punctuation = /^[。．.!！?？;；,，]*/u.exec(text.slice(end))?.[0] ?? "";
+    const spacing = /^\s*/u.exec(text.slice(end + punctuation.length))?.[0] ?? "";
+    const rest = end + punctuation.length + spacing.length;
     const introduction = mediaIntroduction(text.slice(segmentStart, next));
     if (rest === text.length && holdIncomplete) {
       // Later text may still add punctuation to move before the image.
@@ -309,6 +325,8 @@ function parseInlineCode(text: string, start: number): ParsedInlineCode {
 type ParsedMarkdownImage =
   | {
       kind: "image";
+      /** Raw label text, without its brackets. */
+      label: string;
       destination: string;
       destinationStart: number;
       destinationEnd: number;
@@ -319,10 +337,11 @@ type ParsedMarkdownImage =
   | { kind: "open"; holdFrom: number }
   | { kind: "text"; end: number };
 
-function parseMarkdownImage(text: string, start: number): ParsedMarkdownImage {
+/** Parses `![label](destination)`, or with `prefix` 1 a link `[label](destination)`. */
+function parseMarkdownImage(text: string, start: number, prefix = 2): ParsedMarkdownImage {
   // Until the label closes, only `![` is settled: `!` was publishable before `[` arrived.
-  const openLabel = { kind: "open", holdFrom: start + 2 } as const;
-  let index = start + 2;
+  const openLabel = { kind: "open", holdFrom: start + prefix } as const;
+  let index = start + prefix;
   while (index < text.length) {
     const character = text[index];
     if (character === "\n") return { kind: "text", end: start + 1 };
@@ -331,8 +350,11 @@ function parseMarkdownImage(text: string, start: number): ParsedMarkdownImage {
       continue;
     }
     if (character === "]") break;
+    // A link around an image or another link is not a plain reference to media.
+    if (prefix === 1 && character === "[") return { kind: "text", end: start + 1 };
     index += 1;
   }
+  const labelEnd = index;
   if (index + 1 >= text.length) return openLabel;
   if (text[index + 1] !== "(") return { kind: "text", end: start + 1 };
   const destinationStart = index + 2;
@@ -379,6 +401,7 @@ function parseMarkdownImage(text: string, start: number): ParsedMarkdownImage {
   if (text[index] !== ")") return malformed;
   return {
     kind: "image",
+    label: text.slice(start + prefix, labelEnd),
     destination,
     destinationStart,
     destinationEnd,
