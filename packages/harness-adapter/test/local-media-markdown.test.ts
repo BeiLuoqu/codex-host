@@ -107,6 +107,25 @@ describe("rewriteLocalMediaMarkdown", () => {
     expect(rewrite(unchanged)).toBe(unchanged);
   });
 
+  it("follows CommonMark fences: line-start openers and matching closers only", () => {
+    const a = at("a.png");
+    const fenced = [
+      "````md\n```\n![a](a.png)\n```\n`a.png`\n````",
+      "~~~\n[x](a.png) `a.png`\n~~~",
+      "  ```\n`a.png`\n  ``` \t",
+      // Not closed: a shorter run, the other marker, or text after the run.
+      "```\n`a.png`\n``\n~~~\n``` x\n`a.png`",
+    ];
+    for (const text of fenced) expect(rewrite(text), text).toBe(text);
+    // A fence ends at a matching line, and media after it is rewritten again.
+    expect(rewrite("~~~~\n`a.png`\n~~~~~\nafter `a.png`")).toBe(
+      `~~~~\n\`a.png\`\n~~~~~\nafter\n\n![a.png](${a})`,
+    );
+    // Backtick runs inside a line are not fences, so later media still resolves.
+    expect(rewrite("use ``` here, then ![a](a.png)")).toBe(`use \`\`\` here, then ![a](${a})`);
+    expect(rewrite("    ```\n`a.png`")).toBe(`    \`\`\`\n\n![a.png](${a})`);
+  });
+
   it("holds only a trailing construct that later text could still change", () => {
     expect(rewrite("见 [图](sub/b", true)).toBe("见");
     expect(rewrite("大肥鱼：`a.png`", true)).toBe("大肥鱼");
@@ -145,6 +164,9 @@ describe("LocalMediaMarkdownStream", () => {
     "前文\n\n`a.png`",
     "画好了：\n\n[Claude 御姐](a.png)\n\n后面",
     "[x](a.png) and [y](notes.txt) - [ ] t [z](https://e/a.png)",
+    "````\n```\n`a.png`\n```\n````\nthen `a.png`",
+    "~~~\n![a](a.png)\n~~\n~~~ \nafter ![a](a.png)",
+    "use ``` here `a.png`",
   ];
 
   function streamed(text: string, cuts: readonly number[]): { deltas: string[]; text: string } {

@@ -150,31 +150,48 @@ function projectLocalMedia(
 ): LocalMediaProjection {
   let output = "";
   let index = 0;
-  let fence = false;
+  let fence: { readonly marker: string; readonly length: number } | null = null;
   while (index < text.length) {
     if (fence) {
-      const fenceEnd = text.indexOf("```", index);
-      if (fenceEnd === -1) break;
-      output += text.slice(index, fenceEnd + 3);
-      index = fenceEnd + 3;
-      fence = false;
+      // Fenced code is copied verbatim through its closing fence line.
+      const close = closingFenceEnd(text, index, fence.marker, fence.length);
+      if (close === -1) break;
+      output += text.slice(index, close);
+      index = close;
+      fence = null;
       continue;
     }
     const next = earliestIndex([
-      text.indexOf("```", index),
       text.indexOf("![", index),
       text.indexOf("[", index),
-      indexOfInlineTick(text, index),
+      text.indexOf("`", index),
+      indexOfLineStartTilde(text, index),
     ]);
     if (next === -1) break;
     const segmentStart = index;
     output += text.slice(index, next);
     index = next;
-    if (text.startsWith("```", next)) {
-      output += "```";
-      index += 3;
-      fence = true;
-      continue;
+    const marker = text[next];
+    if (marker === "`" || marker === "~") {
+      let runEnd = next;
+      while (text[runEnd] === marker) runEnd += 1;
+      if (runEnd === text.length && holdIncomplete) {
+        // The run may still grow into a fence, or a backtick may open a media path.
+        const held = mediaIntroduction(text.slice(segmentStart, next)).length;
+        return { text: output.slice(0, output.length - held), consumed: next - held };
+      }
+      // CommonMark: a fence is three or more of one marker, indented at most three spaces.
+      if (runEnd - next >= 3 && isLineStart(text, next)) {
+        fence = { marker, length: runEnd - next };
+        output += text.slice(next, runEnd);
+        index = runEnd;
+        continue;
+      }
+      if (marker === "~" || runEnd - next > 1) {
+        output += text.slice(next, runEnd);
+        index = runEnd;
+        continue;
+      }
     }
     if (text.startsWith("![", next)) {
       const image = parseMarkdownImage(text, next);
@@ -283,16 +300,34 @@ function canPlaceMediaBlock(output: string): boolean {
   return !/^\s*[|#]/u.test(line);
 }
 
-function indexOfInlineTick(text: string, start: number): number {
-  let index = start;
-  while (index < text.length) {
-    const tick = text.indexOf("`", index);
-    if (tick === -1) return -1;
-    if (text.startsWith("```", tick)) {
-      index = tick + 3;
-      continue;
-    }
-    return tick;
+/** Whether only up to three spaces precede `index` on its line. */
+function isLineStart(text: string, index: number): boolean {
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  return index - lineStart <= 3 && /^ *$/u.test(text.slice(lineStart, index));
+}
+
+/** A `~` that could open a fence; elsewhere tildes are ordinary text. */
+function indexOfLineStartTilde(text: string, start: number): number {
+  for (let tilde = text.indexOf("~", start); tilde !== -1; tilde = text.indexOf("~", tilde + 1)) {
+    if (isLineStart(text, tilde)) return tilde;
+  }
+  return -1;
+}
+
+/**
+ * End of the line that closes a fence opened before `start`: the same marker, at least as long,
+ * indented at most three spaces and followed only by spaces or tabs. -1 while still inside.
+ */
+function closingFenceEnd(text: string, start: number, marker: string, length: number): number {
+  const closing = new RegExp(`^ {0,3}${marker === "`" ? "`" : "~"}{${length},}[ \\t]*$`, "u");
+  // The opening line's info string is never a closing fence.
+  let lineStart = text.indexOf("\n", start);
+  while (lineStart !== -1) {
+    lineStart += 1;
+    const newline = text.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? text.length : newline;
+    if (closing.test(text.slice(lineStart, lineEnd))) return lineEnd;
+    lineStart = newline;
   }
   return -1;
 }
