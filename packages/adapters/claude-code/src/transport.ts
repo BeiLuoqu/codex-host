@@ -330,8 +330,12 @@ export interface ClaudeTurnTransport {
    * the current tool call, or running it next. The Turn ending first does not reject a written
    * message. Rejects with {@link ClaudeSteerMissedTurnError} when no Turn is active, the message
    * cannot be written, or the transport closes or faults before acceptance.
+   *
+   * `onTakeover` runs once for a written message: `true` when Claude drains it into a native turn
+   * (`command_lifecycle` `started`), `false` when it ends without one, the `queued` receipt never
+   * arrives, or the transport closes or faults first.
    */
-  steer(text: string, messageId: string): Promise<void>;
+  steer(text: string, messageId: string, onTakeover?: (started: boolean) => void): Promise<void>;
   respondToInteraction(response: ClaudeInteractionResponse): Promise<void>;
   /** Interrupts the running requested or autonomous Turn; its Terminal still follows. */
   abort(): Promise<void>;

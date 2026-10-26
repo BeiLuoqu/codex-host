@@ -3283,7 +3283,10 @@ describe("ClaudeSdkTransport steer", () => {
     expect(value.transport.canSteerActiveTurn()).toBe(true);
 
     const steerId = "00000000-0000-4000-8000-000000000060";
-    const steered = value.transport.steer("background status?", steerId);
+    const takeovers: boolean[] = [];
+    const steered = value.transport.steer("background status?", steerId, (started) =>
+      takeovers.push(started),
+    );
     const prompt = value.queryInput().prompt;
     if (typeof prompt === "string" || !prompt) throw new Error("expected streaming input");
     const input = prompt[Symbol.asyncIterator]();
@@ -3305,6 +3308,19 @@ describe("ClaudeSdkTransport steer", () => {
       session_id: "00000000-0000-4000-8000-000000000001",
     } as unknown as SDKMessage);
     await steered;
+    expect(takeovers).toEqual([]);
+
+    // Claude drains the steer into its next native turn, reported once.
+    for (const state of ["started", "completed"]) {
+      value.fakeQuery.push({
+        type: "command_lifecycle",
+        state,
+        command_uuid: steerId,
+        uuid: "00000000-0000-4000-8000-000000000064",
+        session_id: "00000000-0000-4000-8000-000000000001",
+      } as unknown as SDKMessage);
+    }
+    await vi.waitFor(() => expect(takeovers).toEqual([true]));
 
     // The answer runs as the held Turn's next Segment through the idle handler.
     pushAssistantText(
@@ -3395,6 +3411,34 @@ describe("ClaudeSdkTransport steer", () => {
     await value.transport.close();
   });
 
+  it("reports a queued steer that ends without a native turn", async () => {
+    const value = fixture();
+    await value.transport.start();
+    const turn = value.transport.runTurn(
+      "hello",
+      "00000000-0000-4000-8000-000000000042",
+      () => undefined,
+    );
+    await enableNativeSteer(value);
+    const steerId = "00000000-0000-4000-8000-000000000043";
+    const takeovers: boolean[] = [];
+    const steered = value.transport.steer("PIN", steerId, (started) => takeovers.push(started));
+    for (const state of ["queued", "cancelled"]) {
+      value.fakeQuery.push({
+        type: "command_lifecycle",
+        state,
+        command_uuid: steerId,
+        uuid: "00000000-0000-4000-8000-000000000044",
+        session_id: "00000000-0000-4000-8000-000000000001",
+      } as unknown as SDKMessage);
+    }
+    await steered;
+    await vi.waitFor(() => expect(takeovers).toEqual([false]));
+    completeTurn(value.fakeQuery);
+    await turn;
+    await value.transport.close();
+  });
+
   it("keeps a written steer accepted when the Turn ends before Claude queues it", async () => {
     const value = fixture();
     await value.transport.start();
@@ -3450,9 +3494,14 @@ describe("ClaudeSdkTransport steer", () => {
       () => undefined,
     );
     await enableNativeSteer({ transport, fakeQuery: value.fakeQuery });
+    const takeovers: boolean[] = [];
     await expect(
-      transport.steer("PIN", "00000000-0000-4000-8000-000000000039"),
+      transport.steer("PIN", "00000000-0000-4000-8000-000000000039", (started) =>
+        takeovers.push(started),
+      ),
     ).resolves.toBeUndefined();
+    // Without a receipt nothing reports its fate, so it is no longer awaited.
+    expect(takeovers).toEqual([false]);
     completeTurn(value.fakeQuery);
     await turn;
     await transport.close();
@@ -3465,10 +3514,16 @@ describe("ClaudeSdkTransport steer", () => {
       .runTurn("hello", "00000000-0000-4000-8000-000000000040", () => undefined)
       .catch(() => undefined);
     await enableNativeSteer(value);
-    const steered = value.transport.steer("PIN", "00000000-0000-4000-8000-000000000041");
+    const takeovers: boolean[] = [];
+    const steered = value.transport.steer(
+      "PIN",
+      "00000000-0000-4000-8000-000000000041",
+      (started) => takeovers.push(started),
+    );
     const lostReceipt = expect(steered).rejects.toThrow("receipt was lost after input was written");
     await value.transport.close();
     await lostReceipt;
+    expect(takeovers).toEqual([false]);
     await expect(steered).rejects.not.toBeInstanceOf(ClaudeSteerMissedTurnError);
   });
 });

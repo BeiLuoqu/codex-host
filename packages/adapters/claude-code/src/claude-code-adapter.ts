@@ -229,8 +229,8 @@ interface ActiveTurn {
   cancellation: TurnCancellation | null;
   /** True while Claude can still produce a native result for the current Root Segment. */
   rootSegmentActive: boolean;
-  /** A written steer is not yet taken over by a native Root Segment; the Turn must stay open. */
-  steerAwaitingNative: boolean;
+  /** Written steers Claude has not yet drained into a native turn; the Turn must stay open. */
+  steersAwaitingNative: Set<string>;
   completion: Promise<void>;
   resolveCompletion(): void;
 }
@@ -981,7 +981,7 @@ class ClaudeHarnessSession implements HarnessSession {
       nativeTurnKey,
       nativeTurnRef: null,
       cancellationRequested: false,
-      steerAwaitingNative: false,
+      steersAwaitingNative: new Set(),
       usageRequestIds: new Set(),
       estimatedInputTokens: 0,
       estimatedOutputTokens: 0,
@@ -1056,15 +1056,18 @@ class ClaudeHarnessSession implements HarnessSession {
         },
       };
     }
-    // The write happens synchronously inside steer(); claim the keep-open before it, so
-    // continuation quiescence cannot finish the held Turn between write and native takeover.
-    active.steerAwaitingNative = true;
+    // The write happens synchronously inside steer(); claim the keep-open before it, so neither
+    // the Root result nor continuation quiescence finishes the Turn before Claude drains the steer.
+    const messageId = this.#randomUUID();
+    active.steersAwaitingNative.add(messageId);
     try {
-      await transport.steer(text, this.#randomUUID());
+      await transport.steer(text, messageId, (started) =>
+        this.#takeOverSteer(active, messageId, started),
+      );
     } catch (error) {
       if (error instanceof ClaudeSteerMissedTurnError) {
         // Nothing was written, or the Session died after writing and the Turn ends anyway.
-        active.steerAwaitingNative = false;
+        this.#takeOverSteer(active, messageId, false);
         return { ok: false, error: invalidState("Claude Code steer missed the active Turn") };
       }
       throw error;
@@ -1183,7 +1186,7 @@ class ClaudeHarnessSession implements HarnessSession {
       nativeTurnKey,
       nativeTurnRef: null,
       cancellationRequested: false,
-      steerAwaitingNative: false,
+      steersAwaitingNative: new Set(),
       usageRequestIds: new Set(),
       estimatedInputTokens: 0,
       estimatedOutputTokens: 0,
@@ -1597,7 +1600,10 @@ class ClaudeHarnessSession implements HarnessSession {
     if (
       transport &&
       (taskIds.length > 0 ||
-        (active.held && (active.rootSegmentActive || this.#occupancy.awaitingContinuation)))
+        (active.held &&
+          (active.rootSegmentActive ||
+            this.#occupancy.awaitingContinuation ||
+            active.steersAwaitingNative.size > 0)))
     ) {
       await this.#cancelBackgroundWork(active, transport, taskIds);
       return { ok: true, value: { cancellationRequested: true } };
@@ -1677,6 +1683,11 @@ class ClaudeHarnessSession implements HarnessSession {
     const cancellation = active.cancellation;
     if (this.#active !== active || !cancellation || this.#hardCancelTask) return;
     if (cancellation.stopping || cancellation.interrupting || active.rootSegmentActive) return;
+    if (active.steersAwaitingNative.size > 0) {
+      this.#armCancelEscalation(active);
+      return;
+    }
+    this.#clearCancelEscalation();
     this.#clearCancellationQuiet(cancellation);
     const quiet = setTimeout(() => {
       cancellation.quiet = null;
@@ -2341,7 +2352,7 @@ class ClaudeHarnessSession implements HarnessSession {
     const active: ActiveTurn = {
       command: { type: "turn.start", turnId, input: [] },
       compactionItem: null,
-      steerAwaitingNative: false,
+      steersAwaitingNative: new Set(),
       item,
       agentMessageOrdinal: 1,
       assistantMessageId: null,
@@ -2829,7 +2840,7 @@ class ClaudeHarnessSession implements HarnessSession {
         this.#active !== active ||
         !active.held ||
         active.rootSegmentActive ||
-        active.steerAwaitingNative ||
+        active.steersAwaitingNative.size > 0 ||
         this.#phase !== "open"
       ) {
         return;
@@ -2850,8 +2861,34 @@ class ClaudeHarnessSession implements HarnessSession {
 
   #observeRootOutput(active: ActiveTurn): void {
     active.rootSegmentActive = true;
-    active.steerAwaitingNative = false;
     this.#clearContinuationQuiescence();
+  }
+
+  /**
+   * A drained steer runs in a native turn whose result still reaches this Turn, folded into the
+   * running Root Segment or as the held Turn's next one. A steer that ends without one releases
+   * its keep-open, so a Turn held only for it settles as if the steer had never been written.
+   */
+  #takeOverSteer(active: ActiveTurn, messageId: string, started: boolean): void {
+    if (!active.steersAwaitingNative.delete(messageId) || this.#active !== active) return;
+    if (started) {
+      this.#handleTurnEvent(active, { type: "segment.started" });
+      return;
+    }
+    if (active.cancellation) {
+      this.#settleCancellation(active);
+      return;
+    }
+    if (
+      !active.held ||
+      active.rootSegmentActive ||
+      active.steersAwaitingNative.size > 0 ||
+      this.#phase !== "open"
+    ) {
+      return;
+    }
+    if (this.#occupancy.awaitingContinuation) this.#armContinuationQuiescence(active);
+    else if (!this.#occupancy.unsettled) this.#finish(active, { status: "succeeded" });
   }
 
   #finish(active: ActiveTurn, outcome: TurnOutcome): void {
@@ -2864,7 +2901,9 @@ class ClaudeHarnessSession implements HarnessSession {
     }
     this.#clearContinuationQuiescence();
     const hold =
-      outcome.status === "succeeded" && !active.cancellationRequested && this.#occupancy.unsettled;
+      outcome.status === "succeeded" &&
+      !active.cancellationRequested &&
+      (this.#occupancy.unsettled || active.steersAwaitingNative.size > 0);
     this.#closeActiveInteractions(
       active,
       outcome.status === "succeeded" ? "superseded" : "cancelled",
