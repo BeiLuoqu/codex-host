@@ -80,18 +80,45 @@ describe("Pi Model Catalog normalization", () => {
     ]);
   });
 
-  it("rejects an effective Model absent from the available catalog", () => {
-    expect(() =>
-      normalizePiModelCatalog(
-        [{ provider: "available", id: "model", reasoning: true }],
-        {
-          provider: "missing",
-          id: "model",
-        },
-        [harnessThinkingOptionIdSchema.parse("off")],
-        harnessThinkingOptionIdSchema.parse("off"),
-      ),
-    ).toThrow("absent from the available Model catalog");
+  it("publishes an effective Model that Pi does not list as available as the default", () => {
+    const catalog = normalizePiModelCatalog(
+      [{ provider: "available", id: "model", reasoning: true }],
+      {
+        provider: "retired",
+        id: "model",
+      },
+      [harnessThinkingOptionIdSchema.parse("off"), harnessThinkingOptionIdSchema.parse("high")],
+      harnessThinkingOptionIdSchema.parse("high"),
+      true,
+    );
+
+    expect(catalog.models.map(({ label }) => label)).toEqual([
+      "available / model",
+      "retired / model",
+    ]);
+    expect(catalog.defaultModel).toEqual(encodePiModelRef({ provider: "retired", id: "model" }));
+    expect(catalog.models[1]?.supportedThinkingOptionIds).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+  });
+
+  it("does not claim Thinking support for an effective Model without reported reasoning", () => {
+    const catalog = normalizePiModelCatalog(
+      [],
+      { provider: "retired", id: "model" },
+      [harnessThinkingOptionIdSchema.parse("off"), harnessThinkingOptionIdSchema.parse("high")],
+      harnessThinkingOptionIdSchema.parse("high"),
+    );
+
+    expect(catalog.models).toHaveLength(1);
+    expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual(["off"]);
+    expect(catalog.defaultModel).toEqual(encodePiModelRef({ provider: "retired", id: "model" }));
   });
 
   it("rejects duplicate Model entries with conflicting reasoning metadata", () => {

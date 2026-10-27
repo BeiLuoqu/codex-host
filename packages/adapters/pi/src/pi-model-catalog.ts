@@ -126,6 +126,7 @@ export function normalizePiModelCatalog(
   effectiveModel: PiNativeModelRef | null,
   thinkingLevels: readonly HarnessThinkingOptionId[] | null,
   effectiveThinkingOptionId: HarnessThinkingOptionId | null,
+  effectiveModelReasoning: boolean | null = null,
 ): HarnessModelCatalog {
   const byRef = new Map<
     string,
@@ -149,8 +150,18 @@ export function normalizePiModelCatalog(
     });
   }
   const defaultModel = effectiveModel ? encodePiModelRef(effectiveModel) : undefined;
-  if (defaultModel && !byRef.has(defaultModel.id)) {
-    throw new Error("Pi effective Model is absent from the available Model catalog");
+  if (effectiveModel && defaultModel && !byRef.has(defaultModel.id)) {
+    // Pi resolves its effective Model from the full Model registry plus configured auth, while
+    // `get_available_models` lists only currently offered Models (a Provider may filter them, for
+    // example by subscription entitlement). The Session keeps running with that Model, so the
+    // Catalog must publish it as the current native selection instead of failing inspection.
+    byRef.set(defaultModel.id, {
+      model: {
+        ref: defaultModel,
+        label: `${effectiveModel.provider} / ${effectiveModel.id}`,
+      },
+      reasoning: effectiveModelReasoning ?? false,
+    });
   }
   if (
     thinkingLevels &&
