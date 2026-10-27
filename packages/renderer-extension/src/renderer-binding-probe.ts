@@ -1,4 +1,5 @@
 import { createRemoteConnectionsControl } from "./remote-connections-control.js";
+import { installRendererQuestions } from "./renderer-questions.js";
 import { isOrbitComposer, orbitComposerKind } from "./renderer-composer-kind.js";
 import { handleRemoteConnectionsRequest } from "./remote-connections-request.js";
 import {
@@ -2872,6 +2873,7 @@ export function installRendererBindingProbe(
       void refreshHarnessAvailability();
     }
     pendingReplacements.clear();
+    questions.refreshContext();
   };
 
   const scheduleScan = (refreshTargets = false): void => {
@@ -3202,6 +3204,25 @@ export function installRendererBindingProbe(
       (mounted) => isMountedComposer(mounted.composer) && mounted.control.root.isConnected,
     );
 
+  const questions = installRendererQuestions(window, () => {
+    const visible = connectedComposers().filter(
+      (mounted) =>
+        mounted.composer.getClientRects().length > 0 &&
+        window.getComputedStyle(mounted.composer).visibility === "visible" &&
+        !mounted.composer.closest('[hidden], [inert], [aria-hidden="true"]') &&
+        controller.get(mounted.composer).agent !== "codex",
+    );
+    const mounted = visible.length === 1 ? visible[0] : undefined;
+    const threadId = mounted
+      ? threadIdFromComposerModelTarget(findComposerModelTarget(mounted.composer))
+      : null;
+    const hostId = mounted?.hostId;
+    const route = hostId ? window.__codexhostHostRoutingV1?.forHost(hostId) : null;
+    return mounted && threadId && hostId && route
+      ? { hostId, threadId, composer: mounted.composer, route: route.manager }
+      : null;
+  });
+
   const api: RendererBindingProbeApi = {
     remoteConnections: (request) => handleRemoteConnectionsRequest(remoteConnections, request),
     currentThreadId() {
@@ -3307,6 +3328,7 @@ export function installRendererBindingProbe(
     dispose() {
       if (disposed) return;
       disposed = true;
+      questions.dispose();
       usageNotificationDispose();
       adapterDispose?.();
       adapterDispose = null;

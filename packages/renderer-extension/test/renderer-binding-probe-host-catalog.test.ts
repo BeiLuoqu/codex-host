@@ -183,6 +183,10 @@ function installFakeBrowser(): void {
   const listeners = new EventTarget();
   class FakeElement {
     readonly nodeType = 1;
+    // This catalog-only fixture has no layout; visible question cards have browser coverage.
+    getClientRects(): DOMRect[] {
+      return [];
+    }
     closest(): Element | null {
       return null;
     }
@@ -224,6 +228,8 @@ function installFakeBrowser(): void {
     dispatchEvent: listeners.dispatchEvent.bind(listeners),
     setTimeout,
     clearTimeout,
+    setInterval: vi.fn(() => 0),
+    clearInterval: vi.fn(),
     open: vi.fn(),
   };
   const document_ = {
