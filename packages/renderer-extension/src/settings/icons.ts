@@ -1,7 +1,6 @@
 import type { IconNode } from "lucide";
 import createElement from "lucide/dist/esm/createElement.mjs";
 import Boxes from "lucide/dist/esm/icons/boxes.mjs";
-import CalendarClock from "lucide/dist/esm/icons/calendar-clock.mjs";
 import Check from "lucide/dist/esm/icons/circle-check.mjs";
 import ChevronDown from "lucide/dist/esm/icons/chevron-down.mjs";
 import ChevronLeft from "lucide/dist/esm/icons/chevron-left.mjs";
@@ -55,7 +54,6 @@ export const RENDERER_SETTINGS_ICON_NAMES = [
   "routes",
   "gateway",
   "updates",
-  "schedules",
   "about",
   "info",
   "external-link",
@@ -110,7 +108,6 @@ const iconNodes = {
   routes: Route,
   gateway: Network,
   updates: CircleArrowUp,
-  schedules: CalendarClock,
   about: Info,
   info: Info,
   "external-link": ExternalLink,
