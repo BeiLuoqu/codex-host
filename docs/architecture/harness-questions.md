@@ -16,6 +16,10 @@ The Host retains shared cards in the same pending-question lifecycle as native q
 
 Secret text remains unsupported and fails closed, including in a mixed multi-select group. This feature does not expose Grok-specific countdowns, activity resets, plan actions or native preview controls. It does not change what Pi, OMP or another single-choice-only Harness can ask.
 
+## Grok integration
+
+The [Grok Adapter](../harnesses/grok/questions.md) handles native `_x.ai/ask_user_question` requests and maps them into this existing public contract. Multi-select groups use the shared card; single-choice/text-only groups retain native Desktop cards. Grok owns native answer encoding, cancellation and timeout withdrawal. Updating only the card does not add this capability to an older Grok plugin.
+
 ## Renderer lifecycle
 
 The versioned Renderer binding chooses one visible external Composer and its existing Host route. Ambiguous, hidden or official Composers show no shared card. The component is mounted **outside** the native Composer, with an open Shadow DOM to isolate Desktop CSS resets and keep question inputs out of chat-editor discovery.

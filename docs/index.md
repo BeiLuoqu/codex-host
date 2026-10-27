@@ -93,6 +93,7 @@
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`harnesses/grok/subagent-status-and-model.md`](harnesses/grok/subagent-status-and-model.md) | Grok Subagent 状态、Model、Transcript 与 Desktop 投影；修改 Grok Subagent 时阅读。 |
+| [`harnesses/grok/questions.md`](harnesses/grok/questions.md) | Grok 原生单选、多选和自由输入的 ACP 接线、答案回传、撤回与验证边界。 |
 | [`harnesses/grok/permission-modes.md`](harnesses/grok/permission-modes.md) | Grok 会话内权限切换、原生生效确认、失败处理与验证范围。 |
 
 ### Copilot
