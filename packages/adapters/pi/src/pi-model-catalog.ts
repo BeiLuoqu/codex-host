@@ -155,12 +155,16 @@ export function normalizePiModelCatalog(
     // `get_available_models` lists only currently offered Models (a Provider may filter them, for
     // example by subscription entitlement). The Session keeps running with that Model, so the
     // Catalog must publish it as the current native selection instead of failing inspection.
+    const reasoning =
+      (effectiveThinkingOptionId && effectiveThinkingOptionId !== "off") ||
+      (effectiveModelReasoning ??
+        Boolean(thinkingLevels && thinkingLevels.some((level) => level !== "off")));
     byRef.set(defaultModel.id, {
       model: {
         ref: defaultModel,
         label: `${effectiveModel.provider} / ${effectiveModel.id}`,
       },
-      reasoning: effectiveModelReasoning ?? false,
+      reasoning,
     });
   }
   if (

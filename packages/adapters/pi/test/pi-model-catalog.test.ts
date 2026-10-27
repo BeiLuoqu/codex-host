@@ -108,7 +108,7 @@ describe("Pi Model Catalog normalization", () => {
     ]);
   });
 
-  it("does not claim Thinking support for an effective Model without reported reasoning", () => {
+  it("infers Thinking support for an effective Model from active thinking levels when reasoning is unreported", () => {
     const catalog = normalizePiModelCatalog(
       [],
       { provider: "retired", id: "model" },
@@ -117,8 +117,44 @@ describe("Pi Model Catalog normalization", () => {
     );
 
     expect(catalog.models).toHaveLength(1);
+    expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(catalog.defaultModel).toEqual(encodePiModelRef({ provider: "retired", id: "model" }));
+    expect(catalog.defaultThinkingOptionId).toBe("high");
+  });
+
+  it("does not claim Thinking support for an effective Model when thinking levels are off only", () => {
+    const catalog = normalizePiModelCatalog(
+      [],
+      { provider: "retired", id: "model" },
+      [harnessThinkingOptionIdSchema.parse("off")],
+      harnessThinkingOptionIdSchema.parse("off"),
+    );
+
+    expect(catalog.models).toHaveLength(1);
     expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual(["off"]);
     expect(catalog.defaultModel).toEqual(encodePiModelRef({ provider: "retired", id: "model" }));
+    expect(catalog.defaultThinkingOptionId).toBe("off");
+  });
+
+  it("respects explicit reasoning=false when thinking level is off", () => {
+    const catalog = normalizePiModelCatalog(
+      [],
+      { provider: "retired", id: "model" },
+      [harnessThinkingOptionIdSchema.parse("off")],
+      harnessThinkingOptionIdSchema.parse("off"),
+      false,
+    );
+
+    expect(catalog.models).toHaveLength(1);
+    expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual(["off"]);
   });
 
   it("rejects duplicate Model entries with conflicting reasoning metadata", () => {

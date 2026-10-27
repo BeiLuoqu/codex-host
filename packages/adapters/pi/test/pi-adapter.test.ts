@@ -719,6 +719,30 @@ describe("Pi HarnessAdapter Session", () => {
     await adapter.close();
   });
 
+  it("infers reasoning for an unlisted effective Model when modelReasoning is omitted but thinking is active", async () => {
+    const { adapter, dependencies, transports } = fixture();
+    vi.mocked(dependencies.createTransport).mockImplementationOnce(() => {
+      const transport = new FakePiTransport();
+      transport.state = {
+        ...transport.state,
+        provider: "synthetic-provider",
+        modelId: "unlisted-model",
+        thinkingLevel: harnessThinkingOptionIdSchema.parse("high"),
+      };
+      transports.push(transport);
+      return transport;
+    });
+
+    const inspection = await adapter.inspect({ cwd: "/synthetic", refresh: true });
+    if (inspection.status !== "ready") throw new Error(inspection.error.message);
+    const unlisted = inspection.catalog.models.find((model) =>
+      model.label.endsWith("unlisted-model"),
+    );
+    expect(unlisted?.supportedThinkingOptionIds).toContain("high");
+    expect(transports[0]?.close).toHaveBeenCalledOnce();
+    await adapter.close();
+  });
+
   it.each(
     ["openai-codex-responses", "openai-responses"].flatMap((api) =>
       [false, true].map((liveSelection) => ({ api, liveSelection })),
