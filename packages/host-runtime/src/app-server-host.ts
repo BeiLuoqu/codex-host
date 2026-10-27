@@ -1713,7 +1713,14 @@ export class AppServerHost {
       request.method === THREAD_QUESTIONS_LIST_METHOD ||
       request.method === THREAD_QUESTION_RESPOND_METHOD
     ) {
-      this.#dispatchDesktopReply(request, () => this.#handleSharedQuestionRequest(request));
+      const threadId = requestObject(request).threadId;
+      this.#dispatchDesktopReply(
+        request,
+        () => this.#handleSharedQuestionRequest(request),
+        request.method === THREAD_QUESTION_RESPOND_METHOD && typeof threadId === "string"
+          ? threadId
+          : undefined,
+      );
       return;
     }
     if (request.method === "codexhost/thread/steering/inspect") {

@@ -53,7 +53,7 @@ export function createQuestionCard(
   titleIcon.append(icon(MessageCircleQuestion));
   titleIcon.setAttribute("aria-hidden", "true");
   const titleText = document.createElement("span");
-  titleText.textContent = "Question";
+  titleText.textContent = question.title?.trim() || "Question";
   const dismiss = document.createElement("button");
   dismiss.type = "button";
   dismiss.className = "dismiss";

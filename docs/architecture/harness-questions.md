@@ -10,7 +10,7 @@ The Host retains shared cards in the same pending-question lifecycle as native q
 
 - `codexhost/thread/questions/list` takes `{ threadId }` and returns `{ questions }` for the loaded external Thread's active Turn only. It does not resume sessions, start work, or query the official app-server. Unknown/official Threads return an empty list.
 - `codexhost/thread/question/respond` takes `{ threadId, turnId, interactionId, answers, cancelled? }`. The Host checks the live owner, active Turn, pending interaction and expiry, then validates required answers, declared values, cardinality and duplicate values before calling `interaction.respond`.
-- Cancellation must contain no answers. A rejected validation leaves the card pending. Concurrent submissions are excluded. Successful delivery retires the question; ambiguous Adapter exceptions retire it rather than allowing a second write.
+- Cancellation must contain no answers. A rejected validation leaves the card pending. Answer delivery uses the existing per-Thread request queue, so it cannot overlap a queued interruption; unrelated Threads remain responsive. Duplicate submissions are rejected after the first delivery. Successful delivery retires the question; ambiguous Adapter exceptions retire it rather than allowing a second write.
 - Native withdrawal, Turn completion, Session cleanup and existing Host `expiresAt` handling retire pending cards. Late/replayed responses are rejected. A guessed native response ID cannot answer a shared card.
 - Existing shared-Thread routing carries these methods to the Session owner; multiple GUI viewers do not create multiple native questions or permit duplicate answers.
 
@@ -22,7 +22,7 @@ The [Grok Adapter](../harnesses/grok/questions.md) handles native `_x.ai/ask_use
 
 ## Renderer lifecycle
 
-The versioned Renderer binding chooses one visible external Composer and its existing Host route. Ambiguous, hidden or official Composers show no shared card. The component is mounted **outside** the native Composer, with an open Shadow DOM to isolate Desktop CSS resets and keep question inputs out of chat-editor discovery.
+The versioned Renderer binding chooses one visible external Composer and its existing Host route. Ambiguous, hidden or official Composers show no shared card. The component is mounted **outside** the native Composer, with an open Shadow DOM to isolate Desktop CSS resets and keep question inputs out of chat-editor discovery. Its header preserves the interaction title, falling back to “Question” when untitled.
 
 Only one list request is in flight; polling runs every 750 ms and Composer scans also refresh context. Responses are bound to the initiating connection, Host, Thread and Composer. Answer acknowledgements invalidate older in-flight list results. A failed list refresh hides the stale card. An old Host returning method-not-found disables polling for that connection.
 

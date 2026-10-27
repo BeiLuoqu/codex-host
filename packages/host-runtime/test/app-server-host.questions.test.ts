@@ -32,7 +32,7 @@ const fixtures: ReturnType<typeof createFixture>[] = [];
 afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await stopFixture(fixture);
 });
-async function setup(options: { expiresAt?: string } = {}) {
+async function setup(options: { expiresInMs?: number } = {}) {
   const fixture = createFixture();
   fixtures.push(fixture);
   const threadId = await startPiThread(fixture);
@@ -45,7 +45,14 @@ async function setup(options: { expiresAt?: string } = {}) {
     writeRequest(fixture.desktopInput, { id: request, method, params });
     return fixture.collector.waitFor((message) => requestId(message, request));
   };
-  const interactionId = session.askQuestion(choice, options);
+  const interactionId = session.askQuestion(
+    choice,
+    options.expiresInMs === undefined
+      ? {}
+      : {
+          expiresAt: new Date(Date.now() + options.expiresInMs).toISOString(),
+        },
+  );
   const list = async () =>
     threadQuestionsResultSchema.parse(
       (await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId })).result,
@@ -114,8 +121,8 @@ describe("shared multi-select Questions", () => {
     expect(await list()).toEqual([]);
   });
 
-  it("rejects concurrent double submissions before the Adapter acknowledges", async () => {
-    const { session, respond } = await setup();
+  it("serializes double submissions and rejects the duplicate after delivery", async () => {
+    const { session, respond, rpc } = await setup();
     const execute = session.execute.bind(session);
     const gate = Promise.withResolvers<undefined>();
     const spy = vi.spyOn(session, "execute").mockImplementation(async (command) => {
@@ -123,14 +130,51 @@ describe("shared multi-select Questions", () => {
       return execute(command);
     });
     const first = respond();
+    let second: ReturnType<typeof respond> | undefined;
+    let duplicateSettled = false;
     try {
       await vi.waitFor(() => expect(spy).toHaveBeenCalled());
-      expect(await respond()).toHaveProperty("error");
+      second = respond().then((result) => {
+        duplicateSettled = true;
+        return result;
+      });
+      await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId: "unrelated-thread" });
+      expect(duplicateSettled).toBe(false);
+      expect(spy).toHaveBeenCalledTimes(1);
     } finally {
       gate.resolve(undefined);
     }
     expect(await first).toMatchObject({ result: { accepted: true } });
+    expect(await second).toHaveProperty("error");
     expect(session.interactionResponses).toHaveLength(1);
+  });
+
+  it("queues interruption behind answer delivery without blocking unrelated Threads", async () => {
+    const { session, respond, rpc, threadId, turnId } = await setup();
+    const execute = session.execute.bind(session);
+    const gate = Promise.withResolvers<undefined>();
+    const spy = vi.spyOn(session, "execute").mockImplementation(async (command) => {
+      if ((command.type as string) === "interaction.respond") await gate.promise;
+      return execute(command);
+    });
+    const answer = respond();
+    let interruption: ReturnType<typeof rpc> | undefined;
+    try {
+      await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+      interruption = rpc("turn/interrupt", { threadId, turnId });
+      expect(
+        await rpc(THREAD_QUESTIONS_LIST_METHOD, { threadId: "unrelated-thread" }),
+      ).toMatchObject({ result: { questions: [] } });
+      expect(spy.mock.calls.map(([command]) => command.type)).toEqual(["interaction.respond"]);
+    } finally {
+      gate.resolve(undefined);
+    }
+    expect(await answer).toMatchObject({ result: { accepted: true } });
+    expect(await interruption).not.toHaveProperty("error");
+    expect(spy.mock.calls.map(([command]) => command.type)).toEqual([
+      "interaction.respond",
+      "turn.cancel",
+    ]);
   });
 
   it("withdraws native-closed questions and rejects late responses", async () => {
@@ -143,7 +187,7 @@ describe("shared multi-select Questions", () => {
 
   it("honors Host expiry without emitting a native server-request resolution", async () => {
     const { fixture, list, respond, session } = await setup({
-      expiresAt: new Date(Date.now() + 500).toISOString(),
+      expiresInMs: 500,
     });
     await vi.waitFor(async () => expect(await list()).toEqual([]));
     await vi.waitFor(() => expect(session.interactionResponses).toHaveLength(1));

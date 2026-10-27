@@ -87,6 +87,18 @@ test("returns all Host values in mixed groups and leaves the chat editor intact"
   ]);
 });
 
+test("preserves the interaction title with a fallback for untitled questions", async ({ page }) => {
+  for (const title of ["Deployment platforms", ""]) {
+    await page.evaluate(async (title) => {
+      const question = Reflect.get(window, "fixture").questions[0];
+      question.title = title;
+      question.interactionId = `title-${title || "default"}`;
+      await Reflect.get(window, "controller").refresh();
+    }, title);
+    await expect(page.locator("[data-codexhost-question] .title")).toHaveText(title || "Question");
+  }
+});
+
 test("validates required and Other answers, retaining drafts after rejection", async ({ page }) => {
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("required");
