@@ -204,6 +204,7 @@ function installFakeBrowser(): void {
     closest: () => composer,
   }) as unknown as Element;
   const sendButton = {
+    closest: () => null,
     type: "submit",
     disabled: false,
     parentElement: null,

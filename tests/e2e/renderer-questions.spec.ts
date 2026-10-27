@@ -255,6 +255,16 @@ test("mounts through the real binding probe outside the chat Composer and follow
     (node as HTMLElement).hidden = false;
   });
   await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("keep draft");
+  // Native question/approval surfaces temporarily own the Composer; do not stack a shared card.
+  await page
+    .locator("#composer")
+    .evaluate((node) => node.setAttribute("data-codex-composer-request", ""));
+  await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
+  await expect(page.locator("[data-codexhost-agent-control]")).toHaveCount(0);
+  await page
+    .locator("#composer")
+    .evaluate((node) => node.removeAttribute("data-codex-composer-request"));
+  await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("keep draft");
   await page.evaluate(() => Reflect.get(window, "binding").dispose());
   await expect(page.locator("[data-codexhost-question]")).toHaveCount(0);
 });

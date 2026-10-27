@@ -30,6 +30,16 @@ Selections and text survive refreshes, DOM remounts and chat switching within th
 
 Both the Host and Renderer must contain this feature. An older Renderer cannot display a new Host's shared cards; there is no silent conversion of a multi-select into single-choice. Update both ends, including remote Hosts. Browser fixtures exercise the component and full binding; they are not installed Desktop or per-Harness acceptance.
 
+## Native question and approval isolation
+
+Native Desktop surfaces marked with `data-codex-composer-request` or `data-codex-composer-request-navigation` own their answer editors and submission actions. A marker on a Composer, its ancestor, or a descendant suspends chat controls for that Composer only. Agent/Model/permission/usage controls do not mount into it; existing controls are disposed and native controls restored when the surface appears. The shared multi-select card is also hidden until the native surface closes, retaining its draft.
+
+Input, Enter, submission and button capture handlers check live ownership before interception, including the interval before the next DOM reconciliation. Late ownership/model responses cannot render into a suspended Composer. Native answer buttons are excluded from send-button discovery and the unlabelled-button fallback. Neither answers nor native disabled states are rewritten.
+
+Adding/removing the markers or inserting/removing a request subtree triggers reconciliation, including inside a rich-text editor. When the surface disappears, normal chat controls are discovered again. Unrelated Composers and ordinary Chat/Orbit surfaces retain their existing behavior. Detection uses these explicit DOM markers, not question text, button labels or a Harness ID; a Desktop version changing the markers needs renewed binding verification.
+
+Browser regressions cover both markers, ancestor/root/descendant placement, same-task native event propagation, dynamic appearance/removal, native button states, delayed ownership replies, unrelated Composers, and shared-card draft restoration. These are fixture tests, not installed Desktop acceptance.
+
 ## Browser preview
 
 These screenshots use the real component with synthetic multi-select, text and single-choice fields. They are browser-fixture previews, not installed Desktop screenshots or proof of a specific Harness's support.
@@ -40,4 +50,4 @@ These screenshots use the real component with synthetic multi-select, text and s
 
 ## Attribution
 
-The card, isolated styles and polling-controller foundation are adapted from [karlorz/codex-host](https://github.com/karlorz/codex-host/pull/12), revision [`07d8f010`](https://github.com/karlorz/codex-host/tree/07d8f010ae2e969007c611e035e49f3310b73a9d), under the same LGPL-3.0-only license. This implementation limits routing to multi-select groups, omits the fork's native timer/activity features, and integrates with upstream's existing pending-question lifecycle. karlorz is credited as a co-author for the reused implementation.
+The card, isolated styles, polling-controller foundation and native-request marker helpers are adapted from [karlorz/codex-host](https://github.com/karlorz/codex-host/pull/12), revision [`07d8f010`](https://github.com/karlorz/codex-host/tree/07d8f010ae2e969007c611e035e49f3310b73a9d), under the same LGPL-3.0-only license. This implementation limits routing to multi-select groups, omits the fork's native timer/activity features, and integrates with upstream's existing pending-question lifecycle. karlorz is credited as a co-author for the reused implementation.
