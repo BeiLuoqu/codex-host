@@ -840,20 +840,23 @@ export function installRendererBindingProbe(
     getLoadedSessionsClient: () => modelClientForHost("local"),
     requestUsageStatistics: usageStatistics.request,
     usageStatisticsHosts: usageStatistics.hosts,
-    getSessionImportClient: () => {
-      const client = modelClientForHost("local");
+    getSessionImportClient: (requestedHostId) => {
+      const hostId = requestedHostId ?? activeModelHostId();
+      if (!hostId) return null;
+      const client = modelClientForHost(hostId);
       const sources = client?.listSessionImportSources;
       const list = client?.listHarnessSessions;
       const importSession = client?.importHarnessSession;
       if (!sources || !list || !importSession) return null;
       return {
+        hostId,
         listSessionImportSources: () => sources(),
         listHarnessSessions: (input) => list(input),
         importHarnessSession: (input) => importSession(input),
       };
     },
-    openImportedThread: (threadId, signal) =>
-      openRendererThread(threadId, { hostId: "local", signal }),
+    openImportedThread: (threadId, signal, hostId) =>
+      openRendererThread(threadId, { hostId: hostId ?? "local", signal }),
     onLocaleChange() {
       for (const mounted of mountedByComposer.values()) renderMounted(mounted);
     },
