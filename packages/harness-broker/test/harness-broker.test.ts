@@ -61,6 +61,39 @@ describe("macOS Aqua Harness broker", () => {
     await client.close();
   });
 
+  it("forwards availability inspection purpose and rejects unsupported fields", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cx-broker-inspect-"));
+    roots.push(root);
+    const descriptorPath = path.join(root, "broker.json");
+    const socketPath =
+      process.platform === "win32"
+        ? `\\\\.\\pipe\\cx-broker-${randomUUID()}`
+        : path.join(root, "b.sock");
+    const native = new FakeHarnessAdapter(harnessIdSchema.parse("claude-code"));
+    const inspect = vi.spyOn(native, "inspect");
+    const server = await startHarnessBrokerServer({ descriptorPath, socketPath, adapter: native });
+    const client = new BrokeredHarnessAdapter({ descriptorPath });
+    try {
+      const input = { cwd: root, refresh: true, purpose: "availability" as const };
+      await expect(client.inspect(input)).resolves.toMatchObject({ status: "ready" });
+      expect(inspect).toHaveBeenLastCalledWith(input);
+      await expect(client.inspect({ cwd: root })).resolves.toMatchObject({ status: "ready" });
+      expect(inspect).toHaveBeenLastCalledWith({ cwd: root });
+      await expect(
+        // @ts-expect-error Invalid wire values must still be rejected at runtime.
+        client.inspect({ purpose: "unsupported" }),
+      ).resolves.toMatchObject({ status: "unavailable" });
+      await expect(
+        // @ts-expect-error Unknown wire fields must not reach the native Adapter.
+        client.inspect({ unknown: true }),
+      ).resolves.toMatchObject({ status: "unavailable" });
+      expect(inspect).toHaveBeenCalledTimes(2);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("discovers a newly started broker and reconnects on demand after its generation changes", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cx-broker-restart-"));
     roots.push(root);

@@ -517,6 +517,7 @@ export async function startHarnessBrokerServer(input: {
         const inspection = await input.adapter.inspect({
           ...(parsed.cwd ? { cwd: parsed.cwd } : {}),
           ...(parsed.refresh !== undefined ? { refresh: parsed.refresh } : {}),
+          ...(parsed.purpose !== undefined ? { purpose: parsed.purpose } : {}),
         });
         // An unusable Harness gains nothing from a resident broker; exit once idle.
         retireWhenIdle = inspection.status !== "ready";

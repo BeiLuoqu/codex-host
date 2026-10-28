@@ -79,7 +79,11 @@ export const brokerOpenInputSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const brokerInspectInputSchema = z
-  .object({ cwd: cwdSchema.optional(), refresh: z.boolean().optional() })
+  .object({
+    cwd: cwdSchema.optional(),
+    refresh: z.boolean().optional(),
+    purpose: z.literal("availability").optional(),
+  })
   .strict();
 
 const textInputSchema = z
