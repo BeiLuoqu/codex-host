@@ -153,6 +153,22 @@ describe("Pi Model Catalog normalization", () => {
     expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual(["off"]);
   });
 
+  it("matches listed Models when Pi reports no Thinking levels for a synthesized effective Model", () => {
+    const catalog = normalizePiModelCatalog(
+      [{ provider: "available", id: "model", reasoning: true }],
+      { provider: "retired", id: "model" },
+      null,
+      harnessThinkingOptionIdSchema.parse("high"),
+      true,
+    );
+
+    expect(catalog.thinkingOptions).toEqual([]);
+    expect(catalog.defaultThinkingOptionId).toBeUndefined();
+    expect(
+      catalog.models.map(({ supportedThinkingOptionIds }) => supportedThinkingOptionIds),
+    ).toEqual([[], []]);
+  });
+
   it("does not claim Thinking support for an effective Model when thinking levels are off only", () => {
     const catalog = normalizePiModelCatalog(
       [],

@@ -187,9 +187,11 @@ export function normalizePiModelCatalog(
   const offThinkingOptionId = thinkingOptions.find(({ id }) => id === "off")?.id;
   // `thinkingLevels` are the levels Pi supports for its current Model, which is exactly the
   // synthesized effective Model. Other Models have no per-Model evidence, so they keep the draft set.
-  const effectiveThinkingOptionIds = allThinkingOptionIds.filter((id) =>
-    thinkingLevels?.includes(id),
-  );
+  // Without reported levels the Catalog offers no Thinking options at all, so the synthesized Model
+  // falls back to the same empty set as every other Model.
+  const effectiveThinkingOptionIds = thinkingLevels
+    ? allThinkingOptionIds.filter((id) => thinkingLevels.includes(id))
+    : allThinkingOptionIds;
   const models = [...byRef.values()]
     .map(({ model, reasoning, synthesized }) => ({
       ...model,
