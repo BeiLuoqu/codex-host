@@ -97,7 +97,8 @@ describe("Pi Model Catalog normalization", () => {
       "retired / model",
     ]);
     expect(catalog.defaultModel).toEqual(encodePiModelRef({ provider: "retired", id: "model" }));
-    expect(catalog.models[1]?.supportedThinkingOptionIds).toEqual([
+    // Listed Models have no per-Model Thinking evidence; the synthesized Model uses Pi's levels.
+    expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual([
       "off",
       "minimal",
       "low",
@@ -106,6 +107,7 @@ describe("Pi Model Catalog normalization", () => {
       "xhigh",
       "max",
     ]);
+    expect(catalog.models[1]?.supportedThinkingOptionIds).toEqual(["off", "high"]);
   });
 
   it("infers Thinking support for an effective Model from active thinking levels when reasoning is unreported", () => {
@@ -117,17 +119,38 @@ describe("Pi Model Catalog normalization", () => {
     );
 
     expect(catalog.models).toHaveLength(1);
-    expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual([
-      "off",
-      "minimal",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-      "max",
-    ]);
+    expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual(["off", "high"]);
     expect(catalog.defaultModel).toEqual(encodePiModelRef({ provider: "retired", id: "model" }));
     expect(catalog.defaultThinkingOptionId).toBe("high");
+  });
+
+  it("declares only the Thinking levels Pi reports for a synthesized effective Model", () => {
+    const catalog = normalizePiModelCatalog(
+      [],
+      { provider: "retired", id: "model" },
+      [harnessThinkingOptionIdSchema.parse("max")],
+      harnessThinkingOptionIdSchema.parse("max"),
+      true,
+    );
+
+    expect(catalog.models).toHaveLength(1);
+    expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual(["max"]);
+    expect(catalog.defaultThinkingOptionId).toBe("max");
+  });
+
+  it("omits reported Thinking levels that the draft catalog does not offer", () => {
+    const catalog = normalizePiModelCatalog(
+      [],
+      { provider: "retired", id: "model" },
+      [
+        harnessThinkingOptionIdSchema.parse("off"),
+        harnessThinkingOptionIdSchema.parse("future_mode"),
+      ],
+      harnessThinkingOptionIdSchema.parse("off"),
+      true,
+    );
+
+    expect(catalog.models[0]?.supportedThinkingOptionIds).toEqual(["off"]);
   });
 
   it("does not claim Thinking support for an effective Model when thinking levels are off only", () => {

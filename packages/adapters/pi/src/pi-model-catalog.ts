@@ -130,7 +130,7 @@ export function normalizePiModelCatalog(
 ): HarnessModelCatalog {
   const byRef = new Map<
     string,
-    { model: HarnessModelCatalog["models"][number]; reasoning: boolean }
+    { model: HarnessModelCatalog["models"][number]; reasoning: boolean; synthesized: boolean }
   >();
   for (const native of nativeModels) {
     const ref = encodePiModelRef(native);
@@ -147,6 +147,7 @@ export function normalizePiModelCatalog(
         label: `${native.provider} / ${native.id}`,
       },
       reasoning: native.reasoning,
+      synthesized: false,
     });
   }
   const defaultModel = effectiveModel ? encodePiModelRef(effectiveModel) : undefined;
@@ -165,6 +166,7 @@ export function normalizePiModelCatalog(
         label: `${effectiveModel.provider} / ${effectiveModel.id}`,
       },
       reasoning,
+      synthesized: true,
     });
   }
   if (
@@ -183,11 +185,18 @@ export function normalizePiModelCatalog(
     : [];
   const allThinkingOptionIds = thinkingOptions.map(({ id }) => id);
   const offThinkingOptionId = thinkingOptions.find(({ id }) => id === "off")?.id;
+  // `thinkingLevels` are the levels Pi supports for its current Model, which is exactly the
+  // synthesized effective Model. Other Models have no per-Model evidence, so they keep the draft set.
+  const effectiveThinkingOptionIds = allThinkingOptionIds.filter((id) =>
+    thinkingLevels?.includes(id),
+  );
   const models = [...byRef.values()]
-    .map(({ model, reasoning }) => ({
+    .map(({ model, reasoning, synthesized }) => ({
       ...model,
       supportedThinkingOptionIds: reasoning
-        ? allThinkingOptionIds
+        ? synthesized
+          ? effectiveThinkingOptionIds
+          : allThinkingOptionIds
         : offThinkingOptionId
           ? [offThinkingOptionId]
           : [],
