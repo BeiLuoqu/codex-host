@@ -110,6 +110,12 @@ import {
   type RendererDelegationMentionControl,
 } from "./renderer-delegation-mention.js";
 import { compatibleRendererPluginPresentation, rendererAgentLabel } from "./renderer-agent-icon.js";
+import {
+  createNativeScheduleWorkspaceThread,
+  isNativeProjectThreadCreator,
+} from "@codexhost/desktop-control/renderer-bindings";
+import { loadCodexNativeServices } from "./codex-native-services.js";
+import { openCodexSchedules } from "./codex-schedule-navigation.js";
 import { openRendererThread } from "./renderer-fork-control.js";
 import type {
   RendererConnectionDiagnostics,
@@ -833,6 +839,9 @@ export function installRendererBindingProbe(
     disposed: () => disposed,
   });
   const settingsLifecycle = installRendererSettingsLifecycle(window, {
+    harnessSchedules: {
+      openSchedules: (signal) => openCodexSchedules(signal),
+    },
     getRemoteConnections: () => remoteConnections,
     getUpdateClient: () => modelControl,
     getAccountClient: () => modelControl,
@@ -2680,6 +2689,34 @@ export function installRendererBindingProbe(
     },
   };
 
+  const nativeScheduleControls = installRendererNativeScheduleControls(document, {
+    getClient: () => modelClientForHost("local"),
+    getAvailablePlugins: () => {
+      const client = modelClientForHost("local");
+      const state = hostHarnessAvailabilityState("local");
+      if (!client || state.directoryClient !== client) return [];
+      return (state.plugins ?? [])
+        .filter((plugin) => plugin.kind !== "usage" && state.availability[plugin.id] === "ready")
+        .map((plugin) => pluginForHost("local", plugin.id) ?? plugin);
+    },
+    subscribeAvailability: (listener) => {
+      connectionListeners.add(listener);
+      return () => connectionListeners.delete(listener);
+    },
+    canRouteExternal: () =>
+      window.__codexhostHostRoutingV1?.forHost("local")?.policy.scopedCreation === true,
+    async createWorkspaceThread(input, signal) {
+      const routing = window.__codexhostHostRoutingV1;
+      const manager = routing?.forHost("local")?.manager;
+      const create = await loadCodexNativeServices(window, isNativeProjectThreadCreator);
+      signal.throwIfAborted();
+      if (!routing || !manager || routing.forHost("local")?.manager !== manager || !create)
+        throw new Error("Native workspace chat creation is unavailable. Reopen the task dialog.");
+      return createNativeScheduleWorkspaceThread(document, routing, create, input, signal);
+    },
+    locale: () => settingsLifecycle.locale,
+  });
+
   const mount = (composer: Element): void => {
     if (
       mountedByComposer.has(composer) ||
@@ -3312,6 +3349,7 @@ export function installRendererBindingProbe(
         if (disposed || modelControl !== installedModelControl) return;
         try {
           settingsLifecycle.refresh();
+          nativeScheduleControls.refresh();
         } catch {
           // Auxiliary settings UI must not affect Agent routing compatibility.
         }
@@ -3366,6 +3404,7 @@ export function installRendererBindingProbe(
       disposeReasoningSoftWrap();
       delegationMention?.dispose();
       sidebarAgentIcons.dispose();
+      nativeScheduleControls.dispose();
       settingsLifecycle.dispose();
       document.removeEventListener("beforeinput", onBeforeInput, true);
       document.removeEventListener("submit", onSubmit, true);
@@ -3400,3 +3439,4 @@ export function installRendererBindingProbe(
   scan();
   return api;
 }
+import { installRendererNativeScheduleControls } from "./renderer-native-schedule-controls.js";
