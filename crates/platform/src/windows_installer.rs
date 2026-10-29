@@ -81,6 +81,19 @@ fn applications(executable_keys: &[String]) -> Result<Vec<Application>, Platform
             continue;
         }
         let image = PathBuf::from(String::from_utf16_lossy(&image[..length as usize]));
+        let image_name = image
+            .file_name()
+            .map(|name| name.to_string_lossy().to_lowercase());
+        if !executable_keys
+            .iter()
+            .any(|key| key.rsplit('\\').next() == image_name.as_deref())
+        {
+            continue;
+        }
+        // A process started through an 8.3 short path (such as `RUNNER~1` in
+        // %TEMP%) or a link reports that path; compare it canonicalized, as the
+        // targets are.
+        let image = image.canonicalize().unwrap_or(image);
         if !executable_keys.contains(&executable_key(&image)) {
             continue;
         }
