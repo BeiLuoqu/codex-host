@@ -109,18 +109,26 @@ export function installRendererHostRpcRouting(
     const [input, options] = args as unknown[];
     if (!isRecord(input) || !isRecord(input.collaborationMode)) return message;
     const settings = input.collaborationMode.settings;
-    if (!isRecord(settings)) return message;
+    if (!isRecord(settings) || typeof settings.model !== "string" || !settings.model)
+      return message;
     let model: string | null = null;
+    let selected: string | null = null;
     if (path[0] === "startConversation") {
       const draftId = isRecord(options) ? options.clientThreadId : null;
       model = typeof draftId === "string" ? (externalDrafts.get(draftId)?.model ?? null) : null;
     } else if (path[0] === "prewarmConversation") {
       // Desktop prewarms only local drafts; the pool is keyed by workspace, not Model.
       if (input.ephemeral !== true) publishDraftWorkspace("local", input.cwd);
-      const selected = selectedModels.get("local");
+      selected = selectedModels.get("local") ?? null;
       model = selected ? prewarmCarrier(selected) : null;
     }
     if (!model) return message;
+    if (
+      settings.model.startsWith("codexhost/") &&
+      settings.model !== model &&
+      settings.model !== selected
+    )
+      return message;
     return [
       "push",
       [
