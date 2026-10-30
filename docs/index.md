@@ -113,6 +113,7 @@
 
 | 文档 | 内容与阅读时机 |
 | --- | --- |
+| [`product/model-picker.md`](product/model-picker.md) | 外部 Harness 的模型与思考强度选择器：单弹层的滑块和模型列表、Fast、收藏、搜索、恢复默认与缩放定位；修改输入框模型选择时阅读。 |
 | [`product/multi-agent-delegation.md`](product/multi-agent-delegation.md) | 输入框 `#` 委派、跨会话引用与完成通知的使用介绍和截图；介绍多 Agent 协作用法时阅读。 |
 | [`product/harness-schedules.md`](product/harness-schedules.md) | 设置侧栏直达官方任务页，原生弹窗选择 Harness 与可选本地工作区，会话侧栏显示归属图标；复用 Desktop 本地固定聊天调度。 |
 | [`product/codex-accounts.md`](product/codex-accounts.md) | 设置页中的原生账号与额度布局、外部 Harness 不受 Codex 额度门限制、手动导入 Pi 及导入记录管理；修改账号 UI、发送额度门、查询或凭证导入链路时阅读。 |

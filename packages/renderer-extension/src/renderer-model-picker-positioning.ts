@@ -55,8 +55,11 @@ function fitWidth(preferredWidth: number, viewportWidth: number): number {
 }
 
 /**
- * Codex applies its window zoom as a CSS transform, so `getBoundingClientRect`
- * reports zoomed pixels while the popover is positioned in unzoomed ones.
+ * Codex applies its window zoom with CSS `zoom: var(--codex-window-zoom)`, as its own
+ * `100dvh / var(--codex-window-zoom)` rules assume. `getBoundingClientRect` and the
+ * viewport report device-independent pixels, while the popover, appended under that
+ * zoom, is positioned in unzoomed CSS pixels; divide by the zoom like the Agent and
+ * Permission Mode pickers do.
  */
 export function rendererModelPickerPlacement(
   triggerRect: RendererTriggerRect,
