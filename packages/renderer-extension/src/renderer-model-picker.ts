@@ -743,8 +743,10 @@ export function mountRendererModelPicker(
   };
   const focusActiveView = (keyboard = false): void => {
     if (!pickerOpen()) return;
-    if (control.effectiveView === "simple") slider.focus({ preventScroll: true });
-    else focusList(keyboard);
+    if (control.effectiveView !== "simple") focusList(keyboard);
+    else if (sliderAvailable()) slider.focus({ preventScroll: true });
+    // Without a slider the top row is all there is: Model list, Fast, reset.
+    else activeFocusables()[0]?.focus({ preventScroll: true });
   };
   const setMenuView = (
     next: ModelPickerView,
@@ -1201,6 +1203,7 @@ export function mountRendererModelPicker(
     }
     return [viewToggle, fastToggle, resetButton, slider].filter(
       (candidate) =>
+        (candidate !== slider || sliderAvailable()) &&
         !candidate.hidden &&
         !(candidate instanceof HTMLButtonElement && candidate.disabled) &&
         candidate.dataset.interactive !== "false",

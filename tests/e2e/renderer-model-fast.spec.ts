@@ -122,6 +122,34 @@ test("Fast is per selected model, inside the picker and independent from Thinkin
   await expect(fast).toHaveAttribute("aria-checked", "true");
 });
 
+test("keyboard focus stays on visible controls when only Fast is adjustable", async ({ page }) => {
+  await mountFastFixture(page);
+  const trigger = page.locator(
+    '[data-codexhost-model-control="fast-test"] button[aria-haspopup="menu"]',
+  );
+  const popover = page.locator("[data-codexhost-model-picker]");
+  const focusedRole = () =>
+    page.evaluate(() => {
+      const active = document.activeElement;
+      return active?.getAttribute("role") ?? active?.tagName ?? null;
+    });
+  // One Thinking option: no slider, but the top row stays for Fast.
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(popover).toBeVisible();
+  await expect(popover.getByRole("slider", { includeHidden: true })).toBeHidden();
+  await expect.poll(focusedRole).toBe("menuitem");
+  await page.keyboard.press("Tab");
+  await expect.poll(focusedRole).toBe("menuitemcheckbox");
+  await page.keyboard.press("Tab");
+  // Tab cycles through the visible controls and never lands on the hidden slider.
+  await expect.poll(focusedRole).toBe("menuitem");
+  await page.keyboard.press("Shift+Tab");
+  await expect.poll(focusedRole).toBe("menuitemcheckbox");
+  await page.keyboard.press("Space");
+  await expect(popover.getByRole("menuitemcheckbox")).toHaveAttribute("aria-checked", "true");
+});
+
 test("Fast help follows the settings locale", async ({ page }) => {
   await mountFastFixture(page);
   const trigger = page.locator(
