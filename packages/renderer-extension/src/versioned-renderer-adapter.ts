@@ -1095,11 +1095,17 @@ export function installCurrentRendererAdapter(): {
       if (!binding || !route.policy.scopedCreation)
         return agent === "codex" && !draftModels.has(draftKey);
       // The draft write may synchronously render a new creation mode.
+      const previous = draftModels.model(draftKey);
       const policyChanged = route.policy.select(carrier ?? null, draftKey, binding.creationModes);
       try {
         draftModels.apply(draftKey, binding, carrier ?? null);
       } catch (error) {
-        route.policy.select(null, draftKey);
+        // The draft keeps its previous model, so its selection must name that model again.
+        try {
+          route.policy.select(previous, draftKey, binding.creationModes);
+        } catch {
+          // The outer handler reports the route as unavailable.
+        }
         throw error;
       }
       if (policyChanged) {

@@ -109,8 +109,9 @@ export function installRendererHostRpcRouting(
     const [input, options] = args as unknown[];
     if (!isRecord(input) || !isRecord(input.collaborationMode)) return message;
     const settings = input.collaborationMode.settings;
-    if (!isRecord(settings) || typeof settings.model !== "string" || !settings.model)
-      return message;
+    if (!isRecord(settings)) return message;
+    // A creation can omit its native Model; a registered external draft still needs its carrier.
+    const nativeModel = typeof settings.model === "string" ? settings.model : null;
     let model: string | null = null;
     let selected: string | null = null;
     if (path[0] === "startConversation") {
@@ -123,11 +124,7 @@ export function installRendererHostRpcRouting(
       model = selected ? prewarmCarrier(selected) : null;
     }
     if (!model) return message;
-    if (
-      settings.model.startsWith("codexhost/") &&
-      settings.model !== model &&
-      settings.model !== selected
-    )
+    if (nativeModel?.startsWith("codexhost/") && nativeModel !== model && nativeModel !== selected)
       return message;
     return [
       "push",

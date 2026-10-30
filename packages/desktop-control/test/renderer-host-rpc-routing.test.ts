@@ -360,6 +360,41 @@ it("preserves an explicit different external model on a known draft", async () =
   }
 });
 
+it("gives a registered external draft its carrier when the creation omits a native Model", async () => {
+  const fixture = setup();
+  const routing = await install(fixture);
+  try {
+    policyOf(routing.forComposer()).select(carrier, "client-new-thread:external");
+    for (const settings of [
+      { reasoning_effort: "high" },
+      { model: "", reasoning_effort: "high" },
+    ]) {
+      const message = creation("startConversation", "unused", {
+        clientThreadId: "client-new-thread:external",
+      });
+      const call = (message[1] as unknown[])[3] as [
+        { collaborationMode: { settings: Record<string, unknown> } },
+      ];
+      call[0].collaborationMode.settings = settings;
+      fixture.post(message);
+      const sent = fixture.sent.at(-1) as unknown[];
+      const routed = ((sent[1] as unknown[])[3] as typeof call)[0].collaborationMode.settings;
+      expect(routed).toEqual({ ...settings, model: carrier });
+    }
+    // An unregistered draft stays untouched.
+    const other = creation("startConversation", "unused", {
+      clientThreadId: "client-new-thread:x",
+    });
+    (
+      (other[1] as unknown[])[3] as [{ collaborationMode: { settings: unknown } }]
+    )[0].collaborationMode.settings = { reasoning_effort: "high" };
+    fixture.post(other);
+    expect(fixture.sent.at(-1)).toBe(other);
+  } finally {
+    routing.dispose();
+  }
+});
+
 it("marks the selected external prewarm but preserves an explicit different external prewarm", async () => {
   const fixture = setup();
   const routing = await install(fixture);

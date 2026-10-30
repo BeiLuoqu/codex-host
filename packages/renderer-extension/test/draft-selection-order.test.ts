@@ -149,6 +149,22 @@ it("does not write the draft when its selection policy rejects the change", () =
   }
 });
 
+it("restores the previous external selection if the setter rejects a change", () => {
+  const f = setup("local");
+  try {
+    expect(f.adapter.applyAgent("pi", undefined, undefined, undefined, f.editor)).toBe(true);
+    const first = f.readDraft().modelSettings.model;
+    f.rejectNextWrite();
+    const replacement = harnessModelRefSchema.parse({ id: "replacement-model" });
+    expect(f.adapter.applyAgent("pi", replacement, undefined, undefined, f.editor)).toBe(false);
+    // The draft still carries the first Agent, and so does its selection.
+    expect(f.readDraft().modelSettings.model).toBe(first);
+    expect(f.selections.get("client-new-thread:selection-order")).toBe(first);
+  } finally {
+    f.adapter.dispose();
+  }
+});
+
 it("clears the new selection if the native draft setter rejects the write", () => {
   const f = setup("local");
   try {
