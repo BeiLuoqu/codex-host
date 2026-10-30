@@ -27,6 +27,8 @@ export interface RendererViewport {
  */
 export interface RendererModelPickerPlacement {
   left: number;
+  /** Unzoomed CSS width the popover may use; CSS `100vw` ignores Codex's zoom. */
+  maxWidth: number;
   bottom: number;
   availableHeight: number;
   originX: number;
@@ -84,6 +86,7 @@ export function rendererModelPickerPlacement(
   );
   return {
     left: menuLeft,
+    maxWidth: Math.max(COLLISION_PADDING, viewportWidth - COLLISION_PADDING * 2),
     bottom: Math.max(COLLISION_PADDING, viewportHeight - top + MODEL_PICKER_SIDE_OFFSET),
     availableHeight: Math.max(120, top - MODEL_PICKER_SIDE_OFFSET - COLLISION_PADDING),
     originX: Math.max(0, Math.min(menuWidth, center - menuLeft)),

@@ -75,7 +75,7 @@ describe("Renderer combined Model and Thinking picker presentation", () => {
         { width: 1200, height: 900 },
         0,
       ),
-    ).toEqual({ left: 673, bottom: 86, availableHeight: 806, originX: 127 });
+    ).toEqual({ left: 673, maxWidth: 1184, bottom: 86, availableHeight: 806, originX: 127 });
   });
 
   it("keeps the picker inside the viewport next to a screen edge", () => {
@@ -104,7 +104,20 @@ describe("Renderer combined Model and Thinking picker presentation", () => {
         0,
         1.5,
       ),
-    ).toEqual({ left: 538, bottom: 86, availableHeight: 806, originX: 254 });
+    ).toEqual({ left: 538, maxWidth: 784, bottom: 86, availableHeight: 806, originX: 254 });
+  });
+
+  it("caps the popover width to a narrow zoomed window in unzoomed pixels", () => {
+    // 360px window at 150%: 240 CSS pixels wide, so 224 fit inside the 8px margins.
+    const placement = rendererModelPickerPlacement(
+      { left: 135, right: 225, top: 600, width: 90 },
+      { width: 360, height: 640 },
+      254,
+      1.5,
+    );
+    expect(placement.maxWidth).toBe(224);
+    expect(placement.left).toBe(8);
+    expect(placement.left + placement.maxWidth).toBeLessThanOrEqual(240 - 8);
   });
 
   it("widens to the measured popover and clamps it to a narrow viewport", () => {
@@ -461,6 +474,11 @@ describe("Renderer Model picker Thinking order and slider geometry", () => {
     expect(thinkingOptionRank(option("custom", "Ultracode"))).toBe(7);
     expect(thinkingOptionRank(option("unknown-option"))).toBeUndefined();
     expect(thinkingOptionRank(undefined)).toBeUndefined();
+  });
+
+  it("keeps the Harness order when any Thinking option is unrecognized", () => {
+    const mixed = [option("high"), option("auto"), option("low")];
+    expect(orderedThinkingOptions(mixed)).toEqual(mixed);
   });
 
   it("orders Thinking options low to high whatever the Harness reports", () => {

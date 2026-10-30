@@ -109,8 +109,10 @@ export function thinkingOptionRank(option: HarnessThinkingOption | undefined): n
   return void 0;
 }
 export function orderedThinkingOptions(options: HarnessThinkingOption[]): HarnessThinkingOption[] {
-  const ranks = options.map(thinkingOptionRank).filter((rank) => rank !== void 0);
-  if (ranks.length < 2) return [...options];
+  const all = options.map(thinkingOptionRank);
+  // An unrecognized option has no known place, so the Harness order is kept as given.
+  if (all.length < 2 || all.some((rank) => rank === void 0)) return [...options];
+  const ranks = all as number[];
   const descending = ranks.every((rank, index) => index === 0 || rank < (ranks[index - 1] ?? rank));
   return descending ? [...options].reverse() : [...options];
 }

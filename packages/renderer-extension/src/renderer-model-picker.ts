@@ -176,6 +176,8 @@ export interface RendererModelPickerControl {
   fastNext: HarnessModelRef | undefined;
   pendingModelId: string | null;
   pendingReset: { modelId: string; thinkingId: string | undefined } | null;
+  /** The picker control that had focus when a selection disabled it, restored once ready. */
+  focusToRestore: HTMLElement | null;
   sliderState: ThinkingSliderState;
   setSliderOptions(options: HarnessThinkingOption[]): void;
   renderSlider(animate?: boolean): void;
@@ -317,6 +319,7 @@ function positionRendererModelPicker(control: RendererModelPickerControl): void 
     control.popover.offsetWidth,
     modelPickerWindowZoom(),
   );
+  control.popover.style.maxWidth = `${placement.maxWidth}px`;
   control.popover.style.left = `${placement.left}px`;
   control.popover.style.right = "auto";
   control.popover.style.top = "auto";
@@ -797,16 +800,32 @@ export function mountRendererModelPicker(
       renderSlider();
     }
   };
+  // A delayed keyboard commit belongs to the Model it was made for; another Model loading in
+  // the meantime (same Harness, another draft or Thread) drops it instead of changing that one.
+  let keyCommitModelId: string | undefined;
+  const selectedModelId = (): string | undefined =>
+    control.view ? catalogModelForRef(control.view.catalog, control.view.selected)?.ref.id : void 0;
+  const commitPreviewForKeyModel = (): void => {
+    const index = sliderState.previewIndex;
+    if (index === null) return;
+    if (selectedModelId() !== keyCommitModelId) {
+      sliderState.previewIndex = null;
+      renderSlider();
+      return;
+    }
+    commitIndex(index);
+  };
   const flushKeyCommit = (): void => {
     if (sliderState.keyTimer === void 0) return;
     cancelKeyCommit();
-    if (sliderState.previewIndex !== null) commitIndex(sliderState.previewIndex);
+    commitPreviewForKeyModel();
   };
   const scheduleKeyCommit = (): void => {
     cancelKeyCommit();
+    keyCommitModelId = selectedModelId();
     sliderState.keyTimer = window.setTimeout(() => {
       sliderState.keyTimer = void 0;
-      if (sliderState.previewIndex !== null) commitIndex(sliderState.previewIndex);
+      commitPreviewForKeyModel();
     }, SLIDER_KEY_COMMIT_DELAY_MS);
   };
   const previewIndex = (index: number): void => {
@@ -992,8 +1011,12 @@ export function mountRendererModelPicker(
     } catch {}
     slider.dataset.keyboardFocused = String(focusVisible);
   };
-  const onSliderBlur = (): void => {
+  const onSliderBlur = (event: FocusEvent): void => {
     slider.dataset.keyboardFocused = "false";
+    // Moving to another control in the picker keeps the pending commit: committing now would
+    // disable that control mid-click (Fast) or drop the focus Tab just moved.
+    const next = event.relatedTarget;
+    if (next instanceof Node && popover.contains(next)) return;
     flushKeyCommit();
   };
   const close = ({ commitPending = true }: { commitPending?: boolean } = {}): void => {
@@ -1347,6 +1370,7 @@ export function mountRendererModelPicker(
     fastNext: void 0,
     pendingModelId: null,
     pendingReset: null,
+    focusToRestore: null,
     sliderState,
     setSliderOptions,
     renderSlider,
@@ -1554,6 +1578,9 @@ export function renderRendererModelPicker(
   harnessId = "",
   locale: RendererSettingsLocale = "en",
 ): void {
+  const focused = document.activeElement;
+  if (control.isOpen() && focused instanceof HTMLElement && control.popover.contains(focused))
+    control.focusToRestore = focused;
   if (control.harnessId !== harnessId) {
     control.close({ commitPending: false });
     control.selectionNotice.hide();
@@ -1615,6 +1642,9 @@ export function renderRendererModelPicker(
   control.trigger.disabled = isRendererModelPickerDisabled(view);
   if (keepOpenContent) {
     for (const option of control.options.values()) option.item.disabled = true;
+    control.fastToggle.disabled = true;
+    control.resetButton.disabled = true;
+    control.fastNext = void 0;
     control.sliderState.disabled = true;
     control.renderSlider();
   } else {
@@ -1630,4 +1660,27 @@ export function renderRendererModelPicker(
   if (shouldCloseRendererModelPicker(view) && !keepOpenContent) control.close();
   resolveModelPickerPendingSelections(control, view);
   syncModelPickerSelectionNotice(control, view, locale);
+  restoreModelPickerFocus(control, view);
+}
+
+/** A selection disables the focused control, which drops focus to the page; give it back. */
+function restoreModelPickerFocus(
+  control: RendererModelPickerControl,
+  view: RendererModelControlView,
+): void {
+  const target = control.focusToRestore;
+  if (!target) return;
+  if (!control.isOpen()) {
+    control.focusToRestore = null;
+    return;
+  }
+  if (isRendererModelPickerDisabled(view)) return;
+  control.focusToRestore = null;
+  const active = document.activeElement;
+  if (active instanceof Node && control.popover.contains(active)) return;
+  const usable =
+    target.isConnected &&
+    !(target instanceof HTMLButtonElement && target.disabled) &&
+    target.closest("[hidden], [inert]") === null;
+  if (usable) target.focus({ preventScroll: true });
 }

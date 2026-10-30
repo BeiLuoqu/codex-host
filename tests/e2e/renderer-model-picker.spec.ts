@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { build } from "esbuild";
 import path from "node:path";
 
@@ -65,6 +65,55 @@ const { outputFiles } = await build({
         );
         document.body.append(control.root);
         renderRendererModelPicker(control, view, true);
+      };
+
+      globalThis.setupInteractiveRendererModelPicker = () => {
+        const thinking = ["low", "high", "xhigh"];
+        const catalog = {
+          models: [
+            { ref: { id: "a" }, fastModel: { id: "a-fast" }, label: "Provider / A", supportedThinkingOptionIds: thinking },
+            { ref: { id: "b" }, label: "Provider / B", supportedThinkingOptionIds: thinking },
+          ],
+          defaultModel: { id: "a" },
+          thinkingOptions: [
+            { id: "low", label: "Low" },
+            { id: "high", label: "High" },
+            { id: "xhigh", label: "Extra High" },
+          ],
+          defaultThinkingOptionId: "low",
+        };
+        const calls = [];
+        globalThis.pickerCalls = calls;
+        let view = { status: "ready", catalog, selected: { id: "a" }, selectedThinkingOptionId: "low" };
+        let control;
+        const render = () => renderRendererModelPicker(control, view, true, "pi");
+        // Host applies each selection after a short "selecting" phase.
+        const apply = (change) => {
+          view = { ...view, status: "selecting" };
+          render();
+          setTimeout(() => {
+            view = { ...view, ...change, status: "ready" };
+            render();
+          }, 120);
+        };
+        control = mountRendererModelPicker(
+          "interactive-composer",
+          (modelId) => {
+            calls.push("model:" + modelId);
+            apply({ selected: { id: modelId } });
+          },
+          (thinkingId) => {
+            calls.push("thinking:" + thinkingId);
+            apply({ selectedThinkingOptionId: thinkingId });
+          },
+        );
+        document.body.append(control.root);
+        render();
+        // Another draft or Thread loading a different Model of the same Harness.
+        globalThis.loadPickerView = (status, modelId) => {
+          view = { ...view, status, ...(modelId ? { selected: { id: modelId } } : {}) };
+          render();
+        };
       };
 
       globalThis.setupClaudeRendererModelPicker = () => {
@@ -254,4 +303,111 @@ test("stays centered above its trigger in a zoomed Codex window", async ({ page 
   expect(Math.abs(popoverCenter - triggerCenter)).toBeLessThanOrEqual(2);
   expect(popoverBox.y + popoverBox.height).toBeLessThanOrEqual(triggerBox.y + 1);
   expect(popoverBox.y + popoverBox.height).toBeGreaterThanOrEqual(triggerBox.y - 24);
+});
+
+const mountInteractivePicker = async (page: Page) => {
+  await page.setContent(
+    '<!doctype html><body style="display:flex;align-items:flex-end;justify-content:center;min-height:100vh;margin:0"></body>',
+  );
+  await page.addScriptTag({ content: browserBundle });
+  await page.evaluate(() => {
+    const setup = Reflect.get(globalThis, "setupInteractiveRendererModelPicker");
+    if (typeof setup !== "function") throw new Error("Interactive picker setup is unavailable");
+    setup();
+  });
+  const trigger = page.locator(
+    '[data-codexhost-model-control="interactive-composer"] > button[aria-haspopup="menu"]',
+  );
+  const popover = page.locator("[data-codexhost-model-picker]");
+  return {
+    trigger,
+    popover,
+    slider: popover.getByRole("slider"),
+    fast: popover.getByRole("menuitemcheckbox"),
+    calls: () => page.evaluate(() => [...(Reflect.get(globalThis, "pickerCalls") as string[])]),
+    focusInPicker: () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        return Boolean(active?.closest("[data-codexhost-model-picker]"));
+      }),
+  };
+};
+
+test("moving to Fast right after a keyboard Thinking change applies both", async ({ page }) => {
+  const picker = await mountInteractivePicker(page);
+  await picker.trigger.click();
+  await picker.slider.focus();
+  await page.keyboard.press("End");
+  // Within the 320 ms keyboard commit delay, focus moves to Fast before it is activated:
+  // committing on that blur would disable Fast and swallow the activation.
+  await picker.fast.focus();
+  await page.keyboard.press("Space");
+  await expect.poll(picker.calls).toEqual(["thinking:xhigh", "model:a-fast"]);
+  await expect(picker.fast).toHaveAttribute("aria-checked", "true");
+  await expect(picker.popover).toBeVisible();
+  // The selection disabled the focused Fast toggle; focus comes back once it is ready.
+  await expect.poll(picker.focusInPicker).toBe(true);
+});
+
+test("Tab after a keyboard Thinking change keeps focus in the picker", async ({ page }) => {
+  const picker = await mountInteractivePicker(page);
+  await picker.trigger.click();
+  await picker.slider.focus();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Tab");
+  await expect.poll(picker.calls).toEqual(["thinking:xhigh"]);
+  await expect(picker.slider).toBeEnabled();
+  await expect(picker.slider).toHaveAttribute("aria-valuetext", /Extra High/u);
+  await expect.poll(picker.focusInPicker).toBe(true);
+});
+
+test("a pending keyboard Thinking change does not apply to a Model loaded meanwhile", async ({
+  page,
+}) => {
+  const picker = await mountInteractivePicker(page);
+  await picker.trigger.click();
+  await picker.slider.focus();
+  await page.keyboard.press("End");
+  await page.evaluate(() => Reflect.get(globalThis, "loadPickerView")("loading"));
+  await page.waitForTimeout(80);
+  await page.evaluate(() => Reflect.get(globalThis, "loadPickerView")("ready", "b"));
+  await page.waitForTimeout(500);
+  expect(await picker.calls()).toEqual([]);
+});
+
+test("loading disables Fast and drops its stale target", async ({ page }) => {
+  const picker = await mountInteractivePicker(page);
+  await picker.trigger.click();
+  await expect(picker.fast).toBeEnabled();
+  await page.evaluate(() => Reflect.get(globalThis, "loadPickerView")("loading"));
+  await expect(picker.trigger).toBeDisabled();
+  await expect(picker.fast).toBeDisabled();
+  await picker.fast.click({ force: true });
+  expect(await picker.calls()).toEqual([]);
+});
+
+test("stays inside a narrow zoomed window", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 640 });
+  await page.setContent(`
+    <!doctype html>
+    <html style="--codex-window-zoom: 1.5; zoom: var(--codex-window-zoom)">
+      <body style="display:flex;align-items:flex-end;justify-content:center;min-height:100vh;margin:0"></body>
+    </html>
+  `);
+  await page.addScriptTag({ content: browserBundle });
+  await page.evaluate(() => {
+    const setup = Reflect.get(globalThis, "setupRendererModelPicker");
+    if (typeof setup !== "function") throw new Error("Model picker setup is unavailable");
+    setup();
+  });
+  const trigger = page.locator(
+    '[data-codexhost-model-control="test-composer"] > button[aria-haspopup="menu"]',
+  );
+  const popover = page.locator("[data-codexhost-model-picker]");
+  await trigger.click();
+  await expect(popover).toBeVisible();
+  const box = await popover.boundingBox();
+  if (!box) throw new Error("Zoomed Model picker geometry is unavailable");
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(360);
 });
