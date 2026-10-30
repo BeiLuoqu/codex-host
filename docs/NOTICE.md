@@ -4,23 +4,20 @@ title: Codex Desktop 新版兼容性提醒
 type: danger
 ---
 
-**Codex Desktop 10 月 30 日版本因内部架构调整，导致当前版本的 codexhost 无法正常使用。** 此问题影响 codexhost 与 Codex Desktop 的集成，Codex Desktop 本身可以正常使用。
+**Codex Desktop 10 月 30 日的更新调整了内部架构，当前 codexhost 暂时无法兼容。Codex Desktop 本身不受影响。**
 
-我们正在探索新的技术方案以恢复兼容，计划今天或者本周末修复。
+我们正在尝试新的适配方案，争取今天或本周末发布修复版本，请耐心等待更新。
 
-等待 codexhost 发布兼容新版的更新～
-加入微信群可以加我拉群，a28417416
+欢迎加入微信群交流，添加微信 **a28417416**，我拉你入群。
 
 [关注 codexhost 后续发布](https://github.com/BytePioneer-AI/codex-host/releases)
 
 ## English
 
-**Internal architectural changes in the October 30 release of Codex Desktop prevent the current version of codexhost from working properly.** This affects the integration between codexhost and Codex Desktop; Codex Desktop itself still works normally.
+**The October 30 update changed Codex Desktop’s internal architecture, making it temporarily incompatible with the current version of codexhost. Codex Desktop itself is unaffected.**
 
-We are exploring a new technical approach to restore compatibility and aim to have a fix ready today or over the weekend.
+We are trying a new integration approach and aim to release a fix today or over the weekend. Thank you for your patience.
 
-Please wait for a codexhost update that supports the new version of Codex Desktop.
-
-To join our WeChat group, add me on WeChat: a28417416.
+To join our WeChat group, add me on WeChat at **a28417416**, and I’ll invite you.
 
 [Follow upcoming codexhost releases](https://github.com/BytePioneer-AI/codex-host/releases)
