@@ -618,6 +618,9 @@ export function mountRendererModelPicker(
   let transitionsFrame = 0;
   const pickerOpen = () => popoverOpen(popover);
   const sliderAvailable = () => sliderState.options.length >= 2;
+  // The top row also carries Fast, so it stays reachable without a slider. Reset is not a
+  // reason on its own: without Thinking it only selects the default Model, which the list offers.
+  const simpleViewUsable = () => sliderAvailable() || !fastToggle.hidden;
   const displayIndex = () => {
     if (sliderState.previewIndex !== null) return sliderState.previewIndex;
     if (sliderState.pendingCommitId) {
@@ -694,12 +697,13 @@ export function mountRendererModelPicker(
       menu.style.height = `min(${height}px, var(--codexhost-model-picker-available-height, 100vh))`;
   };
   const syncViewState = (): void => {
-    const effective = sliderAvailable() ? control.menuView : "advanced";
+    const effective = simpleViewUsable() ? control.menuView : "advanced";
     control.effectiveView = effective;
     menu.dataset.view = effective;
     const simpleActive = effective === "simple";
     topRowMotion.dataset.active = String(simpleActive);
-    sliderMotion.dataset.active = String(simpleActive);
+    sliderMotion.dataset.active = String(simpleActive && sliderAvailable());
+    sliderMotion.hidden = !sliderAvailable();
     listMotion.dataset.active = String(!simpleActive);
     simpleTrack.dataset.active = String(simpleActive);
     listTrack.dataset.active = String(!simpleActive);
@@ -1125,7 +1129,7 @@ export function mountRendererModelPicker(
     const view = control.view;
     const selectedId = catalogModelForRef(view.catalog, view.selected)?.ref.id;
     if (modelId === selectedId && !control.pendingModelId) {
-      if (sliderAvailable()) setMenuView("simple");
+      if (simpleViewUsable()) setMenuView("simple");
       else {
         close();
         trigger.focus();
@@ -1510,7 +1514,8 @@ function resolveModelPickerPendingSelections(
   }
   control.resetButton.hidden = !modelPickerResetAvailable(view);
   if (!control.isOpen()) return;
-  if (control.sliderState.options.length < 2) {
+  // Stay open while the top row still offers Fast for the new Model.
+  if (control.sliderState.options.length < 2 && control.fastToggle.hidden) {
     control.close();
     control.trigger.focus();
     return;

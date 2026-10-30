@@ -64,167 +64,98 @@ async function mountFastFixture(page: Page, theme = "dark") {
   await page.addScriptTag({ content: bundle });
 }
 
-test("Fast lightning is per selected model, independent from Thinking and the Model menu", async ({
+test("Fast is per selected model, inside the picker and independent from Thinking", async ({
   page,
 }) => {
   await mountFastFixture(page);
-  const tooltip = page.getByRole("tooltip", { includeHidden: true });
   const root = page.locator('[data-codexhost-model-control="fast-test"]');
   const trigger = root.locator('button[aria-haspopup="menu"]');
-  const fast = root.locator("[data-codexhost-fast-toggle]");
-  const mainMenu = page.getByRole("menu", { name: "Model and Thinking", exact: true });
-  const modelMenu = page.getByRole("menu", { name: "Model", exact: true });
-  await expect(fast).toBeVisible();
-  await expect(root.locator(":scope > button").first()).toHaveAttribute(
-    "data-codexhost-fast-toggle",
-    "true",
-  );
-  const fastBounds = await fast.boundingBox();
-  const triggerBounds = await trigger.boundingBox();
-  if (!fastBounds || !triggerBounds) {
-    throw new Error("Fast toggle or model trigger geometry is unavailable");
-  }
-  expect(fastBounds.x + fastBounds.width).toBeLessThanOrEqual(triggerBounds.x);
-  await expect(trigger).toHaveCSS("padding-left", "2px");
-  await expect(fast).toHaveCSS("color", "rgb(143, 143, 143)");
-  await expect(fast).toHaveAttribute("aria-pressed", "false");
-  await expect(fast.locator("svg")).toHaveAttribute("viewBox", "0 0 24 24");
-  await expect(fast.locator("svg")).toHaveCSS("width", "14px");
-  await expect(fast.locator("svg")).toHaveCSS("height", "14px");
-  await expect(fast.locator("path")).toHaveAttribute("fill", "none");
-  await expect(fast.locator("path")).toHaveAttribute("stroke", "currentColor");
+  const triggerBolt = trigger.locator(".codexhost-model-picker-trigger-icon");
+  const popover = page.locator("[data-codexhost-model-picker]");
+  // Fast lives in the popover's top row, like the native Codex picker.
+  const fast = popover.getByRole("menuitemcheckbox");
+  const models = popover.locator("button[data-model-id]");
+  const openModelList = () => popover.locator(".codexhost-model-picker-view-toggle").click();
+
   await expect(trigger).toContainText("c / supportedHigh");
-  const offHint = "Fast 已关闭 · 点击开启";
-  const onHint = "Fast 已开启 · 点击关闭";
-  await expect(fast).not.toHaveAttribute("title");
-  await expect(tooltip).toBeHidden();
-  await expect(fast).toHaveAttribute("aria-label", "Fast");
-  await expect(fast).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await page.screenshot({ path: "/tmp/codexhost-pi-fast-off.png" });
-  await fast.hover();
-  // No opening timer: visible as soon as the pointerenter has been processed.
-  expect(await tooltip.isVisible()).toBe(true);
-  await expect(tooltip).toContainText(offHint);
-  await expect(tooltip).toContainText("Codex Fast 模式：优先处理请求，可能增加额度消耗。");
-  const tooltipId = await tooltip.getAttribute("id");
-  if (!tooltipId) throw new Error("Fast tooltip ID is unavailable");
-  await expect(fast).toHaveAttribute("aria-describedby", tooltipId);
-  await expect(fast).toHaveCSS("cursor", "pointer");
-  await expect(fast).toHaveCSS("background-color", "rgba(127, 127, 127, 0.08)");
-  await page.screenshot({ path: "/tmp/codexhost-pi-fast-hover.png" });
+  await expect(triggerBolt).toBeHidden();
+  await trigger.click();
+  await expect(popover).toBeVisible();
+  await expect(fast).toBeVisible();
+  await expect(fast).toHaveAttribute("aria-checked", "false");
+  await expect(fast).toHaveAttribute("aria-label", "Fast 已关闭 · 点击开启");
+  // The usage warning stays with the toggle.
+  await expect(fast).toHaveAttribute("title", /Fast 模式：优先处理请求，可能增加额度消耗。/u);
+
   await fast.click();
-  await expect(fast).toHaveAttribute("aria-pressed", "true");
-  await expect(tooltip).toContainText(onHint);
-  await expect(fast).toHaveAccessibleDescription(/Fast 已开启 · 点击关闭/);
-  await expect(fast.locator("path")).toHaveAttribute("fill", "currentColor");
-  await expect(fast.locator("path")).toHaveAttribute("stroke", "none");
-  await expect(fast).toHaveCSS("color", "rgb(255, 255, 255)");
-  await expect(trigger).toHaveCSS("color", "rgb(255, 255, 255)");
-  await expect(mainMenu).toBeHidden();
-  await expect(modelMenu).toBeHidden();
+  await expect(fast).toHaveAttribute("aria-checked", "true");
+  await expect(fast).toHaveAttribute("aria-label", "Fast 已开启 · 点击关闭");
+  await expect(triggerBolt).toBeVisible();
+  // Fast swaps the Model for its priority variant; Thinking is unchanged.
   await expect(trigger).toContainText("High");
-  await page.screenshot({ path: "/tmp/codexhost-pi-fast-on.png" });
-  await root.screenshot({ path: "/tmp/codexhost-pi-fast-native-icon.png" });
   await fast.click();
-  await expect(fast).toHaveAttribute("aria-pressed", "false");
-  await expect(tooltip).toContainText(offHint);
-  await trigger.hover();
-  await expect(tooltip).toBeHidden();
-  await expect(fast).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(fast).toHaveAttribute("aria-checked", "false");
+  await expect(triggerBolt).toBeHidden();
+
   await fast.click();
-  await trigger.click();
-  await page.locator("button[data-open-model-menu]").click();
-  await expect(modelMenu.locator("button[data-model-id]")).toHaveCount(2);
-  await expect(modelMenu.locator('[data-model-id="normal"]')).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  await modelMenu.locator('[data-model-id="unsupported"]').click();
-  await expect(fast).toHaveCount(0);
-  await expect(tooltip).toBeHidden();
-  await expect(trigger).toHaveCSS("padding-left", "8px");
+  await openModelList();
+  await expect(models).toHaveCount(2);
+  await models.filter({ hasText: "c / unsupported" }).click();
   await expect(trigger).toContainText("c / unsupportedHigh");
-  await page.screenshot({ path: "/tmp/codexhost-pi-fast-unsupported.png" });
+  await expect(fast).toBeHidden();
+  await expect(triggerBolt).toBeHidden();
+
+  // Nothing is left to adjust, so the picker closes; it reopens straight on the Model list.
+  await expect(popover).toBeHidden();
   await trigger.click();
-  await page.locator("button[data-open-model-menu]").click();
-  await modelMenu.locator('[data-model-id="normal"]').click();
-  await expect(fast).toHaveAttribute("aria-pressed", "false");
-  await expect(root.locator(":scope > button").first()).toHaveAttribute(
-    "data-codexhost-fast-toggle",
-    "true",
+  await expect(popover).toBeVisible();
+  await expect(popover.locator(".codexhost-model-picker-menu")).toHaveAttribute(
+    "data-view",
+    "advanced",
   );
+  await models.filter({ hasText: "c / supported" }).first().click();
+  // Returning to the Model starts from its own setting, not the earlier Fast choice.
+  await expect(fast).toBeVisible();
+  await expect(fast).toHaveAttribute("aria-checked", "false");
   await fast.focus();
   await page.keyboard.press("Space");
-  await expect(fast).toHaveAttribute("aria-pressed", "true");
+  await expect(fast).toHaveAttribute("aria-checked", "true");
 });
 
-for (const theme of ["dark", "light"]) {
-  test(`Fast help is hoverable, keyboard accessible and viewport-safe in ${theme} mode`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 360, height: 500 });
-    await mountFastFixture(page, theme);
-    const fast = page.locator("[data-codexhost-fast-toggle]");
-    const tooltip = page.getByRole("tooltip", { includeHidden: true });
-    await fast.hover();
-    expect(await tooltip.isVisible()).toBe(true);
-    const panel = await tooltip.boundingBox();
-    const anchor = await fast.boundingBox();
-    if (!panel || !anchor) {
-      throw new Error("Fast tooltip or toggle geometry is unavailable");
-    }
-    expect(panel.x).toBeGreaterThanOrEqual(12);
-    expect(panel.x + panel.width).toBeLessThanOrEqual(348);
-    expect(panel.y).toBeGreaterThanOrEqual(12);
-    expect(panel.y + panel.height).toBeLessThan(anchor.y);
-    await tooltip.hover();
-    // Exercise the 140ms leave grace period while the pointer rests on the card.
-    await page.waitForTimeout(200);
-    await expect(tooltip).toBeVisible();
-    await expect(tooltip).toHaveCSS(
-      "box-shadow",
-      theme === "dark"
-        ? "rgba(0, 0, 0, 0.42) 0px 10px 24px 0px, rgba(0, 0, 0, 0.28) 0px 2px 8px 0px"
-        : "rgba(15, 23, 42, 0.12) 0px 10px 24px 0px, rgba(15, 23, 42, 0.06) 0px 2px 8px 0px",
-    );
-    await page.screenshot({ path: `/tmp/codexhost-fast-tooltip-${theme}.png` });
-    await page.keyboard.press("Escape");
-    await expect(tooltip).toBeHidden();
-    await fast.hover();
-    expect(await tooltip.isVisible()).toBe(true);
-    await page.getByRole("button", { name: "English", exact: true }).click();
-    await expect(tooltip).toBeHidden();
-    await fast.focus();
-    expect(await tooltip.isVisible()).toBe(true);
-    await expect(tooltip).toContainText("Fast is off · Click to enable");
-    await expect(tooltip).toContainText("may increase usage");
-    await page.screenshot({ path: `/tmp/codexhost-fast-tooltip-${theme}-focus.png` });
-    await page.keyboard.press("Space");
-    await expect(fast).toHaveAttribute("aria-pressed", "true");
-    await expect(tooltip).toContainText("Fast is on · Click to disable");
-    await page.keyboard.press("Escape");
-    await expect(tooltip).toBeHidden();
-  });
-}
+test("Fast help follows the settings locale", async ({ page }) => {
+  await mountFastFixture(page);
+  const trigger = page.locator(
+    '[data-codexhost-model-control="fast-test"] button[aria-haspopup="menu"]',
+  );
+  const fast = page.locator("[data-codexhost-model-picker]").getByRole("menuitemcheckbox");
+  await page.getByRole("button", { name: "English", exact: true }).click();
+  await trigger.click();
+  await expect(fast).toHaveAttribute("aria-label", "Fast is off · Click to enable");
+  await expect(fast).toHaveAttribute("title", /may increase usage/u);
+  await fast.click();
+  await expect(fast).toHaveAttribute("aria-label", "Fast is on · Click to disable");
+});
 
 for (const action of ["Hide picker", "Disable picker", "Dispose picker"]) {
-  test(`Fast help is cleaned up on ${action}`, async ({ page }) => {
+  test(`Fast follows the picker on ${action}`, async ({ page }) => {
     await mountFastFixture(page);
-    const fast = page.locator("[data-codexhost-fast-toggle]");
-    const tooltip = page.getByRole("tooltip", { includeHidden: true });
-    await fast.hover();
-    await expect(tooltip).toBeVisible();
+    const trigger = page.locator(
+      '[data-codexhost-model-control="fast-test"] button[aria-haspopup="menu"]',
+    );
+    const popover = page.locator("[data-codexhost-model-picker]");
+    const fast = popover.getByRole("menuitemcheckbox", { includeHidden: true });
+    await trigger.click();
+    await expect(fast).toBeVisible();
     await page.getByRole("button", { name: action, exact: true }).click();
-    await expect(tooltip).toBeHidden();
+    await expect(popover).toBeHidden();
     if (action === "Dispose picker") {
-      await expect(tooltip).toHaveCount(0);
-      await expect(fast).toHaveCount(0);
+      await expect(popover).toHaveCount(0);
+      await expect(trigger).toHaveCount(0);
     } else if (action === "Disable picker") {
       await expect(fast).toBeDisabled();
-      await fast.hover();
-      await expect(tooltip).toBeHidden();
+      await expect(trigger).toBeDisabled();
     } else {
-      await expect(fast).toBeHidden();
+      await expect(trigger).toBeHidden();
     }
   });
 }
