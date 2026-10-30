@@ -222,3 +222,36 @@ test("Claude aliases show actual runtime Model without exposing Thinking", async
   expect(popoverBox.y).toBeGreaterThanOrEqual(8);
   await expect(popover).not.toContainText("claude-model-v1");
 });
+
+test("stays centered above its trigger in a zoomed Codex window", async ({ page }) => {
+  // Codex zooms its window with CSS `zoom: var(--codex-window-zoom)` on the document.
+  await page.setContent(`
+    <!doctype html>
+    <html style="--codex-window-zoom: 1.5; zoom: var(--codex-window-zoom)">
+      <body style="display:flex;align-items:flex-end;justify-content:center;min-height:100vh;margin:0"></body>
+    </html>
+  `);
+  await page.addScriptTag({ content: browserBundle });
+  await page.evaluate(() => {
+    const setup = Reflect.get(globalThis, "setupRendererModelPicker");
+    if (typeof setup !== "function") throw new Error("Model picker setup is unavailable");
+    setup();
+  });
+
+  const trigger = page.locator(
+    '[data-codexhost-model-control="test-composer"] > button[aria-haspopup="menu"]',
+  );
+  const popover = page.locator("[data-codexhost-model-picker]");
+  await trigger.click();
+  await expect(popover).toBeVisible();
+  const [triggerBox, popoverBox] = await Promise.all([
+    trigger.boundingBox(),
+    popover.boundingBox(),
+  ]);
+  if (!triggerBox || !popoverBox) throw new Error("Zoomed Model picker geometry is unavailable");
+  const triggerCenter = triggerBox.x + triggerBox.width / 2;
+  const popoverCenter = popoverBox.x + popoverBox.width / 2;
+  expect(Math.abs(popoverCenter - triggerCenter)).toBeLessThanOrEqual(2);
+  expect(popoverBox.y + popoverBox.height).toBeLessThanOrEqual(triggerBox.y + 1);
+  expect(popoverBox.y + popoverBox.height).toBeGreaterThanOrEqual(triggerBox.y - 24);
+});

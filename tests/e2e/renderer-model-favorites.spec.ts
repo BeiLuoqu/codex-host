@@ -17,11 +17,12 @@ const { outputFiles } = await build({
       let harnessId = "pi";
       globalThis.selections = 0;
       document.body.append(control.root);
-      const view = { status: "ready", catalog: { models: [
-        { ref: { id: "a" }, label: "Provider / Alpha" },
-        { ref: { id: "b" }, label: "Provider / Beta" },
-        { ref: { id: "c" }, label: "Provider / Gamma" },
-      ], thinkingOptions: [] }, selected: { id: "a" } };
+      // More than eight Models, so the list also shows its search box.
+      const names = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta", "Iota"];
+      const view = { status: "ready", catalog: {
+        models: names.map((name, index) => ({ ref: { id: "abcdefghi"[index] }, label: "Provider / " + name })),
+        thinkingOptions: [],
+      }, selected: { id: "a" } };
       globalThis.changeHarness = (id) => {
         harnessId = id;
         renderRendererModelPicker(control, view, true, id);
@@ -51,7 +52,8 @@ test("favorites persist, reorder immediately, remain searchable and are Harness 
   await page.goto("http://favorites.test/");
   await page.addScriptTag({ content: bundle });
   const trigger = page.locator("[data-codexhost-model-control] > button");
-  const menu = page.locator('[aria-label="Model"]');
+  // The picker opens in the top layer; without Thinking options it shows the Model list.
+  const menu = page.locator("[data-codexhost-model-picker]");
   const models = menu.locator("button[data-model-id]");
   const ids = () =>
     models.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-model-id")));
@@ -61,13 +63,13 @@ test("favorites persist, reorder immediately, remain searchable and are Harness 
   await expect(betaStar).toHaveAttribute("aria-pressed", "true");
   await expect(menu).toBeVisible();
   expect(await page.evaluate(() => Reflect.get(globalThis, "selections"))).toBe(0);
-  expect(await ids()).toEqual(["b", "a", "c"]);
+  expect(await ids()).toEqual(["b", "a", "c", "d", "e", "f", "g", "h", "i"]);
   await expect(betaStar).toBeFocused();
   await expect(betaStar).toHaveCSS("color", "rgb(245, 158, 11)");
   await expect(betaStar.locator("svg")).toHaveCSS("fill", "rgb(245, 158, 11)");
   await trigger.click();
   await trigger.click();
-  expect(await ids()).toEqual(["b", "a", "c"]);
+  expect(await ids()).toEqual(["b", "a", "c", "d", "e", "f", "g", "h", "i"]);
   await menu.getByRole("searchbox").fill("Gamma");
   await expect(menu.locator("button[data-model-id]:visible")).toHaveCount(1);
   await expect(menu.locator("button[data-favorite-model-id]:visible")).toHaveCount(1);
@@ -76,12 +78,12 @@ test("favorites persist, reorder immediately, remain searchable and are Harness 
   await page.keyboard.press("Space");
   await expect(betaStar).toHaveAttribute("aria-pressed", "false");
   await expect(menu).toBeVisible();
-  expect(await ids()).toEqual(["a", "b", "c"]);
+  expect(await ids()).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
   await expect(betaStar).toBeFocused();
   await expect(betaStar.locator("svg")).toHaveCSS("fill", "none");
   await trigger.click();
   await trigger.click();
-  expect(await ids()).toEqual(["a", "b", "c"]);
+  expect(await ids()).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
   await betaStar.click();
   await menu.locator('[data-model-id="b"]').click();
   await expect(trigger).toContainText("Provider / Beta");
@@ -92,10 +94,10 @@ test("favorites persist, reorder immediately, remain searchable and are Harness 
   await page.reload();
   await page.addScriptTag({ content: bundle });
   await trigger.click();
-  expect(await ids()).toEqual(["b", "a", "c"]);
+  expect(await ids()).toEqual(["b", "a", "c", "d", "e", "f", "g", "h", "i"]);
   await page.evaluate(() => Reflect.get(globalThis, "changeHarness")("claude"));
   await trigger.click();
-  expect(await ids()).toEqual(["a", "b", "c"]);
+  expect(await ids()).toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
   await expect(betaStar).toHaveAttribute("aria-pressed", "false");
   await menu.locator('[data-model-id="b"]').click();
   await expect(menu).toBeHidden();

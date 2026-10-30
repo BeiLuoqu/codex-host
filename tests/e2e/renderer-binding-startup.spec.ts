@@ -379,10 +379,20 @@ test("a remounted draft keeps explicit Fast through submission, but a new draft 
     ),
   );
   await page.addScriptTag({ content: browserBundle });
-  const fast = page.locator("[data-codexhost-fast-toggle]:visible");
-  await expect(fast).toHaveAttribute("aria-pressed", "false");
+  // Fast lives in the picker popover; the trigger shows a bolt while it is on.
+  const trigger = page.locator(
+    '[data-codex-composer-root]:visible [data-codexhost-model-control] > button[aria-haspopup="menu"]',
+  );
+  const fastBolt = trigger.locator(".codexhost-model-picker-trigger-icon");
+  const fast = page.locator("[data-codexhost-model-picker]:visible").getByRole("menuitemcheckbox");
+  await expect(trigger).toBeEnabled();
+  await expect(fastBolt).toBeHidden();
+  await trigger.click();
+  await expect(fast).toHaveAttribute("aria-checked", "false");
   await fast.click();
-  await expect(fast).toHaveAttribute("aria-pressed", "true");
+  await expect(fast).toHaveAttribute("aria-checked", "true");
+  await expect(fastBolt).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.evaluate(() => Reflect.get(globalThis, "prewarmTestDraft")());
 
   const remount = async (newDraft: boolean) => {
@@ -413,7 +423,7 @@ test("a remounted draft keeps explicit Fast through submission, but a new draft 
     }, newDraft);
   };
   await remount(false);
-  await expect(fast).toHaveAttribute("aria-pressed", "true");
+  await expect(fastBolt).toBeVisible();
   await page.locator("[data-codex-composer-root]:visible button[type=submit]").click();
   expect(await page.evaluate(() => Reflect.get(globalThis, "appliedConfiguration"))).toMatchObject({
     agent: "pi",
@@ -428,7 +438,8 @@ test("a remounted draft keeps explicit Fast through submission, but a new draft 
     });
   }
   await remount(true);
-  await expect(fast).toHaveAttribute("aria-pressed", "false");
+  await expect(trigger).toBeEnabled();
+  await expect(fastBolt).toBeHidden();
 });
 
 test("a draft waits for the Desktop prewarm policy before applying its Model", async ({ page }) => {
@@ -451,7 +462,7 @@ test("the selected Model loads while its background Harness discovery remains qu
   await expect(trigger).toContainText("Startup Model");
   await expect(trigger).toBeEnabled();
   await trigger.click();
-  await expect(page.getByRole("menu", { name: "Model", exact: true })).toBeVisible();
+  await expect(page.locator("[data-codexhost-model-picker]")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("foreground-model-ready.png") });
 });
 
@@ -479,50 +490,57 @@ test("Kiro selects Thinking inside the Model picker before a Thread exists", asy
     <style>
       body { margin:24px; background:#202020; color:#eee; font:14px system-ui; color-scheme:dark; }
       [data-codex-composer-root] { position:absolute; left:24px; bottom:24px; }
-      [role=menu] { background:#282828; color:#eee; border-radius:8px; box-shadow:0 4px 20px #1118; }
-      [role=menu] button { display:flex; align-items:center; gap:8px; width:100%; border:0; background:transparent; color:inherit; padding:8px; text-align:left; font:inherit; }
-      [role=menu] button span:first-child { flex:1; }
-      [role=menu] button:hover { background:#3b3b3b; }
-      [role=presentation] { padding:8px; color:#aaa; }
-      [role=separator] { border-top:1px solid #444; margin:4px 0; }
-      input { box-sizing:border-box; width:100%; }
     </style><body></body>`);
   await page.evaluate(() => Reflect.set(globalThis, "startupAgent", "kiro-cli"));
   await page.addScriptTag({ content: browserBundle });
   const trigger = page.locator("[data-codexhost-model-control] > button");
-  const mainMenu = page.getByRole("menu", { name: "Model and Thinking", exact: true });
-  const modelMenu = page.getByRole("menu", { name: "Model", exact: true });
+  const popover = page.locator("[data-codexhost-model-picker]");
+  const menu = popover.locator(".codexhost-model-picker-menu");
+  const slider = popover.getByRole("slider");
   await expect(trigger).toHaveAttribute("aria-label", "Model: Auto");
   await expect(trigger).toBeEnabled();
+  // Auto has no Thinking choice, so the picker opens on the Model list.
   await trigger.click();
-  await modelMenu.locator('[data-model-id="adjustable"]').click();
+  await expect(menu).toHaveAttribute("data-view", "advanced");
+  await popover.locator('[data-model-id="adjustable"]').click();
   await expect(trigger).toHaveAttribute("aria-label", "Model: Adjustable Kiro Model, Low");
-  await trigger.click();
-  await expect(mainMenu).toBeVisible();
-  await expect(mainMenu.locator("[data-thinking-option-id]")).toHaveText([
-    "Low✓",
-    "Medium✓",
-    "High✓",
-  ]);
-  await mainMenu.locator('[data-thinking-option-id="high"]').click();
+  // The picker stays open on the Thinking slider for the adjustable Model.
+  await expect(menu).toHaveAttribute("data-view", "simple");
+  await expect(popover.locator("[data-thinking-option-id]")).toHaveCount(3);
+  await expect
+    .poll(() =>
+      popover
+        .locator("[data-thinking-option-id]")
+        .evaluateAll((ticks) => ticks.map((tick) => tick.getAttribute("data-thinking-option-id"))),
+    )
+    .toEqual(["low", "medium", "high"]);
+  await slider.focus();
+  await page.keyboard.press("End");
   await expect(trigger).toHaveAttribute("aria-label", "Model: Adjustable Kiro Model, High");
   expect(await page.evaluate(() => Reflect.get(globalThis, "appliedConfiguration"))).toEqual({
     agent: "kiro-cli",
     model: { id: "adjustable" },
     thinkingOptionId: "high",
   });
-  await trigger.click();
-  await mainMenu.locator("[data-open-model-menu]").hover();
-  await expect(modelMenu).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("kiro-model-thinking-picker.png"),
     clip: { x: 0, y: 430, width: 600, height: 270 },
   });
-  await modelMenu.locator('[data-model-id="fixed"]').click();
-  await expect(trigger).toHaveAttribute("aria-label", "Model: Fixed Kiro Model");
+  // Applying Thinking reloads the Model state; reopen from a known closed state.
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
   await trigger.click();
-  await expect(modelMenu).toBeVisible();
-  await expect(mainMenu).toBeHidden();
+  await expect(menu).toHaveAttribute("data-view", "simple");
+  await popover.locator(".codexhost-model-picker-view-toggle").click();
+  await expect(menu).toHaveAttribute("data-view", "advanced");
+  await popover.locator('[data-model-id="fixed"]').click();
+  await expect(trigger).toHaveAttribute("aria-label", "Model: Fixed Kiro Model");
+  // A Model without Thinking options reopens straight on the Model list.
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+  await trigger.click();
+  await expect(menu).toHaveAttribute("data-view", "advanced");
+  await expect(slider).toBeHidden();
   expect(await page.evaluate(() => Reflect.get(globalThis, "appliedConfiguration"))).toEqual({
     agent: "kiro-cli",
     model: { id: "fixed" },
