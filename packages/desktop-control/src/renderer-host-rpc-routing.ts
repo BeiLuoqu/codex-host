@@ -121,10 +121,18 @@ export function installRendererHostRpcRouting(
       // Desktop prewarms only local drafts; the pool is keyed by workspace, not Model.
       if (input.ephemeral !== true) publishDraftWorkspace("local", input.cwd);
       selected = selectedModels.get("local") ?? null;
-      model = selected ? prewarmCarrier(selected) : null;
+      // A prewarm that names an external carrier keeps it; Host still needs the prewarm marker
+      // to treat it as a discardable prewarm instead of a new Thread.
+      const carrier = nativeModel?.startsWith("codexhost/") ? nativeModel : selected;
+      model = carrier ? prewarmCarrier(carrier) : null;
     }
     if (!model) return message;
-    if (nativeModel?.startsWith("codexhost/") && nativeModel !== model && nativeModel !== selected)
+    // A creation that names a different external carrier keeps it.
+    if (
+      path[0] === "startConversation" &&
+      nativeModel?.startsWith("codexhost/") &&
+      nativeModel !== model
+    )
       return message;
     return [
       "push",

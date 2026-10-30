@@ -118,18 +118,24 @@ export function findScopedDraftModelBinding(
 }
 
 export function createScopedDraftModelWriter() {
-  const captured = new Map<string, { update: UpdateDraft; original: Draft; model: string }>();
+  /** Only carriers the native setter accepted; `original` is the draft before the first one. */
+  const captured = new Map<string, { update: UpdateDraft; original?: Draft; model: string }>();
   const restore = (key: string): void => {
     const entry = captured.get(key);
     if (!entry) return;
+    const { original } = entry;
+    if (!original) {
+      captured.delete(key);
+      return;
+    }
     entry.update((current) => {
       const settings = current.modelSettings as Draft | null;
       return settings?.model === entry.model && current.modelSettingsPersistAsDefault === false
         ? {
             ...current,
-            modelSettings: entry.original.modelSettings,
-            modelSettingsPersistAsDefault: entry.original.modelSettingsPersistAsDefault,
-            isManuallyChanged: entry.original.isManuallyChanged,
+            modelSettings: original.modelSettings,
+            modelSettingsPersistAsDefault: original.modelSettingsPersistAsDefault,
+            isManuallyChanged: original.isManuallyChanged,
           }
         : current;
     });
@@ -149,9 +155,13 @@ export function createScopedDraftModelWriter() {
         return;
       }
       const { update, usesAccountPreferences } = binding;
+      const previousOriginal = captured.get(key)?.original;
+      const entry: { update: UpdateDraft; original?: Draft; model: string } = previousOriginal
+        ? { update, original: previousOriginal, model }
+        : { update, model };
       update((current) => {
-        const previous = captured.get(key);
-        captured.set(key, { update, original: previous?.original ?? current, model });
+        // React may run the updater later, so the original draft is read when it runs.
+        entry.original ??= current;
         const settings = current.modelSettings as Draft | null;
         if (
           settings?.model === model &&
@@ -172,6 +182,9 @@ export function createScopedDraftModelWriter() {
           },
         };
       });
+      // A setter can evaluate the updater and still reject the commit; record the carrier only
+      // after it returns, so a later rollback names what the draft actually holds.
+      captured.set(key, entry);
     },
     dispose(): void {
       for (const key of captured.keys()) restore(key);

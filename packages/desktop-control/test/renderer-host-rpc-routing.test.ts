@@ -395,7 +395,7 @@ it("gives a registered external draft its carrier when the creation omits a nati
   }
 });
 
-it("marks the selected external prewarm but preserves an explicit different external prewarm", async () => {
+it("marks every external prewarm, keeping an explicit different carrier", async () => {
   const fixture = setup();
   const routing = await install(fixture);
   try {
@@ -408,9 +408,19 @@ it("marks the selected external prewarm but preserves an explicit different exte
       ...decodeHarnessPluginRoute(carrier),
       prewarm: true,
     });
-    const explicit = creation("prewarmConversation", "codexhost/pi-native", {});
-    fixture.post(explicit);
-    expect(fixture.sent.at(-1)).toBe(explicit);
+    // An explicit different, unmarked carrier keeps its Harness and Model and gains the marker,
+    // so Host registers a discardable prewarm rather than publishing a Thread.
+    const pi = encodeHarnessPluginRoute(
+      harnessPluginRouteSchema.parse({ harnessId: "pi", model: { id: "pi-model-v1.native" } }),
+    );
+    fixture.post(creation("prewarmConversation", pi, {}));
+    const explicit = (((fixture.sent.at(-1) as unknown[])[1] as unknown[])[3] as unknown[])[0] as {
+      collaborationMode: { settings: { model: string } };
+    };
+    expect(decodeHarnessPluginRoute(explicit.collaborationMode.settings.model)).toEqual({
+      ...decodeHarnessPluginRoute(pi),
+      prewarm: true,
+    });
   } finally {
     routing.dispose();
   }
