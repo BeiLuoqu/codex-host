@@ -1094,8 +1094,15 @@ export function installCurrentRendererAdapter(): {
       const draftKey = target[1];
       if (!binding || !route.policy.scopedCreation)
         return agent === "codex" && !draftModels.has(draftKey);
-      draftModels.apply(draftKey, binding, carrier ?? null);
-      if (route.policy.select(carrier ?? null, draftKey, binding.creationModes)) {
+      // The draft write may synchronously render a new creation mode.
+      const policyChanged = route.policy.select(carrier ?? null, draftKey, binding.creationModes);
+      try {
+        draftModels.apply(draftKey, binding, carrier ?? null);
+      } catch (error) {
+        route.policy.select(null, draftKey);
+        throw error;
+      }
+      if (policyChanged) {
         modelUpdates += 1;
         liveStatus.modelUpdates = modelUpdates;
       }
